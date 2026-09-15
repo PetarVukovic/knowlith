@@ -1,0 +1,106 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "KL-001 Daikin FTXM25R",
+      "statement": "Split uređaj Daikin FTXM25R snage 2,5 kW vodi se pod šifrom KL-001 i naplaćuje se 812 po komadu.",
+      "quotes": ["KL-001 | Daikin FTXM25R, split 2,5 kW | kom | 812"]
+    },
+    {
+      "kind": "fact",
+      "title": "KL-002 Daikin FTXM35R",
+      "statement": "Split uređaj Daikin FTXM35R snage 3,5 kW vodi se pod šifrom KL-002 i naplaćuje se 892 po komadu.",
+      "quotes": ["KL-002 | Daikin FTXM35R, split 3,5 kW | kom | 892"]
+    },
+    {
+      "kind": "fact",
+      "title": "KL-003 Daikin FTXM50R",
+      "statement": "Split uređaj Daikin FTXM50R snage 5,0 kW vodi se pod šifrom KL-003 i naplaćuje se 1120 po komadu.",
+      "quotes": ["KL-003 | Daikin FTXM50R, split 5,0 kW | kom | 1120"]
+    },
+    {
+      "kind": "fact",
+      "title": "KL-010 Mitsubishi MSZ-AP25VGK",
+      "statement": "Split uređaj Mitsubishi MSZ-AP25VGK snage 2,5 kW vodi se pod šifrom KL-010 i naplaćuje se 765 po komadu.",
+      "quotes": ["KL-010 | Mitsubishi MSZ-AP25VGK, split 2,5 kW | kom | 765"]
+    },
+    {
+      "kind": "fact",
+      "title": "KL-011 Mitsubishi MSZ-AP35VGK",
+      "statement": "Split uređaj Mitsubishi MSZ-AP35VGK snage 3,5 kW vodi se pod šifrom KL-011 i naplaćuje se 848 po komadu.",
+      "quotes": ["KL-011 | Mitsubishi MSZ-AP35VGK, split 3,5 kW | kom | 848"]
+    },
+    {
+      "kind": "fact",
+      "title": "KL-020 Multi split vanjska jedinica 2x",
+      "statement": "Vanjska jedinica multi split sustava za dvije unutarnje jedinice vodi se pod šifrom KL-020 i naplaćuje se 1340 po komadu.",
+      "quotes": ["KL-020 | Multi split vanjska jedinica 2x | kom | 1340"]
+    },
+    {
+      "kind": "fact",
+      "title": "KL-021 Multi split vanjska jedinica 3x",
+      "statement": "Vanjska jedinica multi split sustava za tri unutarnje jedinice vodi se pod šifrom KL-021 i naplaćuje se 1795 po komadu.",
+      "quotes": ["KL-021 | Multi split vanjska jedinica 3x | kom | 1795"]
+    },
+    {
+      "kind": "fact",
+      "title": "KL-030 Kanalska jedinica 7,1 kW",
+      "statement": "Kanalska jedinica snage 7,1 kW vodi se pod šifrom KL-030 i naplaćuje se 2240 po komadu.",
+      "quotes": ["KL-030 | Kanalska jedinica 7,1 kW | kom | 2240"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-001 Montaža split sustava do 3,5 kW",
+      "statement": "Montaža split sustava snage do 3,5 kW vodi se pod šifrom US-001 i naplaćuje se 210 po komadu.",
+      "quotes": ["US-001 | Montaža split sustava do 3,5 kW | kom | 210"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-002 Montaža split sustava 3,5–5,0 kW",
+      "statement": "Montaža split sustava snage od 3,5 do 5,0 kW vodi se pod šifrom US-002 i naplaćuje se 265 po komadu.",
+      "quotes": ["US-002 | Montaža split sustava 3,5–5,0 kW | kom | 265"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-003 Montaža multi split sustava",
+      "statement": "Montaža multi split sustava naplaćuje se po unutarnjoj jedinici, pod šifrom US-003, po cijeni 180 po komadu.",
+      "quotes": ["US-003 | Montaža multi split sustava, po unutarnjoj jedinici | kom | 180"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-010 Bakrena instalacija",
+      "statement": "Isporuka i montaža bakrene instalacije vodi se pod šifrom US-010 i naplaćuje se 18.5 po metru.",
+      "quotes": ["US-010 | Bakrena instalacija, isporuka i montaža | m | 18.5"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-011 Probijanje zida do 30 cm",
+      "statement": "Probijanje zida debljine do 30 cm vodi se pod šifrom US-011 i naplaćuje se 35 po komadu.",
+      "quotes": ["US-011 | Probijanje zida do 30 cm | kom | 35"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-020 Godišnji servis split sustava",
+      "statement": "Godišnji servis split sustava vodi se pod šifrom US-020 i naplaćuje se 65 po komadu.",
+      "quotes": ["US-020 | Godišnji servis split sustava | kom | 65"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-021 Izlazak na teren, Zagreb",
+      "statement": "Izlazak na teren u Zagrebu vodi se pod šifrom US-021 i naplaćuje se 40 po komadu.",
+      "quotes": ["US-021 | Izlazak na teren, Zagreb | kom | 40"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-022 Izlazak na teren, izvan Zagreba",
+      "statement": "Izlazak na teren izvan Zagreba vodi se pod šifrom US-022 i naplaćuje se 0.65 po kilometru.",
+      "quotes": ["US-022 | Izlazak na teren, izvan Zagreba | km | 0.65"]
+    },
+    {
+      "kind": "fact",
+      "title": "US-030 Punjenje plina R32",
+      "statement": "Punjenje plina R32 vodi se pod šifrom US-030 i naplaćuje se 42 po kilogramu.",
+      "quotes": ["US-030 | Punjenje plina R32 | kg | 42"]
+    }
+  ]
+}

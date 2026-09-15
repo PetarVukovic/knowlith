@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/extract", "crates/lake", "crates/graph", "crates/engine", "crates/compiler", "crates/server", "crates/worker", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+authors = ["Knowlith contributors"]
+
+[workspace.dependencies]
+knowlith-core = { path = "crates/core" }
+knowlith-compiler = { path = "crates/compiler" }
+knowlith-engine = { path = "crates/engine" }
+knowlith-extract = { path = "crates/extract" }
+knowlith-graph = { path = "crates/graph" }
+knowlith-lake = { path = "crates/lake" }
+knowlith-server = { path = "crates/server" }
+knowlith-worker = { path = "crates/worker" }
+
+anyhow = "1"
+axum = "0.8"
+calamine = { version = "0.36", features = ["dates"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+petgraph = "0.8"
+walkdir = "2"
+encoding_rs = "0.8"
+pdf-extract = "0.12"
+quick-xml = "0.42"
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower-http = { version = "0.7", features = ["cors"] }
+sha2 = "0.10"
+thiserror = "2"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

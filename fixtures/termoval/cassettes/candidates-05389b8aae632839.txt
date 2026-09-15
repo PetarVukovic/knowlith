@@ -1,0 +1,37 @@
+{
+  "candidates": [
+    {
+      "kind": "rule",
+      "title": "Vrijeme izlaska na teren za ugovorne korisnike",
+      "statement": "Dogovoreno je da vrijeme izlaska na teren za ugovorne korisnike bude 48 sati, umjesto 24 sata koliko pise u opcim uvjetima.",
+      "quotes": [
+        "Dogovoreno je da vrijeme izlaska na teren za ugovorne korisnike bude 48 sati, a ne 24 sata kako pise u opcim uvjetima."
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Rok u opcim uvjetima",
+      "statement": "U opcim uvjetima pise da vrijeme izlaska na teren iznosi 24 sata.",
+      "quotes": [
+        "Dogovoreno je da vrijeme izlaska na teren za ugovorne korisnike bude 48 sati, a ne 24 sata kako pise u opcim uvjetima."
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Razlog produljenja roka",
+      "statement": "Razlog za produljeni rok je manjak servisera u sijecnju i veljaci.",
+      "quotes": [
+        "Razlog je manjak servisera u sijecnju i veljaci."
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Azuriranje opcih uvjeta",
+      "statement": "Opce uvjete treba azurirati, a to jos nije napravljeno.",
+      "quotes": [
+        "Treba azurirati opce uvjete.",
+        "Nije jos napravljeno."
+      ]
+    }
+  ]
+}

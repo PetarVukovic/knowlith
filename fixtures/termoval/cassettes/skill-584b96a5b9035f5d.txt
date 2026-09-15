@@ -1,0 +1,67 @@
+{
+  "name": "Odobri popust",
+  "description": "Koristi se kada prodavač traži odobrenje popusta za kupca i popust treba unijeti u ponudu prije slanja.",
+  "inputs": [
+    {
+      "name": "kupac",
+      "type": "string",
+      "description": "Naziv kupca za kojeg se traži popust."
+    },
+    {
+      "name": "promet_kupca_12_mjeseci",
+      "type": "number",
+      "description": "Promet koji je kupac ostvario u prethodnih dvanaest mjeseci, iskazan u EUR bez PDV-a."
+    },
+    {
+      "name": "trazeni_popust_postotak",
+      "type": "number",
+      "description": "Postotak popusta koji se traži za ovog kupca."
+    },
+    {
+      "name": "javna_nabava",
+      "type": "boolean",
+      "description": "Je li riječ o javnoj nabavi; ako jest, uz to i uvjeti iz natječajne dokumentacije."
+    },
+    {
+      "name": "ponuda",
+      "type": "document",
+      "description": "Ponuda u koju se odobreni popust unosi prije slanja."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "odluka_o_popustu",
+      "type": "string",
+      "description": "Je li popust odobren ili nije, u kojem postotku i tko ga je odobrio."
+    },
+    {
+      "name": "pisana_suglasnost",
+      "type": "document",
+      "description": "Pisana suglasnost tamo gdje je pravilima tražena."
+    },
+    {
+      "name": "evidencijski_zapis",
+      "type": "record",
+      "description": "Zapis odobrenog popusta većeg od 5% s imenom odobravatelja i datumom."
+    },
+    {
+      "name": "ponuda_s_popustom",
+      "type": "document",
+      "description": "Ponuda s unesenim odobrenim popustom, spremna za slanje."
+    }
+  ],
+  "steps": [
+    "Prikupi naziv kupca, traženi postotak popusta i podatak radi li se o javnoj nabavi.",
+    "Provjeri promet koji je kupac ostvario u prethodnih dvanaest mjeseci, u EUR bez PDV-a.",
+    "Ako promet kupca nije veći od 20.000,00 EUR bez PDV-a, popust se ne odobrava — to je prag iz pravila 'Prag prometa kupca'; obavijesti prodavača i zaustavi postupak.",
+    "Ako je traženi popust 5%, odobrava ga voditelj prodaje sam, bez dodatne suglasnosti, prema pravilu 'Redovni popust od 5%'.",
+    "Ako je traženi popust veći od 5%, zahtjev proslijedi direktoru, kako nalaže sam postupak odobravanja popusta.",
+    "Ako je traženi popust veći od 5%, a do 10%, pribavi pisanu suglasnost direktora prije odobrenja, prema pravilu 'Povećani popust do 10%'.",
+    "Ako je traženi popust veći od 10%, nemoj sam odlučivati: pravila su proturječna jer pravilo 'Odobrenje popusta većeg od 10%' kaže da ga isključivo voditelj prodaje može odobriti uz pisanu suglasnost, a pravilo 'Zabrana popusta većeg od 10%' kaže da se takav popust ne odobrava ni u kojem slučaju, uz iznimku javne nabave — pitaj vlasnika postupka kako postupiti i pričekaj njegovu odluku.",
+    "Ako je riječ o javnoj nabavi, primijeni uvjete iz natječajne dokumentacije, kako predviđa iznimka u pravilu 'Zabrana popusta većeg od 10%'; ako ti ti uvjeti nisu dostavljeni, zatraži ih od vlasnika postupka.",
+    "Ako je traženi popust manji od 5%, pitaj vlasnika postupka tko ga odobrava i uz koju suglasnost, jer to pravila ne uređuju; nemoj odlučivati sam.",
+    "Svaki odobreni popust veći od 5% evidentiraj uz ime odobravatelja i datum odobrenja, prema pravilu 'Evidencija odobrenih popusta'.",
+    "Unesi odobreni popust u ponudu prije nego što se ponuda pošalje kupcu.",
+    "Ako popust nije odobren, obavijesti prodavača o razlogu i nemoj unositi popust u ponudu."
+  ]
+}

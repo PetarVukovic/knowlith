@@ -1,0 +1,63 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "Stupanje pravilnika na snagu",
+      "statement": "Pravilnik o odobravanju popusta je interni dokument koji vrijedi od 1. siječnja 2026.",
+      "quotes": [
+        "Vrijedi od 1. siječnja 2026."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Redovni popust od 5%",
+      "statement": "Popust od 5% odobrava voditelj prodaje sam, bez dodatne suglasnosti.",
+      "quotes": [
+        "Popust od 5% odobrava voditelj prodaje samostalno, bez dodatne suglasnosti."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Prag prometa kupca",
+      "statement": "Uvjet za odobrenje popusta je da je kupac u prethodnih dvanaest mjeseci ostvario promet veći od 20.000,00 EUR bez PDV-a.",
+      "quotes": [
+        "Uvjet je da je kupac u prethodnih dvanaest mjeseci ostvario promet veći od 20.000,00 EUR bez PDV-a."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Povećani popust do 10%",
+      "statement": "Popust do 10% odobrava se samo uz pisanu suglasnost direktora.",
+      "quotes": [
+        "Popust do 10% odobrava se uz pisanu suglasnost direktora."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Zabrana popusta većeg od 10%",
+      "statement": "Popust veći od 10% ne odobrava se ni u kojem slučaju, uz iznimku javne nabave gdje vrijede uvjeti iz natječajne dokumentacije.",
+      "quotes": [
+        "Popust veći od 10% ne odobrava se ni u kojem slučaju, osim kod javne nabave gdje vrijede uvjeti iz natječajne dokumentacije."
+      ]
+    },
+    {
+      "kind": "process",
+      "title": "Postupak odobravanja popusta",
+      "statement": "Prodavač prvo provjerava promet kupca u prethodnih 12 mjeseci; ako je promet ispod praga, popust se ne odobrava, a ako je traženi popust veći od 5%, zahtjev ide direktoru. Odobreni popust unosi se u ponudu prije slanja.",
+      "quotes": [
+        "Prodavač provjerava promet kupca u prethodnih 12 mjeseci.",
+        "Ako je promet ispod praga, popust se ne odobrava.",
+        "Ako je traženi popust veći od 5%, zahtjev ide direktoru.",
+        "Odobreni popust unosi se u ponudu prije slanja."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Evidencija odobrenih popusta",
+      "statement": "Svaki odobreni popust veći od 5% evidentira se u tablici Popusti-2026.xlsx uz ime odobravatelja i datum.",
+      "quotes": [
+        "Svaki odobreni popust veći od 5% evidentira se u tablici `Popusti-2026.xlsx` uz ime odobravatelja i datum."
+      ]
+    }
+  ]
+}

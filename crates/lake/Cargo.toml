@@ -1,0 +1,22 @@
+[package]
+name = "knowlith-lake"
+description = "The Context Lake: SQLite storage, the evidence gate on write, and the durable queue."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+knowlith-core.workspace = true
+
+chrono.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+knowlith-extract.workspace = true
+rusqlite.workspace = true
+knowlith-graph.workspace = true

@@ -1,0 +1,59 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "Jamstveni rok na ugradnju",
+      "statement": "Jamstveni rok na ugradnju traje 24 mjeseca, računajući od dana primopredaje.",
+      "quotes": [
+        "1. Jamstveni rok na ugradnju iznosi 24 mjeseca od dana primopredaje."
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Jamstveni rok na opremu",
+      "statement": "Jamstveni rok na opremu određuje proizvođač opreme, a naveden je u jamstvenom listu koji se predaje kupcu.",
+      "quotes": [
+        "2. Jamstveni rok na opremu odreduje proizvodac opreme i naveden je",
+        "u jamstvenom listu koji se predaje kupcu."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Uvjet redovnog godisnjeg servisa",
+      "statement": "Jamstvo vrijedi samo uz uvjet redovnog godišnjeg servisa koji obavlja ovlašteni servis Termoval d.o.o.",
+      "quotes": [
+        "3. Jamstvo vrijedi uz uvjet redovnog godisnjeg servisa koji obavlja",
+        "ovlasteni servis Termoval d.o.o."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Sto jamstvo ne pokriva",
+      "statement": "Jamstvo ne pokriva kvarove nastale nepravilnim rukovanjem, kvarove nastale izostankom redovnog godišnjeg servisa, oštećenja nastala radovima trećih osoba na instalaciji te potrošni materijal, filtere i sredstva za čišćenje.",
+      "quotes": [
+        "Sto jamstvo ne pokriva",
+        "- kvarove nastale nepravilnim rukovanjem",
+        "- kvarove nastale izostankom redovnog godisnjeg servisa",
+        "- ostecenja nastala radovima trecih osoba na instalaciji",
+        "- potrosni materijal, filtere i sredstva za ciscenje"
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok i nacin podnosenja reklamacije",
+      "statement": "Reklamacija se podnosi pisanim putem u roku od 8 dana od uočavanja nedostatka, i to na adresu sjedišta društva.",
+      "quotes": [
+        "Reklamacija se podnosi pisanim putem u roku od 8 dana od uocavanja",
+        "nedostatka, na adresu sjedista drustva."
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Datum stupanja na snagu jamstvenih uvjeta",
+      "statement": "Jamstveni uvjeti društva Termoval d.o.o. vrijede od 1. siječnja 2026.",
+      "quotes": [
+        "Termoval d.o.o. - vrijedi od 1. sijecnja 2026."
+      ]
+    }
+  ]
+}

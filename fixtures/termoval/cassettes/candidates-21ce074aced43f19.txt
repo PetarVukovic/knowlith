@@ -1,0 +1,73 @@
+{
+  "candidates": [
+    {
+      "kind": "process",
+      "title": "Prijava kvara",
+      "statement": "Kupac kvar prijavljuje telefonom ili e-poštom na adresu servis@termoval.hr.",
+      "quotes": [
+        "Kupac prijavljuje kvar telefonom ili e-poštom na servis@termoval.hr."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Evidentiranje prijave istog radnog dana",
+      "statement": "Prijava kvara mora se evidentirati u servisni nalog istog radnog dana.",
+      "quotes": [
+        "Prijava se evidentira u servisni nalog istog radnog dana."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok izlaska na teren",
+      "statement": "Izlazak na teren po prijavi kvara je 24 sata za ugovorne korisnike, a 72 sata za ostale korisnike.",
+      "quotes": [
+        "Vrijeme izlaska na teren po prijavi kvara iznosi 24 sata za ugovorne korisnike i 72 sata za ostale."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Naplata izlaska na teren",
+      "statement": "Izlazak na teren naplaćuje se prema cjeniku, osim ako je uređaj u jamstvenom roku.",
+      "quotes": [
+        "Izlazak se naplaćuje prema cjeniku, osim u jamstvenom roku."
+      ]
+    },
+    {
+      "kind": "process",
+      "title": "Ispunjavanje servisnog naloga",
+      "statement": "Serviser na terenu ispunjava servisni nalog i u njega evidentira opis kvara kako ga je opisao kupac, utvrđeni uzrok, izvršene radove, utrošeni materijal i vrijeme na terenu.",
+      "quotes": [
+        "Serviser ispunjava servisni nalog na terenu i evidentira:",
+        "- opis kvara kako ga je opisao kupac",
+        "- utvrđeni uzrok",
+        "- izvršene radove",
+        "- utrošeni materijal",
+        "- vrijeme na terenu"
+      ]
+    },
+    {
+      "kind": "process",
+      "title": "Potpis primopredajnog zapisnika",
+      "statement": "Nakon završetka radova kupac potpisuje primopredajni zapisnik.",
+      "quotes": [
+        "Nakon završetka radova kupac potpisuje primopredajni zapisnik."
+      ]
+    },
+    {
+      "kind": "term",
+      "title": "Primopredajni zapisnik",
+      "statement": "Primopredajni zapisnik je dokument kojim kupac potvrđuje da su radovi izvršeni i od kojeg počinje teći jamstveni rok.",
+      "quotes": [
+        "Primopredajni zapisnik je dokument kojim kupac potvrđuje da su radovi izvršeni i kojim počinje teći jamstveni rok."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok za izdavanje računa",
+      "statement": "Račun se izdaje najkasnije tri radna dana od potpisa zapisnika.",
+      "quotes": [
+        "Račun se izdaje u roku od tri radna dana od potpisa zapisnika."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "Cjenik 2026",
+      "statement": "Objavljen je cjenik za 2026. godinu, a stari cjenik je povucen iz upotrebe.",
+      "quotes": [
+        "Cjenik 2026 objavljen, stari cjenik povucen iz upotrebe"
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Visina popusta",
+      "statement": "Popust ostaje 5%.",
+      "quotes": [
+        "Popust ostaje 5%, prag prometa podignut na 20.000 EUR"
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Prag prometa za popust",
+      "statement": "Prag prometa podignut je na 20.000 EUR.",
+      "quotes": [
+        "Popust ostaje 5%, prag prometa podignut na 20.000 EUR"
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Avans za radove iznad 5.000 EUR",
+      "statement": "Za radove iznad 5.000 EUR ostaje avans od 40%.",
+      "quotes": [
+        "Avans 40% za radove iznad 5.000 EUR - ostaje"
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Krugovi izmjena ponude",
+      "statement": "Ponuda ima dva kruga izmjena, a treci krug se naplacuje.",
+      "quotes": [
+        "Broj krugova izmjena ponude: dva, treci se naplacuje"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Sljedeci sastanak",
+      "statement": "Sljedeci sastanak prodaje odrzat ce se 12. veljace.",
+      "quotes": [
+        "Sljedeci sastanak: 12. veljace."
+      ]
+    }
+  ]
+}

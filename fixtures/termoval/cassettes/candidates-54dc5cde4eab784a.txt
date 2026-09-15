@@ -1,0 +1,36 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "Cijena Daikin FTXM25R (KL-001)",
+      "statement": "Šifra KL-001, Daikin FTXM25R, split sustav od 2,5 kW, obračunava se po komadu po cijeni 780.",
+      "quotes": [
+        "KL-001 | Daikin FTXM25R, split 2,5 kW | kom | 780"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Cijena Daikin FTXM35R (KL-002)",
+      "statement": "Šifra KL-002, Daikin FTXM35R, split sustav od 3,5 kW, obračunava se po komadu po cijeni 856.",
+      "quotes": [
+        "KL-002 | Daikin FTXM35R, split 3,5 kW | kom | 856"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Cijena montaže split sustava do 3,5 kW (US-001)",
+      "statement": "Šifra US-001, montaža split sustava do 3,5 kW, obračunava se po komadu po cijeni 195.",
+      "quotes": [
+        "US-001 | Montaža split sustava do 3,5 kW | kom | 195"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Cijena godišnjeg servisa split sustava (US-020)",
+      "statement": "Šifra US-020, godišnji servis split sustava, obračunava se po komadu po cijeni 58.",
+      "quotes": [
+        "US-020 | Godišnji servis split sustava | kom | 58"
+      ]
+    }
+  ]
+}

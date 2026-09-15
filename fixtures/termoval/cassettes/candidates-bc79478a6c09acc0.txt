@@ -1,0 +1,52 @@
+{
+  "candidates": [
+    {
+      "kind": "rule",
+      "title": "Cijene bez PDV-a",
+      "statement": "Sve navedene cijene iskazane su bez PDV-a.",
+      "quotes": ["Sve cijene su bez PDV-a."]
+    },
+    {
+      "kind": "rule",
+      "title": "Popust na opremu",
+      "statement": "Kupcu je odobren popust od 5% na opremu, temeljem prometa ostvarenog u 2025. godini.",
+      "quotes": ["Odobren popust: 5% na opremu, temeljem ostvarenog prometa u 2025. godini."]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok valjanosti ponude",
+      "statement": "Ponuda vrijedi 14 dana od datuma izdavanja.",
+      "quotes": ["Ponuda vrijedi 14 dana od datuma izdavanja."]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok plaćanja i avans",
+      "statement": "Rok plaćanja je 15 dana od izdavanja računa, uz avans od 40%.",
+      "quotes": ["Rok plaćanja je 15 dana od dana izdavanja računa, uz avans od 40%."]
+    },
+    {
+      "kind": "rule",
+      "title": "Jamstveni rok na ugradnju",
+      "statement": "Jamstveni rok na ugradnju je 24 mjeseca, računajući od dana primopredaje.",
+      "quotes": ["Jamstveni rok na ugradnju iznosi 24 mjeseca od dana primopredaje."]
+    },
+    {
+      "kind": "fact",
+      "title": "Cijena opreme Daikin FTXM35R",
+      "statement": "Split uređaj Daikin FTXM35R od 3,5 kW nudi se po cijeni od 892,00 EUR po komadu.",
+      "quotes": ["14 × Daikin FTXM35R, split 3,5 kW — 892,00 EUR/kom"]
+    },
+    {
+      "kind": "fact",
+      "title": "Cijena montaže split sustava",
+      "statement": "Montaža split sustava do 3,5 kW naplaćuje se 210,00 EUR po komadu.",
+      "quotes": ["14 × Montaža split sustava do 3,5 kW — 210,00 EUR/kom"]
+    },
+    {
+      "kind": "fact",
+      "title": "Cijena bakrene instalacije",
+      "statement": "Bakrena instalacija, s isporukom i montažom, naplaćuje se 18,50 EUR po metru.",
+      "quotes": ["180 m × Bakrena instalacija, isporuka i montaža — 18,50 EUR/m"]
+    }
+  ]
+}

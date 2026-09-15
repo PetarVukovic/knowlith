@@ -1,0 +1,406 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import type { ReactNode } from "react"
+import { api, usingDaemon } from "@/lib/api"
+import type {
+  CompilerRun,
+  ContextObject,
+  DiscoverySummary,
+  MergeHint,
+  ReviewItem,
+  SkillDoc,
+  Source,
+  SourceDocument,
+  ToolRead,
+  TreeNode,
+} from "@/lib/types"
+
+type Activity = Awaited<ReturnType<typeof api.getRecentActivity>>
+
+export type Theme = "light" | "dark" | "system"
+/** Simple hides everything a non-technical owner should never have to see. */
+export type UiMode = "simple" | "engineer"
+/**
+ * Where the owner is in their first run. Onboarding does not end when the
+ * wizard closes: the first review and the first connected tool are part of it,
+ * and they happen inside the real screens rather than in a simulation.
+ */
+export type FirstRun = "review" | "connect" | null
+
+interface AppState {
+  ready: boolean
+  theme: Theme
+  setTheme: (t: Theme) => void
+  resolvedTheme: "light" | "dark"
+  mode: UiMode
+  setMode: (m: UiMode) => void
+  onboarded: boolean
+  completeOnboarding: () => void
+  resetOnboarding: () => void
+  firstRun: FirstRun
+  setFirstRun: (stage: FirstRun) => void
+
+  companyName: string
+  setCompany: (name: string, logo: string | null) => void
+  /** Data URL of the uploaded mark, or null for initials. */
+  companyLogo: string | null
+  objects: ContextObject[]
+  tree: TreeNode[]
+  review: ReviewItem[]
+  sources: Source[]
+  skills: SkillDoc[]
+  discovery: DiscoverySummary | null
+  runs: CompilerRun[]
+  documents: SourceDocument[]
+  toolReads: Record<string, ToolRead[]>
+  activity: Activity
+  /** Pairs the daemon cannot decide about, waiting for one human answer. */
+  mergeHints: MergeHint[]
+  /** What the background worker still has in hand. */
+  work: { queued: number; working: number }
+
+  approve: (itemId: string, edited: boolean) => void
+  reject: (itemId: string) => void
+  mergeObjects: (keepId: string, dropId: string) => void
+  keepBoth: (keepId: string, dropId: string) => void
+  setSourceStatus: (id: string, status: Source["status"]) => void
+  removeSource: (id: string) => void
+
+  paletteOpen: boolean
+  setPaletteOpen: (open: boolean) => void
+  /** True when the screens are showing a real lake rather than the demo. */
+  live: boolean
+}
+
+const Ctx = createContext<AppState | null>(null)
+
+function readStored<T extends string>(key: string, fallback: T): T {
+  try {
+    return (localStorage.getItem(key) as T) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+function store(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    /* private window or blocked storage — the UI still works */
+  }
+}
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [ready, setReady] = useState(false)
+  const [theme, setThemeState] = useState<Theme>(() => readStored<Theme>("knowlith.theme", "system"))
+  const [mode, setModeState] = useState<UiMode>(() => readStored<UiMode>("knowlith.mode", "simple"))
+  const [onboarded, setOnboarded] = useState(() => readStored<"yes" | "no">("knowlith.onboarded", "no") === "yes")
+  const [firstRun, setFirstRunState] = useState<FirstRun>(() => {
+    const stored = readStored<string>("knowlith.firstRun", "")
+    return stored === "review" || stored === "connect" ? stored : null
+  })
+  const [systemDark, setSystemDark] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches,
+  )
+
+  const [companyName, setCompanyName] = useState("Termoval d.o.o.")
+  const [companyLogo, setCompanyLogo] = useState<string | null>(null)
+  const [objects, setObjects] = useState<ContextObject[]>([])
+  const [tree, setTree] = useState<TreeNode[]>([])
+  const [review, setReview] = useState<ReviewItem[]>([])
+  const [sources, setSources] = useState<Source[]>([])
+  const [skills, setSkills] = useState<SkillDoc[]>([])
+  const [discovery, setDiscovery] = useState<DiscoverySummary | null>(null)
+  const [runs, setRuns] = useState<CompilerRun[]>([])
+  const [documents, setDocuments] = useState<SourceDocument[]>([])
+  const [toolReads, setToolReads] = useState<Record<string, ToolRead[]>>({})
+  const [activity, setActivity] = useState<Activity>([])
+  const [mergeHints, setMergeHints] = useState<MergeHint[]>([])
+  const [work, setWork] = useState({ queued: 0, working: 0 })
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [live, setLive] = useState(false)
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)")
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches)
+    mq.addEventListener("change", onChange)
+    return () => mq.removeEventListener("change", onChange)
+  }, [])
+
+  const resolvedTheme: "light" | "dark" = theme === "system" ? (systemDark ? "dark" : "light") : theme
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", resolvedTheme === "dark")
+    document.documentElement.style.colorScheme = resolvedTheme
+  }, [resolvedTheme])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const [c, o, t, r, s, sk, d, ru, docs, reads, act, hints] = await Promise.all([
+        api.getCompany(),
+        api.getObjects(),
+        api.getTree(),
+        api.getReviewQueue(),
+        api.getSources(),
+        api.getSkills(),
+        api.getDiscovery(),
+        api.getCompilerRuns(),
+        api.getSourceDocuments(),
+        api.getToolReads(),
+        api.getRecentActivity(),
+        api.getMergeHints(),
+      ])
+      if (cancelled) return
+      setCompanyName((current) => (current === "Termoval d.o.o." ? c.name : current))
+      setObjects(o)
+      setTree(t)
+      setReview(r)
+      setSources(s)
+      setSkills(sk)
+      setDiscovery(d)
+      setRuns(ru)
+      setDocuments(docs)
+      setToolReads(reads)
+      setActivity(act)
+      setMergeHints(hints)
+      setLive(await usingDaemon())
+      setReady(true)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  /**
+   * Watch the background worker while it has something in hand.
+   *
+   * Polled rather than pushed: a websocket for one number on one machine is
+   * ceremony, and the owner needs to know the difference between "nothing is
+   * happening" and "nothing is happening yet", which one number answers.
+   */
+  useEffect(() => {
+    if (!live) return
+    let cancelled = false
+    const poll = async () => {
+      const next = await api.getWork()
+      if (cancelled) return
+      setWork((current) => {
+        // The queue emptying is the moment new knowledge exists, so that is
+        // when the screens refetch rather than on a timer.
+        if (current.queued + current.working > 0 && next.queued + next.working === 0) {
+          void (async () => {
+            const [r, o, d, hints, sk] = await Promise.all([
+              api.getReviewQueue(),
+              api.getObjects(),
+              api.getDiscovery(),
+              api.getMergeHints(),
+              api.getSkills(),
+            ])
+            if (cancelled) return
+            setReview(r)
+            setObjects(o)
+            setDiscovery(d)
+            setMergeHints(hints)
+            setSkills(sk)
+          })()
+        }
+        return next
+      })
+    }
+    void poll()
+    const timer = window.setInterval(poll, 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [live])
+
+  const setTheme = useCallback((t: Theme) => {
+    setThemeState(t)
+    store("knowlith.theme", t)
+  }, [])
+
+  const setMode = useCallback((m: UiMode) => {
+    setModeState(m)
+    store("knowlith.mode", m)
+  }, [])
+
+  const setFirstRun = useCallback((stage: FirstRun) => {
+    setFirstRunState(stage)
+    store("knowlith.firstRun", stage ?? "")
+  }, [])
+
+  const setCompany = useCallback((name: string, logo: string | null) => {
+    setCompanyName(name)
+    setCompanyLogo(logo)
+  }, [])
+
+  const completeOnboarding = useCallback(() => {
+    setOnboarded(true)
+    store("knowlith.onboarded", "yes")
+  }, [])
+
+  const resetOnboarding = useCallback(() => {
+    setOnboarded(false)
+    store("knowlith.onboarded", "no")
+  }, [])
+
+  const approve = useCallback((itemId: string, edited: boolean) => {
+    // Tell the daemon, then move the interface. The optimistic update is
+    // what keeps the queue feeling immediate; a failed write shows up on the
+    // next load rather than being invented here.
+    void api.approve(itemId, edited)
+    setReview((queue) => {
+      const item = queue.find((i) => i.id === itemId)
+      if (item) {
+        setObjects((current) =>
+          current.map((o) =>
+            o.id === item.objectId
+              ? {
+                  ...o,
+                  status: "approved",
+                  body: item.after,
+                  version: o.version + 1,
+                  updatedAt: new Date().toISOString(),
+                  decidedBy: "You",
+                  editedOnApproval: edited,
+                }
+              : o,
+          ),
+        )
+      }
+      return queue.filter((i) => i.id !== itemId)
+    })
+  }, [])
+
+  const reject = useCallback((itemId: string) => {
+    void api.reject(itemId)
+    setReview((queue) => queue.filter((i) => i.id !== itemId))
+  }, [])
+
+  /**
+   * Fold one object into another.
+   *
+   * Nothing is deleted: the daemon marks the dropped version superseded and
+   * moves its quotes onto the one that survives, so a merge the owner
+   * regrets still has something to go back to.
+   */
+  const mergeObjects = useCallback((keepId: string, dropId: string) => {
+    void api.merge(keepId, dropId)
+    setMergeHints((hints) => hints.filter((h) => h.keepId !== keepId || h.dropId !== dropId))
+    setObjects((current) =>
+      current.map((o) => (o.id === dropId ? { ...o, status: "superseded" as const } : o)),
+    )
+    setReview((queue) => queue.filter((item) => item.objectId !== dropId))
+  }, [])
+
+  /** They are different rules. Recorded, so the question is not asked again. */
+  const keepBoth = useCallback((keepId: string, dropId: string) => {
+    void api.dismissMerge(keepId, dropId)
+    setMergeHints((hints) => hints.filter((h) => h.keepId !== keepId || h.dropId !== dropId))
+  }, [])
+
+  const setSourceStatus = useCallback((id: string, status: Source["status"]) => {
+    setSources((current) => current.map((s) => (s.id === id ? { ...s, status } : s)))
+  }, [])
+
+  const removeSource = useCallback((id: string) => {
+    setSources((current) => current.filter((s) => s.id !== id))
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        setPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
+  const value = useMemo<AppState>(
+    () => ({
+      ready,
+      theme,
+      setTheme,
+      resolvedTheme,
+      mode,
+      setMode,
+      onboarded,
+      completeOnboarding,
+      resetOnboarding,
+      firstRun,
+      setFirstRun,
+      companyName,
+      setCompany,
+      companyLogo,
+      objects,
+      tree,
+      review,
+      sources,
+      skills,
+      discovery,
+      runs,
+      documents,
+      toolReads,
+      activity,
+      mergeHints,
+      work,
+      approve,
+      reject,
+      mergeObjects,
+      keepBoth,
+      setSourceStatus,
+      removeSource,
+      paletteOpen,
+      setPaletteOpen,
+      live,
+    }),
+    [
+      ready,
+      theme,
+      setTheme,
+      resolvedTheme,
+      mode,
+      setMode,
+      onboarded,
+      completeOnboarding,
+      resetOnboarding,
+      firstRun,
+      setFirstRun,
+      companyName,
+      setCompany,
+      companyLogo,
+      objects,
+      tree,
+      review,
+      sources,
+      skills,
+      discovery,
+      runs,
+      documents,
+      toolReads,
+      activity,
+      mergeHints,
+      work,
+      approve,
+      reject,
+      mergeObjects,
+      keepBoth,
+      setSourceStatus,
+      removeSource,
+      paletteOpen,
+      live,
+    ],
+  )
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function useApp(): AppState {
+  const ctx = useContext(Ctx)
+  if (!ctx) throw new Error("useApp must be used inside AppProvider")
+  return ctx
+}

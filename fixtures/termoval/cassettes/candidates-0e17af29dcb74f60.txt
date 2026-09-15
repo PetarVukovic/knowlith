@@ -1,0 +1,52 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "Daikin FTXM25R (KL-001), Klima Centar d.o.o.",
+      "statement": "Kod dobavljača Klima Centar d.o.o. artikl KL-001 Daikin FTXM25R naveden je s vrijednošću 612,00 i postotkom 18%.",
+      "quotes": [
+        "Klima Centar d.o.o. | KL-001 | Daikin FTXM25R | 612,00 | 18%"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Daikin FTXM35R (KL-002), Klima Centar d.o.o.",
+      "statement": "Kod dobavljača Klima Centar d.o.o. artikl KL-002 Daikin FTXM35R naveden je s vrijednošću 671,00 i postotkom 18%.",
+      "quotes": [
+        "Klima Centar d.o.o. | KL-002 | Daikin FTXM35R | 671,00 | 18%"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Mitsubishi MSZ-AP25VGK (KL-010), Termo Oprema d.o.o.",
+      "statement": "Kod dobavljača Termo Oprema d.o.o. artikl KL-010 Mitsubishi MSZ-AP25VGK naveden je s vrijednošću 590,00 i postotkom 22%.",
+      "quotes": [
+        "Termo Oprema d.o.o. | KL-010 | Mitsubishi MSZ-AP25VGK | 590,00 | 22%"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Mitsubishi MSZ-AP35VGK (KL-011), Termo Oprema d.o.o.",
+      "statement": "Kod dobavljača Termo Oprema d.o.o. artikl KL-011 Mitsubishi MSZ-AP35VGK naveden je s vrijednošću 655,00 i postotkom 22%.",
+      "quotes": [
+        "Termo Oprema d.o.o. | KL-011 | Mitsubishi MSZ-AP35VGK | 655,00 | 22%"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Bakrena cijev 1/4\" (US-010), Instalater d.o.o.",
+      "statement": "Kod dobavljača Instalater d.o.o. artikl US-010 Bakrena cijev 1/4\" naveden je s vrijednošću 9,20 i postotkom 12%.",
+      "quotes": [
+        "Instalater d.o.o. | US-010 | Bakrena cijev 1/4\" | 9,20 | 12%"
+      ]
+    },
+    {
+      "kind": "fact",
+      "title": "Plin R32, boca 10 kg (US-030), Instalater d.o.o.",
+      "statement": "Kod dobavljača Instalater d.o.o. artikl US-030 Plin R32, boca 10 kg naveden je s vrijednošću 280,00 i postotkom 15%.",
+      "quotes": [
+        "Instalater d.o.o. | US-030 | Plin R32, boca 10 kg | 280,00 | 15%"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1440 @@
+[
+  {
+    "name": "Biljeske-sastanak-2026-01.txt",
+    "kind": "text",
+    "verbatim": true,
+    "text_sha256": "764026abe40e8c44992f68a408043f3ce6a802e5e7d428250c5657028151adc8",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "¶1",
+        "kind": "paragraph",
+        "start_byte": 0,
+        "end_byte": 36,
+        "text": "Sastanak prodaje, 15. sijecnja 2026."
+      },
+      {
+        "locator": "¶2",
+        "kind": "listitem",
+        "start_byte": 38,
+        "end_byte": 95,
+        "text": "- Cjenik 2026 objavljen, stari cjenik povucen iz upotrebe"
+      },
+      {
+        "locator": "¶3",
+        "kind": "listitem",
+        "start_byte": 96,
+        "end_byte": 151,
+        "text": "- Popust ostaje 5%, prag prometa podignut na 20.000 EUR"
+      },
+      {
+        "locator": "¶4",
+        "kind": "listitem",
+        "start_byte": 152,
+        "end_byte": 198,
+        "text": "- Avans 40% za radove iznad 5.000 EUR - ostaje"
+      },
+      {
+        "locator": "¶5",
+        "kind": "listitem",
+        "start_byte": 199,
+        "end_byte": 253,
+        "text": "- Broj krugova izmjena ponude: dva, treci se naplacuje"
+      },
+      {
+        "locator": "¶6",
+        "kind": "listitem",
+        "start_byte": 254,
+        "end_byte": 303,
+        "text": "- Hotel Adriatic: ponuda poslana, ceka se odgovor"
+      },
+      {
+        "locator": "¶7",
+        "kind": "listitem",
+        "start_byte": 304,
+        "end_byte": 349,
+        "text": "- Pekara Klas: bez popusta, ne ispunjava prag"
+      },
+      {
+        "locator": "¶8",
+        "kind": "paragraph",
+        "start_byte": 351,
+        "end_byte": 382,
+        "text": "Sljedeci sastanak: 12. veljace."
+      }
+    ]
+  },
+  {
+    "name": "Cjenik-2025-v2.xlsx",
+    "kind": "xlsx",
+    "verbatim": false,
+    "text_sha256": "5ea3e5ba2c6fd754f0f8c1330827224590a5d9b13a7dd836d074e2703fe441ca",
+    "columns": [
+      "Šifra",
+      "Stavka",
+      "Jedinica",
+      "Cijena (EUR)"
+    ],
+    "blocks": [
+      {
+        "locator": "Klima row 2",
+        "kind": "tablerow",
+        "start_byte": 0,
+        "end_byte": 49,
+        "text": "KL-001 | Daikin FTXM25R, split 2,5 kW | kom | 780"
+      },
+      {
+        "locator": "Klima row 3",
+        "kind": "tablerow",
+        "start_byte": 51,
+        "end_byte": 100,
+        "text": "KL-002 | Daikin FTXM35R, split 3,5 kW | kom | 856"
+      },
+      {
+        "locator": "Usluge row 2",
+        "kind": "tablerow",
+        "start_byte": 102,
+        "end_byte": 155,
+        "text": "US-001 | Montaža split sustava do 3,5 kW | kom | 195"
+      },
+      {
+        "locator": "Usluge row 3",
+        "kind": "tablerow",
+        "start_byte": 157,
+        "end_byte": 207,
+        "text": "US-020 | Godišnji servis split sustava | kom | 58"
+      }
+    ]
+  },
+  {
+    "name": "Cjenik-2026 kopija.xlsx",
+    "kind": "xlsx",
+    "verbatim": false,
+    "text_sha256": "85c1fce89994b5bc7851d57ef1a7461b1379ae6483fd299aa1b19ae1ed2cab3b",
+    "columns": [
+      "Šifra",
+      "Stavka",
+      "Jedinica",
+      "Cijena (EUR)"
+    ],
+    "blocks": [
+      {
+        "locator": "Klima row 2",
+        "kind": "tablerow",
+        "start_byte": 0,
+        "end_byte": 49,
+        "text": "KL-001 | Daikin FTXM25R, split 2,5 kW | kom | 812"
+      },
+      {
+        "locator": "Klima row 3",
+        "kind": "tablerow",
+        "start_byte": 51,
+        "end_byte": 100,
+        "text": "KL-002 | Daikin FTXM35R, split 3,5 kW | kom | 892"
+      },
+      {
+        "locator": "Klima row 4",
+        "kind": "tablerow",
+        "start_byte": 102,
+        "end_byte": 152,
+        "text": "KL-003 | Daikin FTXM50R, split 5,0 kW | kom | 1120"
+      },
+      {
+        "locator": "Klima row 5",
+        "kind": "tablerow",
+        "start_byte": 154,
+        "end_byte": 211,
+        "text": "KL-010 | Mitsubishi MSZ-AP25VGK, split 2,5 kW | kom | 765"
+      },
+      {
+        "locator": "Klima row 6",
+        "kind": "tablerow",
+        "start_byte": 213,
+        "end_byte": 270,
+        "text": "KL-011 | Mitsubishi MSZ-AP35VGK, split 3,5 kW | kom | 848"
+      },
+      {
+        "locator": "Klima row 7",
+        "kind": "tablerow",
+        "start_byte": 272,
+        "end_byte": 325,
+        "text": "KL-020 | Multi split vanjska jedinica 2x | kom | 1340"
+      },
+      {
+        "locator": "Klima row 8",
+        "kind": "tablerow",
+        "start_byte": 327,
+        "end_byte": 380,
+        "text": "KL-021 | Multi split vanjska jedinica 3x | kom | 1795"
+      },
+      {
+        "locator": "Klima row 9",
+        "kind": "tablerow",
+        "start_byte": 382,
+        "end_byte": 428,
+        "text": "KL-030 | Kanalska jedinica 7,1 kW | kom | 2240"
+      },
+      {
+        "locator": "Usluge row 2",
+        "kind": "tablerow",
+        "start_byte": 430,
+        "end_byte": 483,
+        "text": "US-001 | Montaža split sustava do 3,5 kW | kom | 210"
+      },
+      {
+        "locator": "Usluge row 3",
+        "kind": "tablerow",
+        "start_byte": 485,
+        "end_byte": 541,
+        "text": "US-002 | Montaža split sustava 3,5–5,0 kW | kom | 265"
+      },
+      {
+        "locator": "Usluge row 4",
+        "kind": "tablerow",
+        "start_byte": 543,
+        "end_byte": 616,
+        "text": "US-003 | Montaža multi split sustava, po unutarnjoj jedinici | kom | 180"
+      },
+      {
+        "locator": "Usluge row 5",
+        "kind": "tablerow",
+        "start_byte": 618,
+        "end_byte": 678,
+        "text": "US-010 | Bakrena instalacija, isporuka i montaža | m | 18.5"
+      },
+      {
+        "locator": "Usluge row 6",
+        "kind": "tablerow",
+        "start_byte": 680,
+        "end_byte": 724,
+        "text": "US-011 | Probijanje zida do 30 cm | kom | 35"
+      },
+      {
+        "locator": "Usluge row 7",
+        "kind": "tablerow",
+        "start_byte": 726,
+        "end_byte": 776,
+        "text": "US-020 | Godišnji servis split sustava | kom | 65"
+      },
+      {
+        "locator": "Usluge row 8",
+        "kind": "tablerow",
+        "start_byte": 778,
+        "end_byte": 822,
+        "text": "US-021 | Izlazak na teren, Zagreb | kom | 40"
+      },
+      {
+        "locator": "Usluge row 9",
+        "kind": "tablerow",
+        "start_byte": 824,
+        "end_byte": 876,
+        "text": "US-022 | Izlazak na teren, izvan Zagreba | km | 0.65"
+      },
+      {
+        "locator": "Usluge row 10",
+        "kind": "tablerow",
+        "start_byte": 878,
+        "end_byte": 915,
+        "text": "US-030 | Punjenje plina R32 | kg | 42"
+      }
+    ]
+  },
+  {
+    "name": "Cjenik-2026.xlsx",
+    "kind": "xlsx",
+    "verbatim": false,
+    "text_sha256": "85c1fce89994b5bc7851d57ef1a7461b1379ae6483fd299aa1b19ae1ed2cab3b",
+    "columns": [
+      "Šifra",
+      "Stavka",
+      "Jedinica",
+      "Cijena (EUR)"
+    ],
+    "blocks": [
+      {
+        "locator": "Klima row 2",
+        "kind": "tablerow",
+        "start_byte": 0,
+        "end_byte": 49,
+        "text": "KL-001 | Daikin FTXM25R, split 2,5 kW | kom | 812"
+      },
+      {
+        "locator": "Klima row 3",
+        "kind": "tablerow",
+        "start_byte": 51,
+        "end_byte": 100,
+        "text": "KL-002 | Daikin FTXM35R, split 3,5 kW | kom | 892"
+      },
+      {
+        "locator": "Klima row 4",
+        "kind": "tablerow",
+        "start_byte": 102,
+        "end_byte": 152,
+        "text": "KL-003 | Daikin FTXM50R, split 5,0 kW | kom | 1120"
+      },
+      {
+        "locator": "Klima row 5",
+        "kind": "tablerow",
+        "start_byte": 154,
+        "end_byte": 211,
+        "text": "KL-010 | Mitsubishi MSZ-AP25VGK, split 2,5 kW | kom | 765"
+      },
+      {
+        "locator": "Klima row 6",
+        "kind": "tablerow",
+        "start_byte": 213,
+        "end_byte": 270,
+        "text": "KL-011 | Mitsubishi MSZ-AP35VGK, split 3,5 kW | kom | 848"
+      },
+      {
+        "locator": "Klima row 7",
+        "kind": "tablerow",
+        "start_byte": 272,
+        "end_byte": 325,
+        "text": "KL-020 | Multi split vanjska jedinica 2x | kom | 1340"
+      },
+      {
+        "locator": "Klima row 8",
+        "kind": "tablerow",
+        "start_byte": 327,
+        "end_byte": 380,
+        "text": "KL-021 | Multi split vanjska jedinica 3x | kom | 1795"
+      },
+      {
+        "locator": "Klima row 9",
+        "kind": "tablerow",
+        "start_byte": 382,
+        "end_byte": 428,
+        "text": "KL-030 | Kanalska jedinica 7,1 kW | kom | 2240"
+      },
+      {
+        "locator": "Usluge row 2",
+        "kind": "tablerow",
+        "start_byte": 430,
+        "end_byte": 483,
+        "text": "US-001 | Montaža split sustava do 3,5 kW | kom | 210"
+      },
+      {
+        "locator": "Usluge row 3",
+        "kind": "tablerow",
+        "start_byte": 485,
+        "end_byte": 541,
+        "text": "US-002 | Montaža split sustava 3,5–5,0 kW | kom | 265"
+      },
+      {
+        "locator": "Usluge row 4",
+        "kind": "tablerow",
+        "start_byte": 543,
+        "end_byte": 616,
+        "text": "US-003 | Montaža multi split sustava, po unutarnjoj jedinici | kom | 180"
+      },
+      {
+        "locator": "Usluge row 5",
+        "kind": "tablerow",
+        "start_byte": 618,
+        "end_byte": 678,
+        "text": "US-010 | Bakrena instalacija, isporuka i montaža | m | 18.5"
+      },
+      {
+        "locator": "Usluge row 6",
+        "kind": "tablerow",
+        "start_byte": 680,
+        "end_byte": 724,
+        "text": "US-011 | Probijanje zida do 30 cm | kom | 35"
+      },
+      {
+        "locator": "Usluge row 7",
+        "kind": "tablerow",
+        "start_byte": 726,
+        "end_byte": 776,
+        "text": "US-020 | Godišnji servis split sustava | kom | 65"
+      },
+      {
+        "locator": "Usluge row 8",
+        "kind": "tablerow",
+        "start_byte": 778,
+        "end_byte": 822,
+        "text": "US-021 | Izlazak na teren, Zagreb | kom | 40"
+      },
+      {
+        "locator": "Usluge row 9",
+        "kind": "tablerow",
+        "start_byte": 824,
+        "end_byte": 876,
+        "text": "US-022 | Izlazak na teren, izvan Zagreba | km | 0.65"
+      },
+      {
+        "locator": "Usluge row 10",
+        "kind": "tablerow",
+        "start_byte": 878,
+        "end_byte": 915,
+        "text": "US-030 | Punjenje plina R32 | kg | 42"
+      }
+    ]
+  },
+  {
+    "name": "Cjenik-dobavljaci.csv",
+    "kind": "csv",
+    "verbatim": false,
+    "text_sha256": "199fb8140f591f8bb527e9862740078ad2bcd8e1d97f73b6146a351776197365",
+    "columns": [
+      "Dobavljač",
+      "Šifra",
+      "Stavka",
+      "Nabavna cijena",
+      "Rabat"
+    ],
+    "blocks": [
+      {
+        "locator": "row 2",
+        "kind": "tablerow",
+        "start_byte": 0,
+        "end_byte": 60,
+        "text": "Klima Centar d.o.o. | KL-001 | Daikin FTXM25R | 612,00 | 18%"
+      },
+      {
+        "locator": "row 3",
+        "kind": "tablerow",
+        "start_byte": 62,
+        "end_byte": 122,
+        "text": "Klima Centar d.o.o. | KL-002 | Daikin FTXM35R | 671,00 | 18%"
+      },
+      {
+        "locator": "row 4",
+        "kind": "tablerow",
+        "start_byte": 124,
+        "end_byte": 192,
+        "text": "Termo Oprema d.o.o. | KL-010 | Mitsubishi MSZ-AP25VGK | 590,00 | 22%"
+      },
+      {
+        "locator": "row 5",
+        "kind": "tablerow",
+        "start_byte": 194,
+        "end_byte": 262,
+        "text": "Termo Oprema d.o.o. | KL-011 | Mitsubishi MSZ-AP35VGK | 655,00 | 22%"
+      },
+      {
+        "locator": "row 6",
+        "kind": "tablerow",
+        "start_byte": 264,
+        "end_byte": 324,
+        "text": "Instalater d.o.o. | US-010 | Bakrena cijev 1/4\" | 9,20 | 12%"
+      },
+      {
+        "locator": "row 7",
+        "kind": "tablerow",
+        "start_byte": 326,
+        "end_byte": 390,
+        "text": "Instalater d.o.o. | US-030 | Plin R32, boca 10 kg | 280,00 | 15%"
+      }
+    ]
+  },
+  {
+    "name": "Jamstveni-uvjeti.pdf",
+    "kind": "pdf",
+    "verbatim": false,
+    "text_sha256": "04b813973ee75e9200355a734d3a4703eca94f4fb6517625ad932825d6007a3e",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "page 1, ¶1",
+        "kind": "paragraph",
+        "start_byte": 0,
+        "end_byte": 16,
+        "text": "Jamstveni uvjeti"
+      },
+      {
+        "locator": "page 1, ¶2",
+        "kind": "paragraph",
+        "start_byte": 18,
+        "end_byte": 64,
+        "text": "Termoval d.o.o. - vrijedi od 1. sijecnja 2026."
+      },
+      {
+        "locator": "page 1, ¶3",
+        "kind": "paragraph",
+        "start_byte": 66,
+        "end_byte": 134,
+        "text": "1. Jamstveni rok na ugradnju iznosi 24 mjeseca od dana primopredaje."
+      },
+      {
+        "locator": "page 1, ¶4",
+        "kind": "paragraph",
+        "start_byte": 136,
+        "end_byte": 202,
+        "text": "2. Jamstveni rok na opremu odreduje proizvodac opreme i naveden je"
+      },
+      {
+        "locator": "page 1, ¶5",
+        "kind": "paragraph",
+        "start_byte": 204,
+        "end_byte": 245,
+        "text": "u jamstvenom listu koji se predaje kupcu."
+      },
+      {
+        "locator": "page 1, ¶6",
+        "kind": "paragraph",
+        "start_byte": 247,
+        "end_byte": 314,
+        "text": "3. Jamstvo vrijedi uz uvjet redovnog godisnjeg servisa koji obavlja"
+      },
+      {
+        "locator": "page 1, ¶7",
+        "kind": "paragraph",
+        "start_byte": 316,
+        "end_byte": 348,
+        "text": "ovlasteni servis Termoval d.o.o."
+      },
+      {
+        "locator": "page 2, ¶1",
+        "kind": "paragraph",
+        "start_byte": 350,
+        "end_byte": 372,
+        "text": "Sto jamstvo ne pokriva"
+      },
+      {
+        "locator": "page 2, ¶2",
+        "kind": "paragraph",
+        "start_byte": 374,
+        "end_byte": 414,
+        "text": "- kvarove nastale nepravilnim rukovanjem"
+      },
+      {
+        "locator": "page 2, ¶3",
+        "kind": "paragraph",
+        "start_byte": 416,
+        "end_byte": 471,
+        "text": "- kvarove nastale izostankom redovnog godisnjeg servisa"
+      },
+      {
+        "locator": "page 2, ¶4",
+        "kind": "paragraph",
+        "start_byte": 473,
+        "end_byte": 529,
+        "text": "- ostecenja nastala radovima trecih osoba na instalaciji"
+      },
+      {
+        "locator": "page 2, ¶5",
+        "kind": "paragraph",
+        "start_byte": 531,
+        "end_byte": 583,
+        "text": "- potrosni materijal, filtere i sredstva za ciscenje"
+      },
+      {
+        "locator": "page 2, ¶6",
+        "kind": "paragraph",
+        "start_byte": 585,
+        "end_byte": 651,
+        "text": "Reklamacija se podnosi pisanim putem u roku od 8 dana od uocavanja"
+      },
+      {
+        "locator": "page 2, ¶7",
+        "kind": "paragraph",
+        "start_byte": 653,
+        "end_byte": 692,
+        "text": "nedostatka, na adresu sjedista drustva."
+      }
+    ]
+  },
+  {
+    "name": "Opci-uvjeti-poslovanja-2025-STARO.docx",
+    "kind": "docx",
+    "verbatim": false,
+    "text_sha256": "6c0e0ef2c595e880167545591dbff75c3667ef8fbcc833abf08238ebd83ebe78",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "§1",
+        "kind": "heading",
+        "start_byte": 0,
+        "end_byte": 23,
+        "text": "Opći uvjeti poslovanja"
+      },
+      {
+        "locator": "§1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 25,
+        "end_byte": 79,
+        "text": "Termoval d.o.o., Zagreb. Vrijede od 1. siječnja 2025."
+      },
+      {
+        "locator": "§1.1",
+        "kind": "heading",
+        "start_byte": 81,
+        "end_byte": 88,
+        "text": "Popusti"
+      },
+      {
+        "locator": "§1.1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 90,
+        "end_byte": 226,
+        "text": "Popust od 8% odobrava se stalnim kupcima, odnosno kupcima koji su u prethodnih dvanaest mjeseci ostvarili promet veći od 15.000,00 EUR."
+      },
+      {
+        "locator": "§1.2",
+        "kind": "heading",
+        "start_byte": 228,
+        "end_byte": 237,
+        "text": "Plaćanje"
+      },
+      {
+        "locator": "§1.2 ¶1",
+        "kind": "paragraph",
+        "start_byte": 239,
+        "end_byte": 290,
+        "text": "Rok plaćanja je 30 dana od dana izdavanja računa."
+      },
+      {
+        "locator": "§1.3",
+        "kind": "heading",
+        "start_byte": 292,
+        "end_byte": 299,
+        "text": "Jamstvo"
+      },
+      {
+        "locator": "§1.3 ¶1",
+        "kind": "paragraph",
+        "start_byte": 301,
+        "end_byte": 366,
+        "text": "Jamstveni rok na ugradnju iznosi 12 mjeseci od dana primopredaje."
+      }
+    ]
+  },
+  {
+    "name": "Opci-uvjeti-poslovanja-2026.docx",
+    "kind": "docx",
+    "verbatim": false,
+    "text_sha256": "6132c7319c76b97545e11251f06e18b31542634699080ac57a54a4ab4f7015a1",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "§1",
+        "kind": "heading",
+        "start_byte": 0,
+        "end_byte": 23,
+        "text": "Opći uvjeti poslovanja"
+      },
+      {
+        "locator": "§1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 25,
+        "end_byte": 96,
+        "text": "Termoval d.o.o., Zagreb, OIB 12345678901. Vrijede od 1. siječnja 2026."
+      },
+      {
+        "locator": "§1.1",
+        "kind": "heading",
+        "start_byte": 98,
+        "end_byte": 104,
+        "text": "Cijene"
+      },
+      {
+        "locator": "§1.1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 106,
+        "end_byte": 156,
+        "text": "Sve cijene u ovom dokumentu iskazane su bez PDV-a."
+      },
+      {
+        "locator": "§1.1 ¶2",
+        "kind": "paragraph",
+        "start_byte": 158,
+        "end_byte": 317,
+        "text": "Cijene vrijede za isporuku na području Grada Zagreba i Zagrebačke županije. Za isporuke izvan tog područja zaračunava se prijevoz prema važećem cjeniku."
+      },
+      {
+        "locator": "§1.2",
+        "kind": "heading",
+        "start_byte": 319,
+        "end_byte": 326,
+        "text": "Popusti"
+      },
+      {
+        "locator": "§1.2 ¶1",
+        "kind": "paragraph",
+        "start_byte": 328,
+        "end_byte": 464,
+        "text": "Popust od 5% odobrava se stalnim kupcima, odnosno kupcima koji su u prethodnih dvanaest mjeseci ostvarili promet veći od 20.000,00 EUR."
+      },
+      {
+        "locator": "§1.2 ¶2",
+        "kind": "paragraph",
+        "start_byte": 466,
+        "end_byte": 546,
+        "text": "Popust veći od 10% odobrava isključivo voditelj prodaje, uz pisanu suglasnost."
+      },
+      {
+        "locator": "§1.3",
+        "kind": "heading",
+        "start_byte": 548,
+        "end_byte": 554,
+        "text": "Ponude"
+      },
+      {
+        "locator": "§1.3 ¶1",
+        "kind": "paragraph",
+        "start_byte": 556,
+        "end_byte": 647,
+        "text": "Ponuda vrijedi 14 dana od datuma izdavanja, osim ako je u samoj ponudi navedeno drugačije."
+      },
+      {
+        "locator": "§1.3 ¶2",
+        "kind": "paragraph",
+        "start_byte": 649,
+        "end_byte": 761,
+        "text": "Broj krugova izmjena ponude ograničen je na dva. Svaka daljnja izmjena naplaćuje se prema satnici projektanta."
+      },
+      {
+        "locator": "§1.4",
+        "kind": "heading",
+        "start_byte": 763,
+        "end_byte": 772,
+        "text": "Plaćanje"
+      },
+      {
+        "locator": "§1.4 ¶1",
+        "kind": "paragraph",
+        "start_byte": 774,
+        "end_byte": 825,
+        "text": "Rok plaćanja je 15 dana od dana izdavanja računa."
+      },
+      {
+        "locator": "§1.4 ¶2",
+        "kind": "paragraph",
+        "start_byte": 827,
+        "end_byte": 933,
+        "text": "Za radove čija vrijednost prelazi 5.000,00 EUR naplaćuje se avans u iznosu od 40% ugovorene vrijednosti."
+      },
+      {
+        "locator": "§1.5",
+        "kind": "heading",
+        "start_byte": 935,
+        "end_byte": 942,
+        "text": "Jamstvo"
+      },
+      {
+        "locator": "§1.5 ¶1",
+        "kind": "paragraph",
+        "start_byte": 944,
+        "end_byte": 1009,
+        "text": "Jamstveni rok na ugradnju iznosi 24 mjeseca od dana primopredaje."
+      },
+      {
+        "locator": "§1.5 ¶2",
+        "kind": "paragraph",
+        "start_byte": 1011,
+        "end_byte": 1113,
+        "text": "Jamstvo ne pokriva kvarove nastale nepravilnim rukovanjem niti izostankom redovnog godišnjeg servisa."
+      },
+      {
+        "locator": "§1.6",
+        "kind": "heading",
+        "start_byte": 1115,
+        "end_byte": 1121,
+        "text": "Servis"
+      },
+      {
+        "locator": "§1.6 ¶1",
+        "kind": "paragraph",
+        "start_byte": 1123,
+        "end_byte": 1202,
+        "text": "Vrijeme izlaska na teren po prijavi kvara iznosi 24 sata za ugovorne korisnike."
+      }
+    ]
+  },
+  {
+    "name": "Ponuda-2026-0142-Hotel-Adriatic.docx",
+    "kind": "docx",
+    "verbatim": false,
+    "text_sha256": "cbdb9ff1ec3b3a106e0f2675948d188ac158898fe8758568166c11a63ac1d273",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "§1",
+        "kind": "heading",
+        "start_byte": 0,
+        "end_byte": 16,
+        "text": "Ponuda 2026-0142"
+      },
+      {
+        "locator": "§1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 18,
+        "end_byte": 53,
+        "text": "Kupac: Hotel Adriatic d.d., Opatija"
+      },
+      {
+        "locator": "§1 ¶2",
+        "kind": "paragraph",
+        "start_byte": 55,
+        "end_byte": 81,
+        "text": "Datum: 12. siječnja 2026."
+      },
+      {
+        "locator": "§1.1",
+        "kind": "heading",
+        "start_byte": 83,
+        "end_byte": 97,
+        "text": "Predmet ponude"
+      },
+      {
+        "locator": "§1.1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 99,
+        "end_byte": 157,
+        "text": "Isporuka i montaža 14 split sustava u sobama drugog kata."
+      },
+      {
+        "locator": "§1.2",
+        "kind": "heading",
+        "start_byte": 159,
+        "end_byte": 165,
+        "text": "Stavke"
+      },
+      {
+        "locator": "§1.2 ¶1",
+        "kind": "paragraph",
+        "start_byte": 167,
+        "end_byte": 220,
+        "text": "14 × Daikin FTXM35R, split 3,5 kW — 892,00 EUR/kom"
+      },
+      {
+        "locator": "§1.2 ¶2",
+        "kind": "paragraph",
+        "start_byte": 222,
+        "end_byte": 279,
+        "text": "14 × Montaža split sustava do 3,5 kW — 210,00 EUR/kom"
+      },
+      {
+        "locator": "§1.2 ¶3",
+        "kind": "paragraph",
+        "start_byte": 281,
+        "end_byte": 346,
+        "text": "180 m × Bakrena instalacija, isporuka i montaža — 18,50 EUR/m"
+      },
+      {
+        "locator": "§1.3",
+        "kind": "heading",
+        "start_byte": 348,
+        "end_byte": 354,
+        "text": "Uvjeti"
+      },
+      {
+        "locator": "§1.3 ¶1",
+        "kind": "paragraph",
+        "start_byte": 356,
+        "end_byte": 380,
+        "text": "Sve cijene su bez PDV-a."
+      },
+      {
+        "locator": "§1.3 ¶2",
+        "kind": "paragraph",
+        "start_byte": 382,
+        "end_byte": 455,
+        "text": "Odobren popust: 5% na opremu, temeljem ostvarenog prometa u 2025. godini."
+      },
+      {
+        "locator": "§1.3 ¶3",
+        "kind": "paragraph",
+        "start_byte": 457,
+        "end_byte": 500,
+        "text": "Ponuda vrijedi 14 dana od datuma izdavanja."
+      },
+      {
+        "locator": "§1.3 ¶4",
+        "kind": "paragraph",
+        "start_byte": 502,
+        "end_byte": 570,
+        "text": "Rok plaćanja je 15 dana od dana izdavanja računa, uz avans od 40%."
+      },
+      {
+        "locator": "§1.3 ¶5",
+        "kind": "paragraph",
+        "start_byte": 572,
+        "end_byte": 637,
+        "text": "Jamstveni rok na ugradnju iznosi 24 mjeseca od dana primopredaje."
+      }
+    ]
+  },
+  {
+    "name": "Ponuda-2026-0143-Pekara-Klas.docx",
+    "kind": "docx",
+    "verbatim": false,
+    "text_sha256": "fb8d77e019284eedd3d0105b392b3a925229b1f83c37ac0dd61249bb7c1cbc40",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "§1",
+        "kind": "heading",
+        "start_byte": 0,
+        "end_byte": 16,
+        "text": "Ponuda 2026-0143"
+      },
+      {
+        "locator": "§1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 18,
+        "end_byte": 58,
+        "text": "Kupac: Pekara Klas d.o.o., Velika Gorica"
+      },
+      {
+        "locator": "§1 ¶2",
+        "kind": "paragraph",
+        "start_byte": 60,
+        "end_byte": 86,
+        "text": "Datum: 19. siječnja 2026."
+      },
+      {
+        "locator": "§1.1",
+        "kind": "heading",
+        "start_byte": 88,
+        "end_byte": 102,
+        "text": "Predmet ponude"
+      },
+      {
+        "locator": "§1.1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 104,
+        "end_byte": 170,
+        "text": "Isporuka i montaža kanalske jedinice 7,1 kW u proizvodnom pogonu."
+      },
+      {
+        "locator": "§1.2",
+        "kind": "heading",
+        "start_byte": 172,
+        "end_byte": 178,
+        "text": "Stavke"
+      },
+      {
+        "locator": "§1.2 ¶1",
+        "kind": "paragraph",
+        "start_byte": 180,
+        "end_byte": 226,
+        "text": "1 × Kanalska jedinica 7,1 kW — 2.240,00 EUR"
+      },
+      {
+        "locator": "§1.2 ¶2",
+        "kind": "paragraph",
+        "start_byte": 228,
+        "end_byte": 300,
+        "text": "1 × Montaža multi split sustava, po unutarnjoj jedinici — 180,00 EUR"
+      },
+      {
+        "locator": "§1.3",
+        "kind": "heading",
+        "start_byte": 302,
+        "end_byte": 308,
+        "text": "Uvjeti"
+      },
+      {
+        "locator": "§1.3 ¶1",
+        "kind": "paragraph",
+        "start_byte": 310,
+        "end_byte": 334,
+        "text": "Sve cijene su bez PDV-a."
+      },
+      {
+        "locator": "§1.3 ¶2",
+        "kind": "paragraph",
+        "start_byte": 336,
+        "end_byte": 390,
+        "text": "Popust nije odobren; kupac nije ostvario prag prometa."
+      },
+      {
+        "locator": "§1.3 ¶3",
+        "kind": "paragraph",
+        "start_byte": 392,
+        "end_byte": 435,
+        "text": "Ponuda vrijedi 14 dana od datuma izdavanja."
+      }
+    ]
+  },
+  {
+    "name": "Pravilnik-o-popustima.md",
+    "kind": "markdown",
+    "verbatim": true,
+    "text_sha256": "fbecf2842dcc4b162480940adfdb41c9b9852ac22c222d39484b8dce90b3fa06",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "§1",
+        "kind": "heading",
+        "start_byte": 0,
+        "end_byte": 33,
+        "text": "# Pravilnik o odobravanju popusta"
+      },
+      {
+        "locator": "§1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 35,
+        "end_byte": 82,
+        "text": "Interni dokument. Vrijedi od 1. siječnja 2026."
+      },
+      {
+        "locator": "§1.1",
+        "kind": "heading",
+        "start_byte": 84,
+        "end_byte": 104,
+        "text": "## 1. Redovni popust"
+      },
+      {
+        "locator": "§1.1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 106,
+        "end_byte": 181,
+        "text": "Popust od 5% odobrava voditelj prodaje samostalno, bez dodatne suglasnosti."
+      },
+      {
+        "locator": "§1.1 ¶2",
+        "kind": "paragraph",
+        "start_byte": 183,
+        "end_byte": 283,
+        "text": "Uvjet je da je kupac u prethodnih dvanaest mjeseci ostvario promet veći od\n20.000,00 EUR bez PDV-a."
+      },
+      {
+        "locator": "§1.2",
+        "kind": "heading",
+        "start_byte": 285,
+        "end_byte": 307,
+        "text": "## 2. Povećani popust"
+      },
+      {
+        "locator": "§1.2 ¶1",
+        "kind": "paragraph",
+        "start_byte": 309,
+        "end_byte": 366,
+        "text": "Popust do 10% odobrava se uz pisanu suglasnost direktora."
+      },
+      {
+        "locator": "§1.2 ¶2",
+        "kind": "paragraph",
+        "start_byte": 368,
+        "end_byte": 495,
+        "text": "Popust veći od 10% ne odobrava se ni u kojem slučaju, osim kod javne nabave\ngdje vrijede uvjeti iz natječajne dokumentacije."
+      },
+      {
+        "locator": "§1.3",
+        "kind": "heading",
+        "start_byte": 497,
+        "end_byte": 511,
+        "text": "## 3. Postupak"
+      },
+      {
+        "locator": "§1.3 ¶1",
+        "kind": "listitem",
+        "start_byte": 513,
+        "end_byte": 574,
+        "text": "1. Prodavač provjerava promet kupca u prethodnih 12 mjeseci."
+      },
+      {
+        "locator": "§1.3 ¶2",
+        "kind": "listitem",
+        "start_byte": 575,
+        "end_byte": 627,
+        "text": "2. Ako je promet ispod praga, popust se ne odobrava."
+      },
+      {
+        "locator": "§1.3 ¶3",
+        "kind": "listitem",
+        "start_byte": 628,
+        "end_byte": 689,
+        "text": "3. Ako je traženi popust veći od 5%, zahtjev ide direktoru."
+      },
+      {
+        "locator": "§1.3 ¶4",
+        "kind": "listitem",
+        "start_byte": 690,
+        "end_byte": 740,
+        "text": "4. Odobreni popust unosi se u ponudu prije slanja."
+      },
+      {
+        "locator": "§1.4",
+        "kind": "heading",
+        "start_byte": 742,
+        "end_byte": 758,
+        "text": "## 4. Evidencija"
+      },
+      {
+        "locator": "§1.4 ¶1",
+        "kind": "paragraph",
+        "start_byte": 760,
+        "end_byte": 867,
+        "text": "Svaki odobreni popust veći od 5% evidentira se u tablici `Popusti-2026.xlsx`\nuz ime odobravatelja i datum."
+      }
+    ]
+  },
+  {
+    "name": "Predlozak-ponude.docx",
+    "kind": "docx",
+    "verbatim": false,
+    "text_sha256": "4f88c50d85ea6ace4b7c419fcc25f4cb76207b6608871a32b0ffc161832007e5",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "§1",
+        "kind": "heading",
+        "start_byte": 0,
+        "end_byte": 13,
+        "text": "Ponuda [BROJ]"
+      },
+      {
+        "locator": "§1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 15,
+        "end_byte": 35,
+        "text": "Kupac: [NAZIV KUPCA]"
+      },
+      {
+        "locator": "§1 ¶2",
+        "kind": "paragraph",
+        "start_byte": 37,
+        "end_byte": 51,
+        "text": "Datum: [DATUM]"
+      },
+      {
+        "locator": "§1.1",
+        "kind": "heading",
+        "start_byte": 53,
+        "end_byte": 67,
+        "text": "Predmet ponude"
+      },
+      {
+        "locator": "§1.1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 69,
+        "end_byte": 75,
+        "text": "[OPIS]"
+      },
+      {
+        "locator": "§1.2",
+        "kind": "heading",
+        "start_byte": 77,
+        "end_byte": 83,
+        "text": "Uvjeti"
+      },
+      {
+        "locator": "§1.2 ¶1",
+        "kind": "paragraph",
+        "start_byte": 85,
+        "end_byte": 109,
+        "text": "Sve cijene su bez PDV-a."
+      },
+      {
+        "locator": "§1.2 ¶2",
+        "kind": "paragraph",
+        "start_byte": 111,
+        "end_byte": 154,
+        "text": "Ponuda vrijedi 14 dana od datuma izdavanja."
+      },
+      {
+        "locator": "§1.2 ¶3",
+        "kind": "paragraph",
+        "start_byte": 156,
+        "end_byte": 207,
+        "text": "Rok plaćanja je 15 dana od dana izdavanja računa."
+      }
+    ]
+  },
+  {
+    "name": "Primopredajni-zapisnik.docx",
+    "kind": "docx",
+    "verbatim": false,
+    "text_sha256": "01aa915b2a39dd4b59c68bfa6b6351c10639f508654a2472225398c7f9f6a4bd",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "§1",
+        "kind": "heading",
+        "start_byte": 0,
+        "end_byte": 22,
+        "text": "Primopredajni zapisnik"
+      },
+      {
+        "locator": "§1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 24,
+        "end_byte": 41,
+        "text": "Broj: ____ / 2026"
+      },
+      {
+        "locator": "§1 ¶2",
+        "kind": "paragraph",
+        "start_byte": 43,
+        "end_byte": 75,
+        "text": "Datum primopredaje: ____________"
+      },
+      {
+        "locator": "§1.1",
+        "kind": "heading",
+        "start_byte": 77,
+        "end_byte": 92,
+        "text": "Ugovorne strane"
+      },
+      {
+        "locator": "§1.1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 94,
+        "end_byte": 128,
+        "text": "Izvođač: Termoval d.o.o., Zagreb"
+      },
+      {
+        "locator": "§1.1 ¶2",
+        "kind": "paragraph",
+        "start_byte": 130,
+        "end_byte": 155,
+        "text": "Naručitelj: ____________"
+      },
+      {
+        "locator": "§1.2",
+        "kind": "heading",
+        "start_byte": 157,
+        "end_byte": 163,
+        "text": "Izjava"
+      },
+      {
+        "locator": "§1.2 ¶1",
+        "kind": "paragraph",
+        "start_byte": 165,
+        "end_byte": 302,
+        "text": "Primopredajni zapisnik je dokument kojim naručitelj potvrđuje da su radovi izvršeni prema ponudi i kojim počinje teći jamstveni rok."
+      },
+      {
+        "locator": "§1.2 ¶2",
+        "kind": "paragraph",
+        "start_byte": 304,
+        "end_byte": 379,
+        "text": "Naručitelj izjavljuje da je pregledao izvedene radove i da nema primjedbi."
+      },
+      {
+        "locator": "§1.3",
+        "kind": "heading",
+        "start_byte": 381,
+        "end_byte": 388,
+        "text": "Potpisi"
+      },
+      {
+        "locator": "§1.3 ¶1",
+        "kind": "paragraph",
+        "start_byte": 390,
+        "end_byte": 450,
+        "text": "Za izvođača: ____________    Za naručitelja: ____________"
+      }
+    ]
+  },
+  {
+    "name": "Servisni-postupak.md",
+    "kind": "markdown",
+    "verbatim": true,
+    "text_sha256": "bcace7df4bec7e25de07d6e2c0763ec00781ebf1407695a152364d9346e34d95",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "§1",
+        "kind": "heading",
+        "start_byte": 0,
+        "end_byte": 19,
+        "text": "# Servisni postupak"
+      },
+      {
+        "locator": "§1.1",
+        "kind": "heading",
+        "start_byte": 21,
+        "end_byte": 40,
+        "text": "## 1. Prijava kvara"
+      },
+      {
+        "locator": "§1.1 ¶1",
+        "kind": "paragraph",
+        "start_byte": 42,
+        "end_byte": 111,
+        "text": "Kupac prijavljuje kvar telefonom ili e-poštom na servis@termoval.hr."
+      },
+      {
+        "locator": "§1.1 ¶2",
+        "kind": "paragraph",
+        "start_byte": 113,
+        "end_byte": 170,
+        "text": "Prijava se evidentira u servisni nalog istog radnog dana."
+      },
+      {
+        "locator": "§1.2",
+        "kind": "heading",
+        "start_byte": 172,
+        "end_byte": 194,
+        "text": "## 2. Izlazak na teren"
+      },
+      {
+        "locator": "§1.2 ¶1",
+        "kind": "paragraph",
+        "start_byte": 196,
+        "end_byte": 295,
+        "text": "Vrijeme izlaska na teren po prijavi kvara iznosi 24 sata za ugovorne\nkorisnike i 72 sata za ostale."
+      },
+      {
+        "locator": "§1.2 ¶2",
+        "kind": "paragraph",
+        "start_byte": 297,
+        "end_byte": 357,
+        "text": "Izlazak se naplaćuje prema cjeniku, osim u jamstvenom roku."
+      },
+      {
+        "locator": "§1.3",
+        "kind": "heading",
+        "start_byte": 359,
+        "end_byte": 379,
+        "text": "## 3. Servisni nalog"
+      },
+      {
+        "locator": "§1.3 ¶1",
+        "kind": "paragraph",
+        "start_byte": 381,
+        "end_byte": 438,
+        "text": "Serviser ispunjava servisni nalog na terenu i evidentira:"
+      },
+      {
+        "locator": "§1.3 ¶2",
+        "kind": "listitem",
+        "start_byte": 440,
+        "end_byte": 476,
+        "text": "- opis kvara kako ga je opisao kupac"
+      },
+      {
+        "locator": "§1.3 ¶3",
+        "kind": "listitem",
+        "start_byte": 477,
+        "end_byte": 494,
+        "text": "- utvrđeni uzrok"
+      },
+      {
+        "locator": "§1.3 ¶4",
+        "kind": "listitem",
+        "start_byte": 495,
+        "end_byte": 513,
+        "text": "- izvršene radove"
+      },
+      {
+        "locator": "§1.3 ¶5",
+        "kind": "listitem",
+        "start_byte": 514,
+        "end_byte": 535,
+        "text": "- utrošeni materijal"
+      },
+      {
+        "locator": "§1.3 ¶6",
+        "kind": "listitem",
+        "start_byte": 536,
+        "end_byte": 555,
+        "text": "- vrijeme na terenu"
+      },
+      {
+        "locator": "§1.4",
+        "kind": "heading",
+        "start_byte": 557,
+        "end_byte": 575,
+        "text": "## 4. Primopredaja"
+      },
+      {
+        "locator": "§1.4 ¶1",
+        "kind": "paragraph",
+        "start_byte": 577,
+        "end_byte": 640,
+        "text": "Nakon završetka radova kupac potpisuje primopredajni zapisnik."
+      },
+      {
+        "locator": "§1.4 ¶2",
+        "kind": "paragraph",
+        "start_byte": 642,
+        "end_byte": 760,
+        "text": "Primopredajni zapisnik je dokument kojim kupac potvrđuje da su radovi\nizvršeni i kojim počinje teći jamstveni rok."
+      },
+      {
+        "locator": "§1.5",
+        "kind": "heading",
+        "start_byte": 762,
+        "end_byte": 775,
+        "text": "## 5. Naplata"
+      },
+      {
+        "locator": "§1.5 ¶1",
+        "kind": "paragraph",
+        "start_byte": 777,
+        "end_byte": 840,
+        "text": "Račun se izdaje u roku od tri radna dana od potpisa zapisnika."
+      }
+    ]
+  },
+  {
+    "name": "Vrijeme-izlaska-na-teren.txt",
+    "kind": "text",
+    "verbatim": true,
+    "text_sha256": "8e2e20acdcfe45a03bb9c7ac4513082cfad9367377f4c8c4514d39cf9e7e72e8",
+    "columns": null,
+    "blocks": [
+      {
+        "locator": "¶1",
+        "kind": "paragraph",
+        "start_byte": 0,
+        "end_byte": 47,
+        "text": "Biljeska sa sastanka servisa, 8. sijecnja 2026."
+      },
+      {
+        "locator": "¶2",
+        "kind": "paragraph",
+        "start_byte": 51,
+        "end_byte": 220,
+        "text": "Dogovoreno je da vrijeme izlaska na teren za ugovorne korisnike bude\r\n48 sati, a ne 24 sata kako pise u opcim uvjetima. Razlog je manjak\r\nservisera u sijecnju i veljaci."
+      },
+      {
+        "locator": "¶3",
+        "kind": "paragraph",
+        "start_byte": 224,
+        "end_byte": 274,
+        "text": "Treba azurirati opce uvjete. Nije jos napravljeno."
+      },
+      {
+        "locator": "¶4",
+        "kind": "paragraph",
+        "start_byte": 278,
+        "end_byte": 322,
+        "text": "Prisutni: Ana Kovac, Marko Juric, Ivan Peric"
+      }
+    ]
+  },
+  {
+    "name": "Zaposlenici-place-2026.xlsx",
+    "kind": "xlsx",
+    "verbatim": false,
+    "text_sha256": "4fc64875cef77e46ff7e1ee61a2989de90d4dd360cfc09f4d20111944ca86f3e",
+    "columns": [
+      "Ime i prezime",
+      "OIB",
+      "Radno mjesto",
+      "Bruto plaća",
+      "IBAN"
+    ],
+    "blocks": [
+      {
+        "locator": "row 2",
+        "kind": "tablerow",
+        "start_byte": 0,
+        "end_byte": 74,
+        "text": "Ana Kovač | 98765432109 | Voditelj prodaje | 2450 | HR1723600001101234565"
+      },
+      {
+        "locator": "row 3",
+        "kind": "tablerow",
+        "start_byte": 76,
+        "end_byte": 144,
+        "text": "Marko Jurić | 87654321098 | Serviser | 1680 | HR1723600001101234566"
+      },
+      {
+        "locator": "row 4",
+        "kind": "tablerow",
+        "start_byte": 146,
+        "end_byte": 213,
+        "text": "Ivan Perić | 76543210987 | Serviser | 1620 | HR1723600001101234567"
+      }
+    ]
+  }
+]

@@ -1,0 +1,44 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "Vrijeme primjene općih uvjeta",
+      "statement": "Opći uvjeti poslovanja društva Termoval d.o.o. iz Zagreba vrijede od 1. siječnja 2025.",
+      "quotes": [
+        "Termoval d.o.o., Zagreb. Vrijede od 1. siječnja 2025."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Popust za stalne kupce",
+      "statement": "Stalnim kupcima odobrava se popust od 8%. Stalnim kupcem smatra se kupac koji je u prethodnih dvanaest mjeseci ostvario promet veći od 15.000,00 EUR.",
+      "quotes": [
+        "Popust od 8% odobrava se stalnim kupcima, odnosno kupcima koji su u prethodnih dvanaest mjeseci ostvarili promet veći od 15.000,00 EUR."
+      ]
+    },
+    {
+      "kind": "term",
+      "title": "Stalni kupac",
+      "statement": "Pojam \"stalni kupac\" označava kupca koji je u prethodnih dvanaest mjeseci ostvario promet veći od 15.000,00 EUR.",
+      "quotes": [
+        "Popust od 8% odobrava se stalnim kupcima, odnosno kupcima koji su u prethodnih dvanaest mjeseci ostvarili promet veći od 15.000,00 EUR."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok plaćanja",
+      "statement": "Rok plaćanja iznosi 30 dana od dana izdavanja računa.",
+      "quotes": [
+        "Rok plaćanja je 30 dana od dana izdavanja računa."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Jamstveni rok na ugradnju",
+      "statement": "Jamstveni rok na ugradnju je 12 mjeseci, računajući od dana primopredaje.",
+      "quotes": [
+        "Jamstveni rok na ugradnju iznosi 12 mjeseci od dana primopredaje."
+      ]
+    }
+  ]
+}

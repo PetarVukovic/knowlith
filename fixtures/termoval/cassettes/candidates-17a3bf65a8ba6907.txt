@@ -1,0 +1,110 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "Stupanje na snagu Općih uvjeta",
+      "statement": "Opći uvjeti poslovanja društva Termoval d.o.o. vrijede od 1. siječnja 2026.",
+      "quotes": [
+        "Vrijede od 1. siječnja 2026."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Cijene bez PDV-a",
+      "statement": "Sve cijene navedene u dokumentu iskazane su bez PDV-a.",
+      "quotes": [
+        "Sve cijene u ovom dokumentu iskazane su bez PDV-a."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Područje važenja cijena i naplata prijevoza",
+      "statement": "Cijene vrijede za isporuku na području Grada Zagreba i Zagrebačke županije; za isporuke izvan tog područja dodatno se zaračunava prijevoz prema važećem cjeniku.",
+      "quotes": [
+        "Cijene vrijede za isporuku na području Grada Zagreba i Zagrebačke županije.",
+        "Za isporuke izvan tog područja zaračunava se prijevoz prema važećem cjeniku."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Popust od 5% za stalne kupce",
+      "statement": "Stalnim kupcima odobrava se popust od 5%.",
+      "quotes": [
+        "Popust od 5% odobrava se stalnim kupcima, odnosno kupcima koji su u prethodnih dvanaest mjeseci ostvarili promet veći od 20.000,00 EUR."
+      ]
+    },
+    {
+      "kind": "term",
+      "title": "Stalni kupac",
+      "statement": "Stalnim kupcem smatra se kupac koji je u prethodnih dvanaest mjeseci ostvario promet veći od 20.000,00 EUR.",
+      "quotes": [
+        "Popust od 5% odobrava se stalnim kupcima, odnosno kupcima koji su u prethodnih dvanaest mjeseci ostvarili promet veći od 20.000,00 EUR."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Odobrenje popusta većeg od 10%",
+      "statement": "Popust veći od 10% može odobriti isključivo voditelj prodaje, i to uz pisanu suglasnost.",
+      "quotes": [
+        "Popust veći od 10% odobrava isključivo voditelj prodaje, uz pisanu suglasnost."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok valjanosti ponude",
+      "statement": "Ponuda vrijedi 14 dana od datuma izdavanja, osim ako u ponudi nije navedeno drugačije.",
+      "quotes": [
+        "Ponuda vrijedi 14 dana od datuma izdavanja, osim ako je u samoj ponudi navedeno drugačije."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Ograničenje broja krugova izmjena ponude",
+      "statement": "Dopuštena su najviše dva kruga izmjena ponude; svaka daljnja izmjena naplaćuje se prema satnici projektanta.",
+      "quotes": [
+        "Broj krugova izmjena ponude ograničen je na dva.",
+        "Svaka daljnja izmjena naplaćuje se prema satnici projektanta."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok plaćanja",
+      "statement": "Rok plaćanja je 15 dana od dana izdavanja računa.",
+      "quotes": [
+        "Rok plaćanja je 15 dana od dana izdavanja računa."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Avans za radove iznad 5.000,00 EUR",
+      "statement": "Za radove čija vrijednost prelazi 5.000,00 EUR naplaćuje se avans od 40% ugovorene vrijednosti.",
+      "quotes": [
+        "Za radove čija vrijednost prelazi 5.000,00 EUR naplaćuje se avans u iznosu od 40% ugovorene vrijednosti."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Jamstveni rok na ugradnju",
+      "statement": "Jamstveni rok na ugradnju iznosi 24 mjeseca od dana primopredaje.",
+      "quotes": [
+        "Jamstveni rok na ugradnju iznosi 24 mjeseca od dana primopredaje."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Isključenja iz jamstva",
+      "statement": "Jamstvo ne pokriva kvarove nastale nepravilnim rukovanjem ni one nastale zbog izostanka redovnog godišnjeg servisa.",
+      "quotes": [
+        "Jamstvo ne pokriva kvarove nastale nepravilnim rukovanjem niti izostankom redovnog godišnjeg servisa."
+      ]
+    },
+    {
+      "kind": "rule",
+      "title": "Vrijeme izlaska na teren za ugovorne korisnike",
+      "statement": "Za ugovorne korisnike vrijeme izlaska na teren po prijavi kvara iznosi 24 sata.",
+      "quotes": [
+        "Vrijeme izlaska na teren po prijavi kvara iznosi 24 sata za ugovorne korisnike."
+      ]
+    }
+  ]
+}

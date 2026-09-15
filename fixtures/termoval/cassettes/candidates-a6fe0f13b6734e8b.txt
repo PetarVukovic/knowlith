@@ -1,0 +1,34 @@
+{
+  "candidates": [
+    {
+      "kind": "fact",
+      "title": "Cijene bez PDV-a",
+      "statement": "Sve cijene navedene u ponudi iskazane su bez PDV-a.",
+      "quotes": ["Sve cijene su bez PDV-a."]
+    },
+    {
+      "kind": "rule",
+      "title": "Rok valjanosti ponude",
+      "statement": "Ponuda vrijedi 14 dana od datuma izdavanja.",
+      "quotes": ["Ponuda vrijedi 14 dana od datuma izdavanja."]
+    },
+    {
+      "kind": "rule",
+      "title": "Popust uvjetovan pragom prometa",
+      "statement": "Popust nije odobren jer kupac nije ostvario prag prometa.",
+      "quotes": ["Popust nije odobren; kupac nije ostvario prag prometa."]
+    },
+    {
+      "kind": "fact",
+      "title": "Cijena kanalske jedinice 7,1 kW",
+      "statement": "Kanalska jedinica 7,1 kW naplaćuje se 2.240,00 EUR po komadu.",
+      "quotes": ["1 × Kanalska jedinica 7,1 kW — 2.240,00 EUR"]
+    },
+    {
+      "kind": "fact",
+      "title": "Cijena montaže multi split sustava",
+      "statement": "Montaža multi split sustava naplaćuje se 180,00 EUR po unutarnjoj jedinici.",
+      "quotes": ["1 × Montaža multi split sustava, po unutarnjoj jedinici — 180,00 EUR"]
+    }
+  ]
+}

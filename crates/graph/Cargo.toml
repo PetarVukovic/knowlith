@@ -1,0 +1,14 @@
+[package]
+name = "knowlith-graph"
+description = "The knowledge graph: impact, propagation order and cycle detection over approved objects."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+knowlith-core.workspace = true
+knowlith-lake.workspace = true
+
+petgraph.workspace = true

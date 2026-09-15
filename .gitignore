@@ -1,0 +1,14 @@
+/target
+/knowlith/node_modules
+/knowlith/dist
+
+# Lake files. The company's own knowledge never belongs in the repo.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Local machine settings.
+.claude/settings.local.json
+
+# Screenshots taken while testing.
+*.png
