@@ -197,8 +197,10 @@ async fn guard(State(state): State<AppState>, request: Request, next: Next) -> R
 
     // WebSocket clients cannot set custom headers from the browser. The
     // shipped page therefore passes the token as `?token=`; Vite's proxy
-    // still attaches the header in development.
-    if given.is_empty() {
+    // still attaches the header in development. Only the socket route may
+    // do this: a token in a URL lands in history, screenshots and pasted
+    // links, so no other endpoint is allowed to accept it there.
+    if given.is_empty() && request.uri().path() == "/api/terminal" {
         if let Some(query) = request.uri().query() {
             for pair in query.split('&') {
                 if let Some(value) = pair.strip_prefix("token=") {
@@ -1143,7 +1145,7 @@ async fn tool_reads(
 /// separately.
 async fn activity(State(state): State<AppState>) -> ApiResult<Vec<ActivityDto>> {
     let lake = state.lake.lock().map_err(failed)?;
-    let documents = lake.documents().map_err(failed)?;
+    let names = lake.document_names().map_err(failed)?;
     let mut objects = lake.objects().map_err(failed)?;
     objects.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
@@ -1164,10 +1166,9 @@ async fn activity(State(state): State<AppState>) -> ApiResult<Vec<ActivityDto>> 
                 .evidence
                 .first()
                 .map(|e| {
-                    let name = documents
-                        .iter()
-                        .find(|d| d.id == e.document_id)
-                        .map(|d| d.name.as_str())
+                    let name = names
+                        .get(&e.document_id)
+                        .map(String::as_str)
                         .unwrap_or("a document that is no longer there");
                     format!("From {}, {}.", name, e.locator)
                 })
@@ -1247,11 +1248,11 @@ async fn work(State(state): State<AppState>) -> ApiResult<WorkDto> {
             count,
         });
 
-    let documents = lake.documents().map_err(failed)?;
+    let names = lake.document_names().map_err(failed)?;
     let sources = lake.sources().map_err(failed)?;
     let name_of = |subject: &str| -> String {
-        if let Some(document) = documents.iter().find(|d| d.id == subject) {
-            return document.name.clone();
+        if let Some(name) = names.get(subject) {
+            return name.clone();
         }
         if let Some((_, name, _, _, _, _)) = sources.iter().find(|(id, ..)| id == subject) {
             return name.clone();

@@ -603,3 +603,32 @@ fn an_unreadable_payload_does_not_take_the_panel_down() {
     assert_eq!(work[0].subject, None);
     assert_eq!(work[0].note.as_deref(), Some("51 kept"));
 }
+
+#[cfg(unix)]
+#[test]
+fn the_lake_on_disk_is_readable_by_its_owner_alone() {
+    // The token was private from the first day; the file with every
+    // document's full text was not. Both folders above the lake are
+    // created here, so both must come out closed to other accounts.
+    use std::os::unix::fs::PermissionsExt;
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "knowlith-private-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let db = root.join("data").join("lake.sqlite");
+    let mut lake = Lake::open(&db).unwrap();
+    // A write, so the WAL exists and can be checked too.
+    lake.put_source("src-1", "Prodaja", "/tmp/prodaja", "folder", "codex").unwrap();
+
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&root), 0o700, "{}", root.display());
+    assert_eq!(mode(&root.join("data")), 0o700);
+    assert_eq!(mode(&db), 0o600);
+    let wal = root.join("data").join("lake.sqlite-wal");
+    assert!(wal.exists(), "WAL mode should have made a -wal file");
+    assert_eq!(mode(&wal), 0o600);
+    drop(lake);
+    let _ = std::fs::remove_dir_all(&root);
+}

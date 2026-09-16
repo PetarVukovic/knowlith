@@ -74,6 +74,62 @@ pub enum LakeError {
 
 type Result<T> = std::result::Result<T, LakeError>;
 
+/// Creates the folders above the lake so that only the owner can enter them.
+///
+/// Only the folders that did not exist are touched. `KNOWLITH_HOME` may point
+/// anywhere, and tightening a folder somebody else chose — `/tmp`, a shared
+/// drive — would lock other people out of their own files.
+fn create_private_dirs(db: &Path) {
+    let Some(parent) = db.parent() else { return };
+    let mut missing = Vec::new();
+    let mut cursor = Some(parent);
+    while let Some(dir) = cursor {
+        if dir.as_os_str().is_empty() || dir.exists() {
+            break;
+        }
+        missing.push(dir);
+        cursor = dir.parent();
+    }
+    for dir in missing.into_iter().rev() {
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        let _ = builder.create(dir);
+    }
+}
+
+/// Makes the lake, and the WAL beside it, readable by the owner alone.
+///
+/// The token was written at 0600 from the start; the file holding the full
+/// text of every document the company owns was created with the default
+/// umask and came out world-readable. On a shared machine that is every
+/// contract and price list, open to every account. SQLite gives `-wal` and
+/// `-shm` the mode of the main file when it creates them, so tightening the
+/// database first is enough for a fresh lake; the two extra names cover a
+/// lake that already existed.
+fn keep_private(db: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let private = std::fs::Permissions::from_mode(0o600);
+        for suffix in ["", "-wal", "-shm"] {
+            let mut name = db.as_os_str().to_owned();
+            name.push(suffix);
+            let path = Path::new(&name);
+            if path.exists() {
+                let _ = std::fs::set_permissions(path, private.clone());
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = db;
+    }
+}
+
 pub struct Lake {
     conn: Connection,
 }
@@ -90,7 +146,9 @@ pub struct Edge {
 impl Lake {
     /// Opens or creates the lake at `path`.
     pub fn open(path: &Path) -> Result<Self> {
+        create_private_dirs(path);
         let conn = Connection::open(path)?;
+        keep_private(path);
         Self::prepare(conn)
     }
 
@@ -527,6 +585,18 @@ impl Lake {
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// Id → file name for every document, and nothing else.
+    ///
+    /// `documents()` carries the full text and every block of every file,
+    /// which `/api/work` was loading once a second only to turn a job's
+    /// subject into a name. On a folder of thousands of files that is the
+    /// whole company's text through memory sixty times a minute.
+    pub fn document_names(&self) -> Result<std::collections::HashMap<String, String>> {
+        let mut stmt = self.conn.prepare_cached("SELECT id, name FROM documents")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
     }
 
     pub fn documents(&self) -> Result<Vec<Document>> {
