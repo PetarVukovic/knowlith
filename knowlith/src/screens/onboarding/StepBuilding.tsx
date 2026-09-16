@@ -22,9 +22,9 @@ const PHASES = [
 ] as const
 
 const ENGINE_VERB: Record<Processor, string> = {
-  "claude-code": "Reading happens on this machine.",
-  codex: "Reading happens on this machine.",
-  "cursor-agent": "Reading happens on this machine.",
+  "claude-code": "Your Claude account is reading.",
+  codex: "Your Codex account is reading.",
+  "cursor-agent": "Your Cursor account is reading.",
   managed: "Reading happens for you.",
 }
 

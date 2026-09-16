@@ -45,12 +45,14 @@ That is a deliberate refusal of three common lies:
 - It will not invent an ETA for work that depends on document size and a model
   it does not control.
 
-Everything stays on `127.0.0.1`. Nothing is uploaded. The only copy of what you
-approved lives under `~/Knowlith` on your computer.
+Knowlith itself runs only on your computer and uploads nothing. Your documents
+are read by the AI you already pay for — Claude, Codex or Cursor — through your
+own account, under that vendor's terms; Knowlith adds no second recipient. The
+only copy of what you approved lives under `~/Knowlith` on your computer.
 
 ## Install
 
-One command. No administrator. Nothing leaves the machine.
+One command. No administrator. No Knowlith account, no Knowlith server.
 
 ```sh
 # macOS and Linux
@@ -96,8 +98,8 @@ written in. They are not guessed from a nearby sentence.
 ## Who it is for
 
 Owners and operators of a real company who already use AI day to day and need
-it to stop improvising about their own rules — without sending the shared drive
-to somebody else’s cloud.
+it to stop improvising about their own rules — without handing the shared drive
+to a new vendor on top of the one they already trust.
 
 ## For people who change the code
 

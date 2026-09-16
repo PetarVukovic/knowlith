@@ -8,9 +8,13 @@ import { cn } from "@/lib/utils"
  * Who reads the documents.
  *
  * Each option states plainly what leaves the disk, because that is the only
- * difference between them that the owner should have to weigh. Local CLIs
- * keep the reading on the machine under an account they already pay for;
- * Managed does not, and says so in the same size type as everything else.
+ * difference between them that the owner should have to weigh. A local CLI
+ * runs here under an account the owner already pays for, but the text it is
+ * asked about still travels to that vendor — the whole document, not a quote
+ * (`compiler/candidates.rs` sends `document.text`, and a batch sends eight).
+ * An earlier version of this screen said "only short quotes leave this Mac",
+ * which was not true, and an owner choosing Knowlith for privacy would have
+ * handed client contracts to a cloud believing they had not.
  */
 const OPTIONS: {
   id: Processor
@@ -23,25 +27,28 @@ const OPTIONS: {
   {
     id: "codex",
     title: "Use Codex on this Mac",
-    subtitle: "Reading happens here, under your own Codex account.",
+    subtitle: "Your own Codex account does the reading.",
     Icon: Terminal,
-    leaves: "Only short quotes leave this Mac, and only to OpenAI under your account.",
+    leaves:
+      "The text of each document is sent to OpenAI through your Codex account while it is read. Knowlith itself sends nothing anywhere.",
     cost: "No extra cost from us.",
   },
   {
     id: "claude-code",
     title: "Use Claude Code",
-    subtitle: "Reading happens here, under your own Claude account.",
+    subtitle: "Your own Claude account does the reading.",
     Icon: Terminal,
-    leaves: "Only short quotes leave this Mac, and only to Anthropic under your account.",
+    leaves:
+      "The text of each document is sent to Anthropic through your Claude account while it is read. Knowlith itself sends nothing anywhere.",
     cost: "No extra cost from us.",
   },
   {
     id: "cursor-agent",
     title: "Use Cursor Agent",
-    subtitle: "Reading happens here, under your own Cursor account (`agent` CLI).",
+    subtitle: "Your own Cursor account does the reading.",
     Icon: Wrench,
-    leaves: "Only short quotes leave this Mac, and only to Cursor under your account.",
+    leaves:
+      "The text of each document is sent to Cursor through your account while it is read. Knowlith itself sends nothing anywhere.",
     cost: "No extra cost from us.",
   },
   {
@@ -96,7 +103,7 @@ export function StepProcessing({
         {engines === null
           ? "Checking which AI tools are on this Mac…"
           : installedCount > 0
-            ? `Knowlith found ${installedCount} AI tool${installedCount === 1 ? "" : "s"} already installed on this Mac. Using one of them keeps the reading on your machine and on your existing subscription.`
+            ? `Knowlith found ${installedCount === 1 ? "an AI tool" : `${installedCount} AI tools`} already installed on this Mac. Using one of them means your existing subscription pays and Knowlith never sees your documents.`
             : "No local AI command line was found yet. Install Claude Code, Codex or Cursor Agent, or choose Managed."}
       </p>
 

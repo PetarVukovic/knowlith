@@ -249,8 +249,11 @@ Three placements, with different consequences for who pays and what may be
 claimed about privacy:
 
 1. **The owner's own CLI** as a child process — `claude` or `codex`, detected
-   on `PATH`. The documents never leave the machine, and the owner's existing
-   subscription pays.
+   on `PATH`. The owner's own CLI carries the document text to that vendor,
+   as it does for everything else the owner asks it; Knowlith adds no second
+   recipient, and the owner's existing subscription pays. Stage 2 sends the
+   whole rendition (eight documents per call in a batch), not a quote — the
+   product must never say "only short quotes leave".
 2. **A recorded replay** — `--replay <dir>` uses saved replies and calls
    nothing. This is how the test suite exercises the whole loop offline, and
    how `--record` produces new fixtures.
