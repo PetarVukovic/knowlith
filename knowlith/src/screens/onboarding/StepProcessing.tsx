@@ -87,6 +87,11 @@ export function StepProcessing({
   const selected = OPTIONS.find((o) => o.id === value)!
   const local = value !== "managed"
   const installedCount = (engines ?? []).filter((e) => e.installed && e.id !== "managed").length
+  // Managed reading is a card only when the daemon says this build has it.
+  // Offering "we do the reading for you, nothing to install" to an owner
+  // with no CLI, and then failing every job, was the worst path here.
+  const managedAvailable = engines?.some((e) => e.id === "managed" && e.installed) ?? false
+  const options = managedAvailable ? OPTIONS : OPTIONS.filter((o) => o.id !== "managed")
 
   const isDetected = (id: Processor) => {
     if (id === "managed") return false
@@ -104,11 +109,11 @@ export function StepProcessing({
           ? "Checking which AI tools are on this Mac…"
           : installedCount > 0
             ? `Knowlith found ${installedCount === 1 ? "an AI tool" : `${installedCount} AI tools`} already installed on this Mac. Using one of them means your existing subscription pays and Knowlith never sees your documents.`
-            : "No local AI command line was found yet. Install Claude Code, Codex or Cursor Agent, or choose Managed."}
+            : "No AI tool was found on this Mac yet. Knowlith reads through Claude Code, Codex or Cursor Agent — install one, sign in to it, and come back to this step."}
       </p>
 
       <div className="mt-8 grid gap-2.5">
-        {OPTIONS.map((option) => {
+        {options.map((option) => {
           const active = value === option.id
           const detected = isDetected(option.id)
           return (
