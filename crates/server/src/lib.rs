@@ -1318,11 +1318,18 @@ async fn build_bundle(State(state): State<AppState>) -> ApiResult<serde_json::Va
         .into_iter()
         .map(|entry| (text_of(&entry, "name"), text_of(&entry, "description")))
         .collect();
-    let prompts: Vec<(String, String)> = {
+    // Straight from the gateway's own prompt list, so what the extension
+    // advertises and what the owner actually gets cannot drift apart.
+    let prompts: Vec<knowlith_desktop::bundle::Prompt> = {
         let lake = state.lake.lock().map_err(failed)?;
-        knowlith_mcp::prompts::list(&lake, &icon)
+        knowlith_mcp::prompts::declared(&lake, &icon)
             .into_iter()
-            .map(|entry| (text_of(&entry, "name"), text_of(&entry, "description")))
+            .map(|p| knowlith_desktop::bundle::Prompt {
+                name: p.name,
+                description: p.description,
+                arguments: p.arguments,
+                text: p.text,
+            })
             .collect()
     };
 

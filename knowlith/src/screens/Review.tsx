@@ -136,6 +136,23 @@ export function Review() {
   const setDraft = (text: string | null) =>
     setDraftFor(text === null || selectedId === null ? null : { id: selectedId, text })
 
+  /**
+   * Decide this one and move to the one under it.
+   *
+   * Without this the selection fell back to `review[0]`: decide the
+   * twelfth item and the pane jumps silently to the first, which on a
+   * queue of twenty-seven near-identical entries reads as the page having
+   * ignored the click. The next id is worked out before the queue shrinks,
+   * because afterwards there is nothing left to count from.
+   */
+  const decide = (act: (id: string) => void) => {
+    if (!item) return
+    const at = review.findIndex((r) => r.id === item.id)
+    const next = review[at + 1] ?? review[at - 1] ?? null
+    act(item.id)
+    setPickedId(next?.id ?? null)
+  }
+
   if (guided && justApproved) {
     return (
       <div className="mx-auto w-full max-w-[560px] px-5 py-16 text-center">
@@ -393,14 +410,14 @@ export function Review() {
               <Button
                 variant="primary"
                 onClick={() => {
-                  approve(item.id, draft !== null)
+                  decide((id) => approve(id, draft !== null))
                   if (guided) setJustApproved(true)
                 }}
               >
                 <Check />
                 {draft !== null ? "Approve my version" : "Approve"}
               </Button>
-              <Button variant="danger" onClick={() => reject(item.id)}>
+              <Button variant="danger" onClick={() => decide(reject)}>
                 <X />
                 Reject
               </Button>

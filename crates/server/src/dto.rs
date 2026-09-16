@@ -241,7 +241,16 @@ pub fn document_kind_str(kind: DocumentKind) -> &'static str {
 pub fn evidence_dto(evidence: &Evidence, document: Option<&Document>) -> EvidenceDto {
     EvidenceDto {
         // Stable per span, so React keys do not shuffle between polls.
-        id: format!("{}-{}", evidence.document_id, evidence.start_byte),
+        //
+        // The whole span, not only where it starts. Two claims quoting the
+        // same paragraph from different offsets into it share a start
+        // byte, and the interface then had two list items under one key —
+        // which React resolves by dropping one of them, so the owner is
+        // shown one piece of evidence where there are two.
+        id: format!(
+            "{}-{}-{}",
+            evidence.document_id, evidence.start_byte, evidence.end_byte
+        ),
         document_id: evidence.document_id.clone(),
         document_name: document
             .map(|d| d.name.clone())
@@ -572,4 +581,36 @@ pub struct WorkLineDto {
     /// `done` | `failed` | `working`.
     pub state: &'static str,
     pub at: String,
+}
+
+#[cfg(test)]
+mod evidence_id_tests {
+    use super::evidence_dto;
+    use knowlith_core::Evidence;
+
+    fn span(start: usize, end: usize) -> Evidence {
+        Evidence {
+            document_id: "doc:90aafc8bde8e17fe".into(),
+            locator: "page 1, ¶16".into(),
+            start_byte: start,
+            end_byte: end,
+            quote: "…".into(),
+        }
+    }
+
+    /// Two claims quoting the same paragraph from the same offset, one
+    /// span nested in the other, shared an id. React then rendered one
+    /// row where there were two, so the owner was shown less evidence
+    /// than the object actually rests on.
+    #[test]
+    fn two_spans_from_the_same_offset_are_told_apart() {
+        let a = evidence_dto(&span(404, 458), None);
+        let b = evidence_dto(&span(404, 439), None);
+        assert_ne!(a.id, b.id, "both spans answered to {}", a.id);
+    }
+
+    #[test]
+    fn the_same_span_is_still_the_same_thing_between_polls() {
+        assert_eq!(evidence_dto(&span(404, 458), None).id, evidence_dto(&span(404, 458), None).id);
+    }
 }

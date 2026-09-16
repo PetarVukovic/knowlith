@@ -275,7 +275,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Tell the daemon, then move the interface. The optimistic update is
     // what keeps the queue feeling immediate; a failed write shows up on the
     // next load rather than being invented here.
-    void api.approve(itemId, edited)
+    //
+    // And then ask again. Approving marks whatever rested on the old
+    // wording as needing attention, which changes what is waiting without
+    // changing how many objects exist — and the poll below only looks at
+    // counts, so those new items would never arrive on their own.
+    void api.approve(itemId, edited).then(async (affected) => {
+      if (affected.length === 0) return
+      const [queue, all] = await Promise.all([api.getReviewQueue(), api.getObjects()])
+      setReview(queue)
+      setObjects(all)
+    })
     setReview((queue) => {
       const item = queue.find((i) => i.id === itemId)
       if (item) {

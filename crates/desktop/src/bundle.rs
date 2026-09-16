@@ -54,7 +54,22 @@ pub struct Contents<'a> {
     /// `(name, description)` for each tool, so the install screen lists what
     /// the extension can do rather than saying "11 tools".
     pub tools: Vec<(String, String)>,
-    pub prompts: Vec<(String, String)>,
+    pub prompts: Vec<Prompt>,
+}
+
+/// One prompt, with everything the manifest schema insists on.
+///
+/// Name and description alone were accepted by the writer here and
+/// rejected by Claude Desktop — "Invalid manifest: prompts: Required,
+/// Required, Required", one for each of the three. The caller fills this
+/// from the gateway's own prompt list so the two cannot disagree.
+pub struct Prompt {
+    pub name: String,
+    pub description: String,
+    /// The names a host may substitute into `text`.
+    pub arguments: Vec<String>,
+    /// The prompt itself, with `${arguments.<name>}` where a value goes.
+    pub text: String,
 }
 
 /// Writes `~/Knowlith/knowlith.mcpb`.
@@ -170,9 +185,11 @@ fn manifest(contents: &Contents<'_>) -> Value {
             "description": description,
         })).collect::<Vec<_>>(),
         "tools_generated": false,
-        "prompts": contents.prompts.iter().map(|(name, description)| json!({
-            "name": name,
-            "description": description,
+        "prompts": contents.prompts.iter().map(|prompt| json!({
+            "name": prompt.name,
+            "description": prompt.description,
+            "arguments": prompt.arguments,
+            "text": prompt.text,
         })).collect::<Vec<_>>(),
         "compatibility": {
             "platforms": ["darwin", "win32", "linux"]
@@ -244,7 +261,12 @@ mod tests {
         Contents {
             company: "Termoval d.o.o.",
             tools: vec![("search_context".into(), "Finds approved rules.".into())],
-            prompts: vec![("odobravanje-popusta".into(), "Odobravanje popusta".into())],
+            prompts: vec![Prompt {
+                name: "odobravanje-popusta".into(),
+                description: "Odobravanje popusta".into(),
+                arguments: vec!["situation".into()],
+                text: "Provjeri ${arguments.situation}.".into(),
+            }],
         }
     }
 
@@ -289,6 +311,30 @@ mod tests {
         assert_eq!(manifest["tools"][0]["name"], "search_context");
         assert_eq!(manifest["tools_generated"], json!(false));
         assert_eq!(manifest["prompts"][0]["name"], "odobravanje-popusta");
+    }
+
+    /// Claude Desktop refused the whole extension over this: a prompt
+    /// with only a name and a description fails validation with
+    /// "Invalid manifest: prompts: Required, Required, Required" — one
+    /// for each prompt, and no indication of which field is missing.
+    #[test]
+    fn every_prompt_carries_what_the_manifest_schema_demands() {
+        let manifest = manifest(&contents());
+        let prompts = manifest["prompts"].as_array().expect("prompts");
+        assert!(!prompts.is_empty());
+        for prompt in prompts {
+            for field in ["name", "description", "arguments", "text"] {
+                assert!(
+                    prompt.get(field).is_some_and(|v| !v.is_null()),
+                    "a prompt went out without {field}: {prompt}"
+                );
+            }
+            assert!(prompt["arguments"].is_array(), "arguments must be a list");
+            assert!(
+                prompt["text"].as_str().is_some_and(|t| !t.trim().is_empty()),
+                "a prompt went out with no text at all"
+            );
+        }
     }
 
     #[test]

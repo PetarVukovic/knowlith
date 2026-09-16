@@ -1179,13 +1179,13 @@ fn bundle(lake: &Lake, company: &str, install: bool) -> Result<()> {
             )
         })
         .collect();
-    let prompts = knowlith_mcp::prompts::list(lake, &icon)
+    let prompts = knowlith_mcp::prompts::declared(lake, &icon)
         .into_iter()
-        .map(|entry| {
-            (
-                entry["name"].as_str().unwrap_or_default().to_string(),
-                entry["description"].as_str().unwrap_or_default().to_string(),
-            )
+        .map(|p| knowlith_desktop::bundle::Prompt {
+            name: p.name,
+            description: p.description,
+            arguments: p.arguments,
+            text: p.text,
         })
         .collect();
 

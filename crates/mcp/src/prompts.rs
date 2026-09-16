@@ -92,10 +92,14 @@ pub fn get(
 
     let skill = skills(lake).into_iter().find(|s| slug(&s.title) == name)?;
     let _ = lake.record_case_read(&skill.id, "prompt", None, app);
+    let text = skill_text(&skill.body, situation);
+    Some((skill.title.clone(), vec![user_message(&text)]))
+}
 
+fn skill_text(body: &str, situation: Option<&str>) -> String {
     let mut text = format!(
         "Follow this company's own procedure, which its owner approved. It is not a suggestion and it is not to be improved on — where it states a figure, that figure is the company's.\n\n{}\n",
-        skill.body.trim()
+        body.trim()
     );
     if let Some(situation) = situation {
         text.push_str(&format!("\nThis case: {situation}\n"));
@@ -103,8 +107,55 @@ pub fn get(
     text.push_str(
         "\nBefore you finish: call get_relevant_context for this case, read what it lists, and call check_coverage. If anything it names is an open question, say so rather than deciding it yourself.",
     );
+    text
+}
 
-    Some((skill.title.clone(), vec![user_message(&text)]))
+/// The name a packaged extension uses for the one argument every prompt
+/// takes.
+const ARGUMENT: &str = "situation";
+
+/// One prompt, as a packaged extension has to declare it.
+///
+/// The bundle manifest requires `arguments` and `text` beside the name and
+/// the description, and Claude Desktop refuses the whole extension when
+/// any of them is missing — "Invalid manifest: prompts: Required,
+/// Required, Required", one for each prompt it could not read.
+pub struct Declared {
+    pub name: String,
+    pub description: String,
+    pub arguments: Vec<String>,
+    pub text: String,
+}
+
+/// Every prompt this gateway serves, described for a manifest.
+///
+/// Built from [`list`] and the same text [`get`] returns, so a packaged
+/// extension cannot end up advertising prompts that differ from the ones
+/// the owner gets.
+pub fn declared(lake: &Lake, icon: &Value) -> Vec<Declared> {
+    // What the host substitutes, in place of what a caller would pass.
+    let placeholder = format!("${{arguments.{ARGUMENT}}}");
+
+    list(lake, icon)
+        .into_iter()
+        .map(|entry| {
+            let name = entry["name"].as_str().unwrap_or_default().to_string();
+            let text = match BUILT_IN.iter().find(|(n, ..)| *n == name) {
+                Some(_) => built_in_text(&name, Some(&placeholder)),
+                None => skills(lake)
+                    .into_iter()
+                    .find(|s| slug(&s.title) == name)
+                    .map(|skill| skill_text(&skill.body, Some(&placeholder)))
+                    .unwrap_or_default(),
+            };
+            Declared {
+                name,
+                description: entry["description"].as_str().unwrap_or_default().to_string(),
+                arguments: vec![ARGUMENT.to_string()],
+                text,
+            }
+        })
+        .collect()
 }
 
 fn built_in_text(name: &str, situation: Option<&str>) -> String {
