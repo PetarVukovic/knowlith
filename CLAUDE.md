@@ -83,7 +83,7 @@ Ctrl-C stops both. A Rust change needs a restart; a React change does not.
 ```sh
 cargo test --workspace         # 335 tests
 cargo clippy --workspace       # 5 pre-existing warnings in lake and compiler
-cd knowlith && npx tsc --noEmit && npx oxlint src
+cd knowlith && npx tsc --noEmit -p tsconfig.app.json && npx oxlint src
 ```
 
 `cargo fmt` is **not** clean across this repository and running it would rewrite
