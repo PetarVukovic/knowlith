@@ -184,6 +184,8 @@ fn manifest(contents: &Contents<'_>) -> Value {
             "name": name,
             "description": description,
         })).collect::<Vec<_>>(),
+        // The tool surface is fixed: the same eleven whatever is in the
+        // lake, so what is listed here is the whole of it.
         "tools_generated": false,
         "prompts": contents.prompts.iter().map(|prompt| json!({
             "name": prompt.name,
@@ -191,6 +193,13 @@ fn manifest(contents: &Contents<'_>) -> Value {
             "arguments": prompt.arguments,
             "text": prompt.text,
         })).collect::<Vec<_>>(),
+        // The prompt surface is not fixed. Every approved skill becomes a
+        // prompt, so this list is the built-ins plus whatever existed the
+        // moment the bundle was written. Without this flag the host takes
+        // the list for the whole of it, and a skill approved afterwards
+        // never reaches the owner — they would have to rebuild and
+        // reinstall the extension to see their own procedure.
+        "prompts_generated": true,
         "compatibility": {
             "platforms": ["darwin", "win32", "linux"]
         }
@@ -310,6 +319,10 @@ mod tests {
         let manifest = manifest(&contents());
         assert_eq!(manifest["tools"][0]["name"], "search_context");
         assert_eq!(manifest["tools_generated"], json!(false));
+        // Skills become prompts, so the host has to keep asking. Declared
+        // as final, a skill approved after the extension was installed
+        // would never appear.
+        assert_eq!(manifest["prompts_generated"], json!(true));
         assert_eq!(manifest["prompts"][0]["name"], "odobravanje-popusta");
     }
 

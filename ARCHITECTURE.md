@@ -181,6 +181,37 @@ A job that finished with nothing to report says nothing. The hourly `recheck`
 would otherwise be the only line on an idle machine's panel, renewed every
 hour.
 
+## What updates by itself, and what the owner has to do
+
+Three different answers, because three different things can change.
+
+**Approved knowledge — automatic, nothing to do.** The gateway reads the lake
+on every call. Approve a rule and the next question a running Claude Desktop
+asks gets the new wording. There is nothing cached and nothing to reinstall.
+
+**Skills and the prompt list — automatic for a running client.** A watcher
+thread in the gateway polls `servable_revision()` (the count of approved
+objects and the latest `updated_at`) every four seconds. When it moves it
+sends `notifications/tools/list_changed`, `prompts/list_changed` and
+`resources/list_changed`, and a client that is listening re-fetches. A skill
+approved now becomes a prompt within seconds.
+
+This is best-effort by design, and the product must not claim otherwise. MCP
+has no acknowledgement: the notification can be written and never confirmed
+applied, and a client that is not running at that moment gets nothing at all —
+it simply asks afresh when it next starts. So the honest claim is never
+"Claude ✓ updated" but "effective for every conversation started from now".
+
+The manifest carries `prompts_generated: true` for this reason. Without it the
+host takes the manifest's prompt list as the whole of it, and a skill approved
+after the extension was installed would never reach the owner. `tools_generated`
+stays `false`, because the tool surface really is fixed.
+
+**The extension itself — manual.** `~/Knowlith/knowlith.mcpb` contains the
+binary and a manifest. Upgrading Knowlith, renaming the company, or moving the
+lake means rebuilding it (`POST /api/bundle`) and installing it again. Nothing
+about a packaged extension updates in place.
+
 ## Storage: five primitives, not five copies
 
 Each answers a different question, and only the first two exist today.
