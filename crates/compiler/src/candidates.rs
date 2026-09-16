@@ -96,8 +96,21 @@ struct Envelope {
 }
 
 /// Asks the engine about one document.
-pub fn propose(engine: &dyn Engine, document: &Document) -> Result<Vec<Candidate>> {
-    let request = Request::new("candidates", INSTRUCTIONS, &document.text).with_schema(CANDIDATE_SCHEMA);
+///
+/// `company` is whatever the owner wrote about what this firm is — industry,
+/// customers, what "success" means here. Without it the model invents the
+/// schema of an invoice twenty times. With it, stage 2 can prefer claims that
+/// matter for *this* company.
+pub fn propose(engine: &dyn Engine, document: &Document, company: Option<&str>) -> Result<Vec<Candidate>> {
+    let instructions = match company.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(profile) => format!(
+            "{INSTRUCTIONS}\n\nThis company, in the owner's words:\n{profile}\n\n\
+             Prefer claims that matter for how this company actually works. \
+             Do not invent a schema the document does not state."
+        ),
+        None => INSTRUCTIONS.to_string(),
+    };
+    let request = Request::new("candidates", &instructions, &document.text).with_schema(CANDIDATE_SCHEMA);
     let reply = engine.run(&request)?;
     parse(&reply.text)
 }

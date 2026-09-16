@@ -380,6 +380,12 @@ pub struct SkillDocDto {
     pub affects: Vec<RelationDto>,
     pub evidence: Vec<EvidenceDto>,
     pub status: &'static str,
+    /// Who approved it, and nobody when nobody has. The interface used to
+    /// print a name that was not on the wire at all — a fixture's — beside
+    /// any approved skill. An invented approver is the worst thing this
+    /// product can put on a screen, so the field exists and is `None`
+    /// rather than being filled in by the page.
+    pub decided_by: Option<String>,
     pub version: u32,
     pub updated_at: String,
 }
@@ -475,6 +481,10 @@ pub struct NewSource {
     pub path: String,
     /// What to call it. The folder's own name when left out.
     pub name: Option<String>,
+    /// Which engine reads this folder: `codex`, `claude-code`, `cursor-agent`,
+    /// `managed`. When omitted, the company's saved policy engine is used.
+    #[serde(default)]
+    pub processor: Option<String>,
 }
 
 #[derive(Deserialize)]

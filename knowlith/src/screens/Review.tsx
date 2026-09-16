@@ -195,9 +195,9 @@ export function Review() {
       <div className="grid min-h-full place-items-center px-4 py-16">
         <div className="max-w-[42ch] text-center">
           <PartyPopper className="mx-auto size-6 text-confirmed" />
-          <h1 className="mt-3 text-[17px] font-semibold text-ink">Nothing is waiting</h1>
+          <h1 className="mt-3 text-[17px] font-semibold text-ink">Nothing to review</h1>
           <p className="mt-1.5 text-[13px] text-muted">
-            Every change has been decided. New ones appear here the next time Knowlith reads your folders.
+            Knowlith will put new findings here when it reads your sources.
           </p>
         </div>
       </div>
@@ -207,7 +207,7 @@ export function Review() {
   return (
     <div className="flex min-h-full">
       <div className="hidden shrink-0 bg-bg md:block" style={{ width: queue.width }}>
-        <div className="px-3 py-3 label-xs">Waiting · {review.length}</div>
+        <div className="px-3 py-3 label-xs">For review · {review.length}</div>
         <ul className="grid gap-px px-2 pb-3">
           {review.map((r) => (
             <li key={r.id}>

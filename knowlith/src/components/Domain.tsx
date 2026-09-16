@@ -18,16 +18,49 @@ import type { ContextObject, ObjectKind, ObjectStatus, Relation } from "@/lib/ty
 import { cn, formatRelative } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
 
-const KIND_META: Record<ObjectKind, { label: string; plural: string; Icon: ComponentType<{ className?: string }> }> = {
-  rule: { label: "Rule", plural: "Rules", Icon: Gavel },
-  process: { label: "Process", plural: "Processes", Icon: ListOrdered },
-  term: { label: "Term", plural: "Company terms", Icon: BookMarked },
-  skill: { label: "Skill", plural: "Skills", Icon: Sparkles },
-  fact: { label: "Knowledge", plural: "Knowledge", Icon: FileText },
+const KIND_META: Record<
+  ObjectKind,
+  { label: string; plural: string; meaning: string; Icon: ComponentType<{ className?: string }> }
+> = {
+  rule: {
+    label: "Rule",
+    plural: "Rules",
+    meaning: "A decision your company already made — limits, deadlines, who approves what.",
+    Icon: Gavel,
+  },
+  process: {
+    label: "Process",
+    plural: "Processes",
+    meaning: "How work is done here, step by step, in the order your documents describe.",
+    Icon: ListOrdered,
+  },
+  term: {
+    label: "Business term",
+    plural: "Business terms",
+    meaning: "A word or product name your company uses in its own way.",
+    Icon: BookMarked,
+  },
+  skill: {
+    label: "AI skill",
+    plural: "AI skills",
+    meaning: "A task an AI assistant can carry out using only knowledge you confirmed.",
+    Icon: Sparkles,
+  },
+  fact: {
+    label: "Business info",
+    plural: "Business info",
+    meaning: "A figure or fact taken from your documents — not guessed.",
+    Icon: FileText,
+  },
 }
 
 export function kindMeta(kind: ObjectKind) {
   return KIND_META[kind]
+}
+
+/** One-line owner explanation — never the compiler taxonomy. */
+export function kindMeaning(kind: ObjectKind): string {
+  return KIND_META[kind].meaning
 }
 
 export function KindIcon({ kind, className }: { kind: ObjectKind; className?: string }) {
@@ -40,9 +73,9 @@ export function KindBadge({ kind }: { kind: ObjectKind }) {
 }
 
 const STATUS_META: Record<ObjectStatus, { label: string; tone: "neutral" | "pending" | "conflict" | "confirmed" | "outline" }> = {
-  draft: { label: "Needs review", tone: "pending" },
-  approved: { label: "In use", tone: "confirmed" },
-  conflict: { label: "Conflict", tone: "conflict" },
+  draft: { label: "Needs confirmation", tone: "pending" },
+  approved: { label: "In force", tone: "confirmed" },
+  conflict: { label: "Documents disagree", tone: "conflict" },
   superseded: { label: "Replaced", tone: "neutral" },
   rejected: { label: "Rejected", tone: "neutral" },
 }
@@ -163,18 +196,19 @@ export function RelationList({
 }
 
 export function VerifiedMark({ verified }: { verified: boolean }) {
+  const { mode } = useApp()
   return verified ? (
     <Tooltip content="The quoted text still exists at that exact position in the source file.">
       <span className="inline-flex items-center gap-1 text-[11px] text-confirmed">
         <Check className="size-3" />
-        verified
+        {mode === "engineer" ? "verified" : "exact quote"}
       </span>
     </Tooltip>
   ) : (
     <Tooltip content="The source file changed and this quote no longer matches. Recompile to fix.">
       <span className="inline-flex items-center gap-1 text-[11px] text-conflict">
         <AlertTriangle className="size-3" />
-        stale
+        {mode === "engineer" ? "stale" : "document changed"}
       </span>
     </Tooltip>
   )
@@ -224,11 +258,14 @@ export function ImpactStrip({
   relations,
   objectId,
   onOpen,
+  onReads,
   className,
 }: {
   relations: Relation[]
   objectId: string
   onOpen?: () => void
+  /** Opens proof-of-use (Activity), when the owner taps the read line. */
+  onReads?: () => void
   className?: string
 }) {
   const { toolReads } = useApp()
@@ -254,7 +291,7 @@ export function ImpactStrip({
   if (parts.length === 0 && reads.length === 0) {
     return (
       <div className={cn("text-[12.5px] text-faint", className)}>
-        Nothing depends on this yet, and no AI tool has read it.
+        Nothing depends on this yet, and no assistant has used it.
       </div>
     )
   }
@@ -268,7 +305,7 @@ export function ImpactStrip({
           className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 text-[12.5px] text-ink hover:border-line-strong"
         >
           <Network className="size-3.5 text-faint" />
-          Used by {parts.join(" · ")}
+          Also used in {parts.join(" · ")}
           <ChevronRight className="size-3 text-faint" />
         </button>
       ) : null}
@@ -285,11 +322,15 @@ export function ImpactStrip({
             </span>
           }
         >
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-[12.5px] text-muted">
+          <button
+            type="button"
+            onClick={onReads}
+            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-[12.5px] text-muted hover:border-line-strong hover:text-ink"
+          >
             <Radio className="size-3.5 text-faint" />
-            Read by {plural(reads.length, "AI tool", "AI tools")}
+            Read by {plural(reads.length, "assistant", "assistants")}
             {lastRead ? <span className="text-faint">· {formatRelative(lastRead)}</span> : null}
-          </span>
+          </button>
         </Tooltip>
       ) : null}
     </div>
@@ -299,6 +340,9 @@ export function ImpactStrip({
 /**
  * The same four facts on every object: is it live, how well is it evidenced,
  * how many quotes back it, and who signed off.
+ *
+ * `compact` collapses the strip into one owner-facing sentence so Simple mode
+ * does not read as a status dashboard.
  */
 export function TrustStrip({
   status,
@@ -306,6 +350,7 @@ export function TrustStrip({
   evidenceCount,
   decidedBy,
   editedOnApproval,
+  compact = false,
   className,
 }: {
   status: ObjectStatus
@@ -313,8 +358,26 @@ export function TrustStrip({
   evidenceCount: number
   decidedBy?: string
   editedOnApproval?: boolean
+  compact?: boolean
   className?: string
 }) {
+  const { mode } = useApp()
+
+  if (compact && mode === "simple") {
+    const quotes = `${evidenceCount} source ${evidenceCount === 1 ? "quote" : "quotes"}`
+    const who = decidedBy
+      ? `approved by ${decidedBy}${editedOnApproval ? " (edited first)" : ""}`
+      : "not approved yet"
+    return (
+      <p className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted", className)}>
+        <StatusBadge status={status} />
+        <span>
+          {quotes} · {who}
+        </span>
+      </p>
+    )
+  }
+
   return (
     <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5", className)}>
       <StatusBadge status={status} />

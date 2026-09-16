@@ -26,7 +26,7 @@ export type ObjectStatus =
 export type KnowledgeType = "term" | "product" | "policy" | "reference" | "template"
 
 export type SourceKind = "folder" | "nas"
-export type Processor = "codex" | "claude-code" | "managed"
+export type Processor = "codex" | "claude-code" | "cursor-agent" | "managed"
 
 /** A literal span in a source document. The unit the evidence gate checks. */
 export interface Evidence {
@@ -244,6 +244,8 @@ export interface SkillDoc {
   affects: Relation[]
   evidence: Evidence[]
   status: ObjectStatus
+  /** Who approved it. Absent when nobody has — never a stand-in name. */
+  decidedBy: string | null
   version: number
   updatedAt: string
 }
@@ -288,13 +290,18 @@ export interface Company {
  * a working one unless the difference is named.
  */
 export interface AiTool {
-  slug: "claude-desktop" | "claude-code" | "codex"
+  slug: "claude-desktop" | "claude-code" | "codex" | "cursor"
   label: string
   state: "missing" | "ready" | "connected" | "needs-attention"
   installed: boolean
   connected: boolean
   /** Whether the application has a window open right now. */
   running: boolean
+  /**
+   * How "try" / "ask" reaches this tool on this machine.
+   * Desktop apps open outside; CLIs open a Terminal session.
+   */
+  launchSurface: "desktop" | "terminal" | "missing"
   configPath: string | null
   needsRestart: boolean
   refreshHint: string
@@ -312,6 +319,32 @@ export interface AiTool {
   lastRead: string | null
 }
 
+/** Approved knowledge as a live graph the owner can walk. */
+export interface CompanyBrain {
+  nodes: BrainNode[]
+  edges: BrainEdge[]
+  assistants: BrainAssistant[]
+}
+
+export interface BrainNode {
+  id: string
+  title: string
+  kind: string
+  status: string
+}
+
+export interface BrainEdge {
+  from: string
+  to: string
+  type: string
+}
+
+export interface BrainAssistant {
+  slug: string
+  label: string
+  surface: "desktop" | "terminal" | "missing"
+}
+
 /** What connecting would write, shown before it is written. */
 export interface ConnectPreview {
   configPath: string | null
@@ -324,6 +357,8 @@ export interface Policy {
   processing: "automatic" | "ask" | "manual"
   pauseOnBattery: boolean
   largeScan: number
+  /** Which CLI reads documents: auto | codex | claude-code | cursor-agent | managed */
+  engine: string
 }
 
 export interface HeldWork {
@@ -336,6 +371,17 @@ export interface PolicyState {
   policy: Policy
   held: HeldWork[]
   onBattery: boolean
+  /** Present when the saved engine changed — worker still holds the old one. */
+  engineRestart?: string | null
+}
+
+export interface DetectedEngine {
+  id: string
+  label: string
+  program: string
+  installed: boolean
+  path: string | null
+  version: string | null
 }
 
 /** Whether the daemon starts with the machine. */
@@ -403,7 +449,7 @@ export type Health = {
  */
 export type Usage = {
   id: string
-  app: "claude-desktop" | "claude-code" | "codex" | null
+  app: "claude-desktop" | "claude-code" | "codex" | "cursor" | null
   /** "Another tool" when the client did not identify itself as one we know. */
   appLabel: string
   /** What the agent said it was doing, when it declared a case. */

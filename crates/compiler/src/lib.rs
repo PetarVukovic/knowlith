@@ -86,7 +86,7 @@ pub fn compile(engine: &dyn Engine, documents: &[Document]) -> Result<Compilatio
 
     for document in documents {
         let mut read = Reading::default();
-        read_one(engine, document, &mut read)?;
+        read_one(engine, document, &mut read, None)?;
         out.documents_read += read.documents_read;
         out.candidates_proposed += read.candidates.len();
         out.dropped.extend(read.dropped);
@@ -116,7 +116,12 @@ pub struct Reading {
 /// Separated from the rest because it is the half that must not be repeated.
 /// A document whose text has not moved has already been read; consolidating
 /// it against a folder that has grown costs nothing and has to happen again.
-pub fn read_one(engine: &dyn Engine, document: &Document, out: &mut Reading) -> Result<()> {
+pub fn read_one(
+    engine: &dyn Engine,
+    document: &Document,
+    out: &mut Reading,
+    company: Option<&str>,
+) -> Result<()> {
     // Stage 1. A skipped document is reported, not silently dropped: the
     // owner needs to know that their payroll sheet was held back and that
     // last year's terms were left to this year's.
@@ -131,7 +136,7 @@ pub fn read_one(engine: &dyn Engine, document: &Document, out: &mut Reading) -> 
     out.documents_read += 1;
 
     // Stage 2.
-    match candidates::propose(engine, document) {
+    match candidates::propose(engine, document, company) {
         Ok(found) => out.candidates.extend(found),
         Err(CompileError::Engine(e)) if !e.is_retryable() => out.dropped.push(Dropped {
             document: document.name.clone(),

@@ -335,23 +335,26 @@ fn company_of(lake: &Lake, override_name: Option<&str>) -> String {
 /// that runs Codex got a daemon that failed every compile job with "claude
 /// is not installed", and the queue looked broken rather than misconfigured.
 fn resolve_engine(name: &str) -> Result<String> {
+    let name = match name {
+        "agent" | "cursor" => "cursor-agent",
+        other => other,
+    };
     if name != "auto" {
         return Ok(name.to_string());
     }
     let installed = detect();
-    // Order is not a preference between the two products. Whichever is
-    // actually on the machine wins, and when both are, the first one the
-    // owner is more likely to have signed in is as good a rule as any.
-    for flavour in [Flavour::ClaudeCode, Flavour::Codex] {
+    // Order is not a preference between products. Whichever is actually on
+    // the machine wins; when several are, Claude → Codex → Cursor Agent.
+    for flavour in [Flavour::ClaudeCode, Flavour::Codex, Flavour::CursorAgent] {
         if installed
             .iter()
             .any(|found| found.flavour == flavour && found.path.is_some())
         {
-            return Ok(flavour.program().to_string());
+            return Ok(flavour.slug().to_string());
         }
     }
     anyhow::bail!(
-        "no AI command line found on this machine. Install Codex or Claude Code, \
+        "no AI command line found on this machine. Install Claude Code, Codex or Cursor Agent, \
          or pass --engine managed. `knowlith engines` shows what was looked for."
     )
 }
@@ -361,8 +364,13 @@ fn pick_engine(name: &str) -> Result<Box<dyn Engine>> {
     Ok(match name.as_str() {
         "codex" => Box::new(Breaker::new(CliEngine::new(Flavour::Codex))),
         "claude" | "claude-code" => Box::new(Breaker::new(CliEngine::new(Flavour::ClaudeCode))),
+        "cursor-agent" | "agent" | "cursor" => {
+            Box::new(Breaker::new(CliEngine::new(Flavour::CursorAgent)))
+        }
         "managed" => Box::new(ManagedEngine),
-        other => anyhow::bail!("unknown engine \"{other}\". Try codex, claude, managed or auto."),
+        other => anyhow::bail!(
+            "unknown engine \"{other}\". Try codex, claude-code, cursor-agent, managed or auto."
+        ),
     })
 }
 
@@ -400,7 +408,7 @@ fn run_compile(
     let mut out = Compilation::default();
     for document in &documents {
         let mut read = knowlith_compiler::Reading::default();
-        knowlith_compiler::read_one(engine.as_ref(), document, &mut read)?;
+        knowlith_compiler::read_one(engine.as_ref(), document, &mut read, None)?;
         out.documents_read += read.documents_read;
         out.dropped.extend(read.dropped);
 
@@ -523,14 +531,27 @@ fn serve(
 ) -> Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
 
+    // CLI `--engine` wins when explicit. `auto` defers to the owner's saved
+    // policy, then to whatever is installed on this machine.
+    let engine_name = if engine_name == "auto" {
+        let saved = lake.policy().engine;
+        if saved.is_empty() || saved == "auto" {
+            "auto".to_string()
+        } else {
+            saved
+        }
+    } else {
+        engine_name.to_string()
+    };
+
     let worker = if no_worker {
         println!("the background worker is off — nothing will happen on its own");
         None
     } else {
-        let engine = worker_engine(engine_name, replay)?;
+        let engine = worker_engine(&engine_name, replay)?;
         let mut worker = Worker::open(&db, engine)?;
         let flag = Arc::clone(&stop);
-        println!("working in the background with {}", worker_label(engine_name, replay));
+        println!("working in the background with {}", worker_label(&engine_name, replay));
         Some(std::thread::spawn(move || {
             if let Err(e) = worker.run(flag) {
                 eprintln!("the background worker stopped: {e}");
@@ -779,12 +800,7 @@ fn ask(instructions: &str, document: Option<&Path>, engine: &str, timeout: u64) 
 
     // The breaker is here even for one request, so this command behaves the
     // way the worker will rather than being a separate path that works.
-    let engine: Box<dyn Engine> = match engine {
-        "codex" => Box::new(Breaker::new(CliEngine::new(Flavour::Codex))),
-        "claude" | "claude-code" => Box::new(Breaker::new(CliEngine::new(Flavour::ClaudeCode))),
-        "managed" => Box::new(ManagedEngine),
-        other => anyhow::bail!("unknown engine \"{other}\". Try codex, claude or managed."),
-    };
+    let engine = pick_engine(engine)?;
 
     let request = Request::new("ask", instructions, text)
         .with_timeout(std::time::Duration::from_secs(timeout));
@@ -1106,6 +1122,7 @@ fn connect(
             let guide = match target {
                 knowlith_desktop::App::Codex => Some(knowlith_desktop::Guide::Codex),
                 knowlith_desktop::App::ClaudeCode => Some(knowlith_desktop::Guide::ClaudeCode),
+                knowlith_desktop::App::Cursor => Some(knowlith_desktop::Guide::Cursor),
                 // Claude Desktop has no standing-instructions file; what it
                 // reads is the server's own `instructions`, which it gets
                 // anyway.
@@ -1259,7 +1276,7 @@ fn chosen(app: Option<&str>) -> Result<Vec<knowlith_desktop::App>> {
         Some(name) => match knowlith_desktop::App::parse(name) {
             Some(app) => Ok(vec![app]),
             None => anyhow::bail!(
-                "unknown application \"{name}\". Try claude-desktop, claude-code or codex."
+                "unknown application \"{name}\". Try claude-desktop, claude-code, codex or cursor."
             ),
         },
     }

@@ -5,16 +5,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Kbd } from "@/components/ui/surface"
-import { Switch } from "@/components/ui/switch"
-import { Tooltip } from "@/components/ui/tooltip"
 import { useApp } from "@/state/AppState"
 
 export function TopBar({ onOpenNav }: { onOpenNav: () => void }) {
-  const { setPaletteOpen, mode, setMode, theme, setTheme, companyName } = useApp()
+  const { setPaletteOpen, theme, setTheme, companyName } = useApp()
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface px-3">
@@ -34,7 +31,7 @@ export function TopBar({ onOpenNav }: { onOpenNav: () => void }) {
         className="ml-auto flex h-8 min-w-0 max-w-[420px] flex-1 items-center gap-2 rounded-md border border-line bg-surface-2 px-2.5 text-left text-[12.5px] text-faint hover:border-line-strong sm:ml-4"
       >
         <Search className="size-3.5 shrink-0" />
-        <span className="truncate">Search rules, processes, terms…</span>
+        <span className="truncate">Search company knowledge…</span>
         <span className="ml-auto hidden shrink-0 items-center gap-0.5 sm:flex">
           <Kbd>⌘</Kbd>
           <Kbd>K</Kbd>
@@ -42,17 +39,6 @@ export function TopBar({ onOpenNav }: { onOpenNav: () => void }) {
       </button>
 
       <div className="ml-auto flex shrink-0 items-center gap-2 sm:ml-4">
-        <Tooltip content="Engineer mode shows the exact stored text, where in each file it came from, and what depends on what.">
-          <label className="hidden cursor-pointer items-center gap-2 lg:flex">
-            <span className="text-[12px] text-muted">Engineer mode</span>
-            <Switch
-              checked={mode === "engineer"}
-              onCheckedChange={(checked) => setMode(checked ? "engineer" : "simple")}
-              aria-label="Engineer mode"
-            />
-          </label>
-        </Tooltip>
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon-sm" aria-label="Appearance">
@@ -70,10 +56,6 @@ export function TopBar({ onOpenNav }: { onOpenNav: () => void }) {
             <DropdownMenuItem onSelect={() => setTheme("system")}>
               <Laptop /> Match system
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Detail</DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => setMode("simple")}>Simple mode</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setMode("engineer")}>Engineer mode</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 

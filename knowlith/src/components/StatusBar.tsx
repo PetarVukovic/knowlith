@@ -45,7 +45,7 @@ export function StatusBar() {
       {work.queued + work.working > 0 ? (
         <span className="flex shrink-0 items-center gap-1.5 text-ink">
           <Loader2 className="size-3 animate-spin text-accent" />
-          Still reading · {work.queued + work.working} left
+          Still reviewing · {work.queued + work.working} left
         </span>
       ) : null}
 

@@ -23,8 +23,10 @@ import type {
   AiTool,
   AutostartState,
   Browsed,
+  CompanyBrain,
   CompilerRun,
   ConnectPreview,
+  DetectedEngine,
   Policy,
   PolicyState,
   SourceDocument,
@@ -193,7 +195,24 @@ export const api = {
   setCompanyName: (name: string) => putCompanyName(name),
 
   async getCompany() {
-    return get<{ name: string }>("/api/company", fixtures.company, { name: "" })
+    return get<{ name: string; profile: string }>(
+      "/api/company",
+      fixtures.company,
+      { name: "", profile: "" },
+    )
+  },
+
+  async setCompanyProfile(profile: string): Promise<void> {
+    if (!(await connected())) return
+    try {
+      await ask("/api/company", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile }),
+      })
+    } catch {
+      /* next save will carry it */
+    }
   },
   async getTree(): Promise<TreeNode[]> {
     return get<TreeNode[]>("/api/tree", fixtures.contextTree, [])
@@ -253,6 +272,14 @@ export const api = {
 
   async reject(itemId: string): Promise<void> {
     await post(`/api/review/${encodeURIComponent(itemId)}/reject`)
+  },
+
+  /**
+   * Owner rewrote a live claim. It goes back to the Inbox and is not served
+   * until they approve again.
+   */
+  async suggestChange(objectId: string, body: string): Promise<{ id: string } | null> {
+    return post<{ id: string }>(`/api/objects/${encodeURIComponent(objectId)}/suggest`, { body })
   },
 
   /**
@@ -346,11 +373,15 @@ export const folders = {
   },
 
   /** Records the folder and queues the walk. The worker does the reading. */
-  async add(path: string, name?: string): Promise<SourceAdded | { error: string }> {
+  async add(
+    path: string,
+    name?: string,
+    processor?: string,
+  ): Promise<SourceAdded | { error: string }> {
     return send<SourceAdded>("/api/sources", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, name }),
+      body: JSON.stringify({ path, name, processor }),
     })
   },
 }
@@ -420,9 +451,46 @@ export const tools = {
     return post<{ message: string }>(`/api/tools/${slug}/open`)
   },
 
+  /**
+   * Opens the application with a prompt prefilled in its composer.
+   * The host does not submit it — the owner still presses send.
+   */
+  async try(slug: string, prompt: string, opts?: { embedded?: boolean }) {
+    return send<{
+      outcome: string
+      surface: "desktop" | "terminal" | "missing"
+      command: string | null
+      message: string
+      app: string
+      label: string
+      embedded: boolean
+    }>(`/api/tools/${slug}/try`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, embedded: opts?.embedded ?? false }),
+    })
+  },
+
   /** Builds the Claude Desktop extension and opens its install screen. */
   async bundle() {
     return post<{ path: string; megabytes: number; version: string }>("/api/bundle")
+  },
+}
+
+/** WebSocket URL for the live CLI PTY (token query for the shipped page). */
+export function terminalSocketUrl(): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
+  const qs = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ""
+  return `${proto}//${window.location.host}/api/terminal${qs}`
+}
+
+export const brain = {
+  async get(): Promise<CompanyBrain> {
+    return get<CompanyBrain>(
+      "/api/brain",
+      { nodes: [], edges: [], assistants: [] },
+      { nodes: [], edges: [], assistants: [] },
+    )
   },
 }
 
@@ -468,6 +536,18 @@ export const background = {
       return (await response.json()) as PolicyState
     } catch {
       return null
+    }
+  },
+
+  /** Which CLIs can read documents on this machine. */
+  async engines(): Promise<DetectedEngine[]> {
+    if (!(await connected())) return []
+    try {
+      const response = await ask("/api/engines")
+      if (!response.ok) return []
+      return (await response.json()) as DetectedEngine[]
+    } catch {
+      return []
     }
   },
 

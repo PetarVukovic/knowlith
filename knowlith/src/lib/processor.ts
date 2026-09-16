@@ -18,12 +18,14 @@ import type { UiMode } from "@/state/AppState"
 const ENGINEER: Record<Processor, string> = {
   codex: "Codex on this Mac",
   "claude-code": "Claude Code on this Mac",
+  "cursor-agent": "Cursor Agent on this Mac",
   managed: "Knowlith Managed",
 }
 
 const SIMPLE: Record<Processor, string> = {
   codex: "Reads on this Mac",
   "claude-code": "Reads on this Mac",
+  "cursor-agent": "Reads on this Mac",
   managed: "Reads in Knowlith's cloud",
 }
 

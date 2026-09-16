@@ -1,4 +1,5 @@
 import { ArrowRight, BookOpen, GitMerge, Percent, Workflow } from "lucide-react"
+import { kindMeta } from "@/components/Domain"
 import { Button } from "@/components/ui/button"
 import { useApp } from "@/state/AppState"
 
@@ -16,17 +17,29 @@ export function StepDiscovery({ company, onReview }: { company: string; onReview
   // typo in the one sentence the owner is most likely to screenshot.
   const sentence = company.endsWith(".") ? company : `${company}.`
 
-  const counts: { value: number; label: string }[] = [
-    { value: discovery?.rules ?? 0, label: "Rules" },
-    { value: discovery?.processes ?? 0, label: "Processes" },
-    { value: discovery?.terms ?? 0, label: "Company terms" },
+  const counts: { value: number; label: string; meaning: string }[] = [
+    { value: discovery?.rules ?? 0, label: kindMeta("rule").plural, meaning: kindMeta("rule").meaning },
+    {
+      value: discovery?.processes ?? 0,
+      label: kindMeta("process").plural,
+      meaning: kindMeta("process").meaning,
+    },
+    {
+      value: discovery?.terms ?? 0,
+      label: kindMeta("term").plural,
+      meaning: kindMeta("term").meaning,
+    },
   ]
 
   // Skills are built from processes the owner approves, so at this moment
   // there are none and a placeholder count would be the one number on this
   // screen that is not true.
   if (discovery?.skills) {
-    counts.push({ value: discovery.skills, label: "Skills" })
+    counts.push({
+      value: discovery.skills,
+      label: kindMeta("skill").plural,
+      meaning: kindMeta("skill").meaning,
+    })
   }
 
   // Named out of what was actually read. The point of this screen is that
@@ -73,18 +86,24 @@ export function StepDiscovery({ company, onReview }: { company: string; onReview
         Here is the first draft. None of it reaches your AI tools until you approve it.
       </p>
 
+      <div className="mt-4 rounded-xl border border-line bg-surface-2 px-4 py-3 text-[12.5px] leading-relaxed text-muted">
+        <strong className="font-medium text-ink">What the numbers mean.</strong>{" "}
+        {kindMeta("rule").meaning} {kindMeta("process").meaning} {kindMeta("term").meaning}
+      </div>
+
       {/* The column count follows the tiles. A fixed four leaves an empty
           cell whose background is the divider colour, which reads as a
           missing number rather than as a number we do not have. */}
       <div
-        className={`mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line ${
+        className={`mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line ${
           counts.length === 4 ? "sm:grid-cols-4" : "sm:grid-cols-3"
         }`}
       >
         {counts.map((count) => (
           <div key={count.label} className="bg-surface px-4 py-4">
             <div className="tabular text-[26px] font-semibold leading-none text-ink">{count.value}</div>
-            <div className="mt-1.5 text-[12px] text-muted">{count.label}</div>
+            <div className="mt-1.5 text-[12px] font-medium text-ink">{count.label}</div>
+            <div className="mt-1 text-[11px] leading-snug text-faint">{count.meaning}</div>
           </div>
         ))}
       </div>

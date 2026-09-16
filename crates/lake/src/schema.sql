@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS sources (
     name        TEXT NOT NULL,
     root        TEXT NOT NULL,
     kind        TEXT NOT NULL,              -- folder | nas
-    processor   TEXT NOT NULL,              -- codex | claude-code | managed
+    processor   TEXT NOT NULL,              -- codex | claude-code | cursor-agent | managed
     status      TEXT NOT NULL,              -- active | paused | scanning | error
     added_at    TEXT NOT NULL,
     last_scan   TEXT,

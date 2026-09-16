@@ -38,6 +38,7 @@ const ICONS: Record<string, typeof Terminal> = {
   "claude-desktop": MessageSquare,
   "claude-code": Terminal,
   codex: Terminal,
+  cursor: Wrench,
 }
 
 /** What each state means, in words rather than as a colour. */
@@ -104,6 +105,15 @@ export function Connect() {
 
   const begin = async (tool: AiTool) => {
     if (tool.state === "connected") {
+      // CLI assistants have no desktop window — Open on Connect used to call
+      // the daemon, get "not installed", and contradict the Connected badge.
+      if (tool.launchSurface === "terminal") {
+        setNote(
+          `${tool.label} runs beside the company map. Pick a node and Ask AI for a live session.`,
+        )
+        navigate("/brain")
+        return
+      }
       setBusy(tool.slug)
       const result = await toolsApi.open(tool.slug)
       setNote(result?.message ?? null)
@@ -158,11 +168,11 @@ export function Connect() {
   return (
     <div className="mx-auto w-full max-w-[720px] px-5 py-10">
       <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.022em] text-ink">
-        Use your company context anywhere
+        AI assistants
       </h1>
       <p className="mt-2.5 max-w-[52ch] text-[14px] leading-relaxed text-muted">
-        Connect the tools your team already uses. From then on they answer from what {companyName}{" "}
-        approved, and they cite the document it came from.
+        Connect Claude, Codex, Cursor or other assistants so they answer from what {companyName}{" "}
+        approved — and cite the document it came from.
       </p>
 
       <div className="mt-8 space-y-2.5">
@@ -183,6 +193,13 @@ export function Connect() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-[14px] font-medium text-ink">{tool.label}</span>
                     <span className={`block text-[12.5px] ${state.tone}`}>{state.label}</span>
+                    {tool.installed && tool.launchSurface !== "missing" ? (
+                      <span className="block text-[11.5px] text-faint">
+                        {tool.launchSurface === "terminal"
+                          ? "Opens in Terminal on this Mac"
+                          : "Opens as a desktop app"}
+                      </span>
+                    ) : null}
                     {/* Connection and use are two different claims, and only
                         the second one means the product is working. They get
                         their own line each rather than being joined by a

@@ -1,6 +1,6 @@
 import { Command } from "cmdk"
 import { useNavigate } from "react-router-dom"
-import { Eye, FolderOpen, GitPullRequestArrow, LayoutGrid, Moon, Plug, RefreshCw, Sparkles, Sun, Wrench } from "lucide-react"
+import { Eye, FolderOpen, GitPullRequestArrow, LayoutGrid, Moon, Plug, RefreshCw, Search, Settings, Sparkles, Sun, Wrench } from "lucide-react"
 import { KindIcon, kindMeta } from "@/components/Domain"
 import { useApp } from "@/state/AppState"
 
@@ -37,16 +37,18 @@ export function CommandPalette() {
           </Command.Empty>
 
           <Command.Group heading="Go to" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:label-xs">
-            <PaletteItem onSelect={() => go("/workspace")} icon={<LayoutGrid />} label="Company overview" />
+            <PaletteItem onSelect={() => go("/home")} icon={<LayoutGrid />} label="Home" />
             <PaletteItem
               onSelect={() => go("/review")}
               icon={<GitPullRequestArrow />}
-              label="Changes waiting for review"
+              label="For review"
               hint={review.length > 0 ? `${review.length}` : undefined}
             />
+            <PaletteItem onSelect={() => go("/browse")} icon={<Search />} label="Company knowledge" />
             <PaletteItem onSelect={() => go("/sources")} icon={<FolderOpen />} label="Sources" />
-            <PaletteItem onSelect={() => go("/connect")} icon={<Plug />} label="AI tools" />
-            <PaletteItem onSelect={() => go("/activity")} icon={<Eye />} label="Activity" />
+            <PaletteItem onSelect={() => go("/connect")} icon={<Plug />} label="AI assistants" />
+            <PaletteItem onSelect={() => go("/activity")} icon={<Eye />} label="History" />
+            <PaletteItem onSelect={() => go("/settings")} icon={<Settings />} label="Settings" />
             <PaletteItem onSelect={() => go("/discovery")} icon={<RefreshCw />} label="Last discovery report" />
             <PaletteItem
               onSelect={() => {

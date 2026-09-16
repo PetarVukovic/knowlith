@@ -1,22 +1,22 @@
 //! Running the owner's own CLI as a child process.
 //!
 //! This is what "the reading happens on your Mac, on your subscription"
-//! means concretely: Knowlith spawns `codex` or `claude`, hands it one
-//! document on stdin, reads the answer, and the process exits. Nothing is
-//! kept running between jobs — a long-lived child would hold state that does
+//! means concretely: Knowlith spawns `codex`, `claude` or `agent`, hands it
+//! one document, reads the answer, and the process exits. Nothing is kept
+//! running between jobs — a long-lived child would hold state that does
 //! not survive a crash, and every piece of state in this system has to live
 //! in the lake instead.
 //!
-//! Both CLIs are invoked read-only and non-interactive. Neither is given a
-//! writable workspace, because the compiler never needs one and a sandbox
+//! All three CLIs are invoked read-only and non-interactive. None is given
+//! a writable workspace, because the compiler never needs one and a sandbox
 //! escape is not a risk worth carrying for a convenience nobody asked for.
 //!
-//! Both are also invoked with the owner's own configuration switched off.
-//! That is not tidiness. A developer's `CLAUDE.md`, hooks, plugins and agent
-//! memory are loaded by these tools on every run, and they will happily
-//! appear in the reply: the first real run of this code returned a hook's
-//! warning about an unrelated tool as part of the answer. Worse than the
-//! noise is what it implies — the compiler's output would depend on which
+//! Codex and Claude are also invoked with the owner's own configuration
+//! switched off. That is not tidiness. A developer's `CLAUDE.md`, hooks,
+//! plugins and agent memory are loaded by these tools on every run, and they
+//! will happily appear in the reply: the first real run of this code returned
+//! a hook's warning about an unrelated tool as part of the answer. Worse than
+//! the noise is what it implies — the compiler's output would depend on which
 //! machine it ran on, and text the owner never wrote for us would be steering
 //! a model that is reading their contracts.
 //!
@@ -26,6 +26,9 @@
 //! existing subscription" into "bring your own billing". `--restricted`
 //! plus `--strict-mcp-config` plus an empty working directory gets the same
 //! isolation while the owner's login keeps working.
+//!
+//! Cursor Agent uses `--mode=ask` (no writes) and never `--approve-mcps`:
+//! compile must not pull Knowlith MCP into the extraction loop.
 
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
@@ -37,6 +40,8 @@ use crate::{Engine, EngineError, Reply, Request, Result};
 pub enum Flavour {
     Codex,
     ClaudeCode,
+    /// Cursor's `agent` CLI — headless ask mode for compile jobs.
+    CursorAgent,
 }
 
 impl Flavour {
@@ -44,6 +49,7 @@ impl Flavour {
         match self {
             Self::Codex => "codex",
             Self::ClaudeCode => "claude",
+            Self::CursorAgent => "agent",
         }
     }
 
@@ -51,14 +57,29 @@ impl Flavour {
         match self {
             Self::Codex => "Codex",
             Self::ClaudeCode => "Claude Code",
+            Self::CursorAgent => "Cursor Agent",
+        }
+    }
+
+    /// Slug stored on sources / policy (`cursor-agent`, not the binary name).
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::ClaudeCode => "claude-code",
+            Self::CursorAgent => "cursor-agent",
         }
     }
 
     /// Whether the CLI can enforce a JSON Schema itself. Codex takes
-    /// `--output-schema`; Claude Code does not, so the schema goes into the
-    /// prompt instead.
+    /// `--output-schema`; Claude Code and Cursor Agent do not, so the schema
+    /// goes into the prompt instead.
     fn schema_is_native(self) -> bool {
         matches!(self, Self::Codex)
+    }
+
+    /// Cursor Agent takes the prompt as a CLI argument; Codex/Claude read stdin.
+    fn prompt_as_argument(self) -> bool {
+        matches!(self, Self::CursorAgent)
     }
 }
 
@@ -141,6 +162,19 @@ impl CliEngine {
                     args.push(model.clone());
                 }
             }
+            Flavour::CursorAgent => {
+                // Headless, ask-only: no file writes, no MCP approval. Compile
+                // must not loop Knowlith back into itself via tools.
+                args.push("-p".into());
+                args.push("--mode=ask".into());
+                args.push("--output-format".into());
+                args.push("text".into());
+                args.push("--trust".into());
+                if let Some(model) = &self.model {
+                    args.push("--model".into());
+                    args.push(model.clone());
+                }
+            }
         }
         args
     }
@@ -164,7 +198,7 @@ impl Engine for CliEngine {
                 tempish::TempFile::with_contents("knowlith-reply", ".txt", b"")
                     .map_err(|e| EngineError::Transport(format!("could not create the reply file: {e}")))?,
             ),
-            Flavour::ClaudeCode => None,
+            Flavour::ClaudeCode | Flavour::CursorAgent => None,
         };
         let reply_path = reply_file.as_ref().map(|p| p.to_string_lossy().into_owned());
 
@@ -175,37 +209,53 @@ impl Engine for CliEngine {
         let workdir = tempish::TempDir::new("knowlith-run")
             .map_err(|e| EngineError::Transport(format!("could not create a working directory: {e}")))?;
 
-        let mut child = Command::new(&self.program)
-            .args(self.arguments(schema_path.as_deref(), reply_path.as_deref()))
-            .current_dir(workdir.path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| match e.kind() {
-                // Not installed is the owner's problem to fix, and retrying
-                // it every five minutes would never fix it.
-                std::io::ErrorKind::NotFound => EngineError::Unavailable(format!(
-                    "{} is not installed, or not on PATH. Install it, or choose another processor.",
-                    self.flavour.label()
-                )),
-                _ => EngineError::Transport(format!("could not start {}: {e}", self.program)),
-            })?;
-
         let prompt = request.prompt(self.flavour.schema_is_native());
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| EngineError::Transport("the child process has no stdin".into()))?;
-        // A separate thread, because a prompt larger than the pipe buffer
-        // deadlocks against a child that is already writing to stdout.
-        let writer = std::thread::spawn(move || {
-            let _ = stdin.write_all(prompt.as_bytes());
-            drop(stdin);
-        });
+        let mut args = self.arguments(schema_path.as_deref(), reply_path.as_deref());
+        if self.flavour.prompt_as_argument() {
+            args.push(prompt.clone());
+        }
+
+        let mut command = Command::new(&self.program);
+        command
+            .args(&args)
+            .current_dir(workdir.path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if self.flavour.prompt_as_argument() {
+            command.stdin(Stdio::null());
+        } else {
+            command.stdin(Stdio::piped());
+        }
+
+        let mut child = command.spawn().map_err(|e| match e.kind() {
+            // Not installed is the owner's problem to fix, and retrying
+            // it every five minutes would never fix it.
+            std::io::ErrorKind::NotFound => EngineError::Unavailable(format!(
+                "{} is not installed, or not on PATH. Install it, or choose another processor.",
+                self.flavour.label()
+            )),
+            _ => EngineError::Transport(format!("could not start {}: {e}", self.program)),
+        })?;
+
+        let writer = if self.flavour.prompt_as_argument() {
+            None
+        } else {
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| EngineError::Transport("the child process has no stdin".into()))?;
+            // A separate thread, because a prompt larger than the pipe buffer
+            // deadlocks against a child that is already writing to stdout.
+            Some(std::thread::spawn(move || {
+                let _ = stdin.write_all(prompt.as_bytes());
+                drop(stdin);
+            }))
+        };
 
         let output = wait_with_timeout(child, request.timeout, self.flavour.label())?;
-        let _ = writer.join();
+        if let Some(writer) = writer {
+            let _ = writer.join();
+        }
         drop(schema_file);
         drop(workdir);
 
@@ -479,6 +529,20 @@ mod tests {
     }
 
     #[test]
+    fn cursor_agent_runs_headless_ask_without_mcp() {
+        let args = CliEngine::new(Flavour::CursorAgent).arguments(None, None);
+        assert!(args.contains(&"-p".to_string()));
+        assert!(args.contains(&"--mode=ask".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"text".to_string()));
+        assert!(args.contains(&"--trust".to_string()));
+        assert!(
+            !args.iter().any(|a| a.contains("approve-mcp")),
+            "compile must not auto-approve MCP servers"
+        );
+    }
+
+    #[test]
     fn claude_runs_non_interactively() {
         let args = CliEngine::new(Flavour::ClaudeCode).arguments(None, None);
         assert!(args.contains(&"--print".to_string()));
@@ -508,6 +572,11 @@ mod tests {
         );
         assert!(
             !CliEngine::new(Flavour::ClaudeCode)
+                .arguments(Some("/tmp/s.json"), None)
+                .contains(&"--output-schema".to_string())
+        );
+        assert!(
+            !CliEngine::new(Flavour::CursorAgent)
                 .arguments(Some("/tmp/s.json"), None)
                 .contains(&"--output-schema".to_string())
         );

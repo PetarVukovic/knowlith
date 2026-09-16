@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Outlet } from "react-router-dom"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { CommandPalette } from "@/components/CommandPalette"
+import { ProductTour } from "@/components/ProductTour"
 import { ResizeHandle, usePanelSize } from "@/components/Resizable"
 import { Sidebar } from "@/components/Sidebar"
 import { StatusBar } from "@/components/StatusBar"
@@ -11,7 +12,8 @@ import { useApp } from "@/state/AppState"
 export function AppShell() {
   const [navOpen, setNavOpen] = useState(false)
   const { ready } = useApp()
-  const sidebar = usePanelSize("sidebar", 248, 190, 460)
+  // Narrow: flat job links, not a data tree that needed room to expand.
+  const sidebar = usePanelSize("sidebar", 200, 168, 280)
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
@@ -21,12 +23,13 @@ export function AppShell() {
           <Sidebar />
         </div>
         <ResizeHandle panel={sidebar} edge="start" label="Resize navigation" className="hidden md:block" />
-        <main className="scroll-thin min-w-0 flex-1 overflow-y-auto">
+        <main className="scroll-thin min-w-0 flex-1 overflow-y-auto [&:has([data-fill-screen])]:overflow-hidden">
           {ready ? <Outlet /> : <LoadingPane />}
         </main>
       </div>
       <StatusBar />
       <CommandPalette />
+      <ProductTour />
 
       <DialogPrimitive.Root open={navOpen} onOpenChange={setNavOpen}>
         <DialogPrimitive.Portal>

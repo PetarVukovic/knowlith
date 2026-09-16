@@ -42,6 +42,24 @@ export function StepWelcome({
         gives. You approve everything before it counts.
       </p>
 
+      <ol className="mt-6 grid gap-2 rounded-xl border border-line bg-surface-2 p-4 text-[13px]">
+        {[
+          { n: "1", t: "Add a folder", d: "Contracts, price lists, procedures you already have." },
+          { n: "2", t: "Confirm what is true", d: "Rules, processes and terms — with the quote behind each." },
+          { n: "3", t: "Connect your AI", d: "Claude, Codex or Cursor Agent answer from what you confirmed." },
+        ].map((step) => (
+          <li key={step.n} className="flex gap-3">
+            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent text-[11px] font-semibold text-on-accent">
+              {step.n}
+            </span>
+            <span>
+              <span className="font-medium text-ink">{step.t}</span>
+              <span className="mt-0.5 block text-[12.5px] text-muted">{step.d}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+
       <div className="mt-10 grid gap-6">
         <div>
           <label htmlFor="company-name" className="mb-1.5 block text-[12.5px] font-medium text-ink">

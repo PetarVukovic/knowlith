@@ -43,6 +43,18 @@ pub struct Policy {
     /// Stop calling models when the laptop is unplugged.
     pub pause_on_battery: bool,
     pub large_scan: usize,
+    /// Which CLI reads documents for compile jobs: `auto`, `codex`,
+    /// `claude-code`, `cursor-agent`, or `managed`.
+    ///
+    /// The worker binds the engine at daemon start. Changing this while
+    /// Knowlith is running takes effect on the next restart — the API says
+    /// so rather than pretending the switch is live.
+    #[serde(default = "default_engine")]
+    pub engine: String,
+}
+
+fn default_engine() -> String {
+    "auto".into()
 }
 
 impl Default for Policy {
@@ -51,6 +63,7 @@ impl Default for Policy {
             processing: Processing::Automatic,
             pause_on_battery: true,
             large_scan: DEFAULT_LARGE_SCAN,
+            engine: default_engine(),
         }
     }
 }
@@ -191,9 +204,19 @@ mod tests {
             processing: Processing::Ask,
             pause_on_battery: false,
             large_scan: 50,
+            engine: "cursor-agent".into(),
         };
         lake.set_policy(&mine).unwrap();
         assert_eq!(lake.policy(), mine);
+    }
+
+    #[test]
+    fn a_policy_saved_before_engine_existed_defaults_to_auto() {
+        let raw: Policy = serde_json::from_str(
+            r#"{"processing":"automatic","pauseOnBattery":true,"largeScan":500}"#,
+        )
+        .unwrap();
+        assert_eq!(raw.engine, "auto");
     }
 
     #[test]

@@ -1,14 +1,16 @@
-import { Check, CircleCheck, Cloud, Terminal } from "lucide-react"
-import type { Processor } from "@/lib/types"
+import { useEffect, useState } from "react"
+import { Check, CircleCheck, Cloud, Terminal, Wrench } from "lucide-react"
+import { background } from "@/lib/api"
+import type { DetectedEngine, Processor } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /**
  * Who reads the documents.
  *
  * Each option states plainly what leaves the disk, because that is the only
- * difference between them that the owner should have to weigh. Two of the
- * three keep the reading on the machine under an account they already pay
- * for; one does not, and says so in the same size type as everything else.
+ * difference between them that the owner should have to weigh. Local CLIs
+ * keep the reading on the machine under an account they already pay for;
+ * Managed does not, and says so in the same size type as everything else.
  */
 const OPTIONS: {
   id: Processor
@@ -17,7 +19,6 @@ const OPTIONS: {
   Icon: typeof Terminal
   leaves: string
   cost: string
-  detected: boolean
 }[] = [
   {
     id: "codex",
@@ -26,7 +27,6 @@ const OPTIONS: {
     Icon: Terminal,
     leaves: "Only short quotes leave this Mac, and only to OpenAI under your account.",
     cost: "No extra cost from us.",
-    detected: true,
   },
   {
     id: "claude-code",
@@ -35,7 +35,14 @@ const OPTIONS: {
     Icon: Terminal,
     leaves: "Only short quotes leave this Mac, and only to Anthropic under your account.",
     cost: "No extra cost from us.",
-    detected: true,
+  },
+  {
+    id: "cursor-agent",
+    title: "Use Cursor Agent",
+    subtitle: "Reading happens here, under your own Cursor account (`agent` CLI).",
+    Icon: Wrench,
+    leaves: "Only short quotes leave this Mac, and only to Cursor under your account.",
+    cost: "No extra cost from us.",
   },
   {
     id: "managed",
@@ -44,7 +51,6 @@ const OPTIONS: {
     Icon: Cloud,
     leaves: "Document text is sent to our service while it is being read.",
     cost: "Included in your plan.",
-    detected: false,
   },
 ]
 
@@ -59,20 +65,45 @@ export function StepProcessing({
   allowStart: boolean
   onAllowStart: (v: boolean) => void
 }) {
+  const [engines, setEngines] = useState<DetectedEngine[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void background.engines().then((list) => {
+      if (!cancelled) setEngines(list)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const selected = OPTIONS.find((o) => o.id === value)!
   const local = value !== "managed"
+  const installedCount = (engines ?? []).filter((e) => e.installed && e.id !== "managed").length
+
+  const isDetected = (id: Processor) => {
+    if (id === "managed") return false
+    const hit = engines?.find((e) => e.id === id)
+    return hit?.installed ?? false
+  }
 
   return (
     <div>
-      <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.022em] text-ink">Choose who reads them</h1>
+      <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.022em] text-ink">
+        Choose who reads them
+      </h1>
       <p className="mt-2.5 max-w-[48ch] text-[14px] leading-relaxed text-muted">
-        Knowlith found two AI tools already installed on this Mac. Using one of them keeps the reading on your
-        machine and on your existing subscription.
+        {engines === null
+          ? "Checking which AI tools are on this Mac…"
+          : installedCount > 0
+            ? `Knowlith found ${installedCount} AI tool${installedCount === 1 ? "" : "s"} already installed on this Mac. Using one of them keeps the reading on your machine and on your existing subscription.`
+            : "No local AI command line was found yet. Install Claude Code, Codex or Cursor Agent, or choose Managed."}
       </p>
 
       <div className="mt-8 grid gap-2.5">
         {OPTIONS.map((option) => {
           const active = value === option.id
+          const detected = isDetected(option.id)
           return (
             <button
               key={option.id}
@@ -95,7 +126,7 @@ export function StepProcessing({
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <option.Icon className="size-4 shrink-0 text-faint" />
                   <span className="text-[14px] font-medium text-ink">{option.title}</span>
-                  {option.detected ? (
+                  {detected ? (
                     <span className="flex items-center gap-1 text-[11.5px] text-confirmed">
                       <CircleCheck className="size-3" />
                       Detected
@@ -121,8 +152,8 @@ export function StepProcessing({
             className="mt-0.5 size-[18px] shrink-0 accent-[var(--k-accent)]"
           />
           <span className="text-[13px] leading-relaxed text-ink">
-            Allow Knowlith to start {selected.title.replace("Use ", "").replace(" on this Mac", "")} for approved
-            analysis jobs.
+            Allow Knowlith to start {selected.title.replace("Use ", "").replace(" on this Mac", "")}{" "}
+            for approved analysis jobs.
             <span className="mt-1 block text-[12px] text-muted">
               It runs only while reading your files, and stops when the work is done.
             </span>

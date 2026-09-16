@@ -12,6 +12,7 @@ import {
   Server,
   Terminal,
   Trash2,
+  Wrench,
 } from "lucide-react"
 import { AddSource } from "@/components/AddSource"
 import { Badge } from "@/components/ui/badge"
@@ -40,6 +41,7 @@ import { useApp } from "@/state/AppState"
 const PROCESSOR_ICON: Record<Processor, typeof Terminal> = {
   codex: Terminal,
   "claude-code": Terminal,
+  "cursor-agent": Wrench,
   managed: Cloud,
 }
 
@@ -64,7 +66,7 @@ export function Sources() {
         <div>
           <h1 className="text-[20px] font-semibold tracking-[-0.015em] text-ink">Sources</h1>
           <p className="mt-1 max-w-[62ch] text-[13px] text-muted">
-            The folders Knowlith reads. It opens files here and never writes into them.
+            Places Knowlith reads business information from. It never writes into them.
           </p>
         </div>
         <Button variant="primary" onClick={() => setAdding(true)}>
@@ -75,7 +77,7 @@ export function Sources() {
 
       <div className="mt-6 grid gap-3">
         {sources.map((source) => {
-          const ProcessorIcon = PROCESSOR_ICON[source.processor]
+          const ProcessorIcon = PROCESSOR_ICON[source.processor] ?? Terminal
           return (
             <Panel key={source.id}>
               <div className="flex flex-wrap items-start gap-3 p-4">
@@ -90,17 +92,37 @@ export function Sources() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[14px] font-medium text-ink">{source.name}</span>
-                    <Badge tone={STATUS_TONE[source.status]}>{source.status}</Badge>
-                    <Badge tone="outline">{source.access}</Badge>
+                    <Badge tone={STATUS_TONE[source.status]}>
+                      {source.status === "active"
+                        ? "Reading"
+                        : source.status === "paused"
+                          ? "Paused"
+                          : source.status === "scanning"
+                            ? "Reading now"
+                            : "Needs attention"}
+                    </Badge>
+                    {mode === "engineer" ? <Badge tone="outline">{source.access}</Badge> : null}
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-[11.5px] text-faint">{source.path}</div>
+                  {mode === "engineer" ? (
+                    <div className="mt-0.5 truncate font-mono text-[11.5px] text-faint">{source.path}</div>
+                  ) : (
+                    <div className="mt-0.5 text-[12.5px] text-muted">
+                      {source.kind === "nas" ? "Network folder" : "Folder on this Mac"}
+                      {" · "}
+                      last read {formatRelative(source.lastAnalyzed)}
+                    </div>
+                  )}
 
                   <div className="mt-3 grid gap-1 text-[12.5px]">
-                    <span className="text-muted">Last analyzed {formatRelative(source.lastAnalyzed)}</span>
+                    {mode === "engineer" ? (
+                      <span className="text-muted">Last analyzed {formatRelative(source.lastAnalyzed)}</span>
+                    ) : null}
                     <span className={source.changesFound > 0 ? "text-ink" : "text-muted"}>
                       {source.changesFound > 0
-                        ? `${source.changesFound} context ${source.changesFound === 1 ? "change" : "changes"} found`
-                        : "No context changes found"}
+                        ? `${source.changesFound} ${source.changesFound === 1 ? "update" : "updates"} waiting in Inbox`
+                        : mode === "engineer"
+                          ? "No context changes found"
+                          : "Nothing new since last read"}
                     </span>
                     {source.conflictsFound > 0 ? (
                       <span className="flex items-center gap-1.5 text-conflict">

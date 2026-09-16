@@ -736,6 +736,41 @@ impl Lake {
         Ok(affected)
     }
 
+    /// Owner rewrote a live claim. It leaves the served set until they
+    /// approve again. Evidence stays — the quote still has to hold.
+    pub fn suggest_edit(&mut self, object_id: &str, body: &str) -> Result<()> {
+        if body.trim().is_empty() {
+            return Err(LakeError::NoBody);
+        }
+        let spans: i64 = self.conn.query_row(
+            "SELECT count(*) FROM evidence WHERE object_id = ?1",
+            params![object_id],
+            |r| r.get(0),
+        )?;
+        if spans == 0 {
+            return Err(LakeError::NoEvidence);
+        }
+        let at = now();
+        let n = self.conn.execute(
+            "UPDATE objects
+             SET body = ?2, status = 'proposed', decided_by = NULL, edited_on_approval = 0,
+                 updated_at = ?3, stale_since = NULL
+             WHERE id = ?1",
+            params![object_id, body, at],
+        )?;
+        if n == 0 {
+            return Err(LakeError::UnknownObject(object_id.to_string()));
+        }
+        self.conn
+            .execute("DELETE FROM objects_fts WHERE object_id = ?1", params![object_id])?;
+        self.conn.execute(
+            "INSERT INTO objects_fts (title, body, object_id)
+             SELECT title, ?2, id FROM objects WHERE id = ?1",
+            params![object_id, body],
+        )?;
+        Ok(())
+    }
+
     /// Records that a tool actually read an object.
     pub fn record_read(&self, object_id: &str, tool: &str) -> Result<()> {
         self.conn.execute(

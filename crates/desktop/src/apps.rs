@@ -16,6 +16,18 @@ use std::path::PathBuf;
 
 use crate::paths;
 
+/// How Knowlith reaches an AI tool when the owner presses "try" / "ask".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LaunchSurface {
+    /// Claude Desktop, Codex.app, ChatGPT.app, Cursor.app — open outside.
+    Desktop,
+    /// Claude Code, Codex CLI, Cursor Agent — Terminal session.
+    Terminal,
+    /// Neither a windowed app nor a CLI binary is present.
+    Missing,
+}
+
 /// One application Knowlith can hand itself to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -27,6 +39,8 @@ pub enum App {
     /// The `codex` command line and the Codex application, which share
     /// `~/.codex/config.toml`.
     Codex,
+    /// Cursor Agent (`agent` CLI) and/or the Cursor IDE.
+    Cursor,
 }
 
 /// How an application stores its server list. The shape decides how a
@@ -41,7 +55,7 @@ pub enum Format {
 }
 
 impl App {
-    pub const ALL: [App; 3] = [App::ClaudeDesktop, App::ClaudeCode, App::Codex];
+    pub const ALL: [App; 4] = [App::ClaudeDesktop, App::ClaudeCode, App::Codex, App::Cursor];
 
     /// What the owner calls it.
     pub fn label(self) -> &'static str {
@@ -49,6 +63,7 @@ impl App {
             App::ClaudeDesktop => "Claude Desktop",
             App::ClaudeCode => "Claude Code",
             App::Codex => "Codex",
+            App::Cursor => "Cursor Agent",
         }
     }
 
@@ -57,6 +72,7 @@ impl App {
             App::ClaudeDesktop => "claude-desktop",
             App::ClaudeCode => "claude-code",
             App::Codex => "codex",
+            App::Cursor => "cursor",
         }
     }
 
@@ -74,7 +90,7 @@ impl App {
     /// keep working.
     ///
     /// `None` means a client we do not recognise. That is reported as
-    /// "another tool" rather than folded into one of these three, because
+    /// "another tool" rather than folded into one of these four, because
     /// telling an owner that Codex read their rules when it was something
     /// else is worse than telling them nothing.
     pub fn from_client_name(name: &str) -> Option<App> {
@@ -83,6 +99,9 @@ impl App {
         // specific names are tested first.
         if name.contains("codex") {
             return Some(App::Codex);
+        }
+        if name.contains("cursor") {
+            return Some(App::Cursor);
         }
         if name.contains("claude-code") || name.contains("claude code") || name == "claude_code" {
             return Some(App::ClaudeCode);
@@ -95,7 +114,7 @@ impl App {
 
     pub fn format(self) -> Format {
         match self {
-            App::ClaudeDesktop | App::ClaudeCode => Format::JsonServers,
+            App::ClaudeDesktop | App::ClaudeCode | App::Cursor => Format::JsonServers,
             App::Codex => Format::TomlServers,
         }
     }
@@ -121,15 +140,24 @@ impl App {
                 Some(base.join(".claude.json"))
             }
             App::Codex => Some(paths::home().join(".codex").join("config.toml")),
+            App::Cursor => Some(paths::home().join(".cursor").join("mcp.json")),
         }
     }
 
     /// Whether this machine looks like it has the application.
+    ///
+    /// Cursor Agent ships as `agent` on PATH (not `cursor`), and Codex may
+    /// be CLI-only with ChatGPT.app as the desktop shell. Counting only the
+    /// `.app` bundle called this product "not installed" on machines that
+    /// run agents every day.
     pub fn installed(self) -> bool {
         if self.application_path().is_some() {
             return true;
         }
-        if program_on_path(self.program()).is_some() {
+        if self.chatgpt_desktop().is_some() {
+            return true;
+        }
+        if self.cli_binary().is_some() {
             return true;
         }
         self.config_file()
@@ -137,11 +165,88 @@ impl App {
             .unwrap_or(false)
     }
 
-    /// The command line this application ships, if any.
-    fn program(self) -> &'static str {
+    /// The command-line binary to spawn for a terminal session, when any.
+    ///
+    /// Cursor Agent is `agent`; older installs may still have `cursor`.
+    pub fn cli_binary(self) -> Option<PathBuf> {
+        for name in self.cli_names() {
+            if let Some(path) = program_on_path(name) {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    fn cli_names(self) -> &'static [&'static str] {
         match self {
-            App::ClaudeDesktop | App::ClaudeCode => "claude",
-            App::Codex => "codex",
+            App::ClaudeDesktop => &[],
+            App::ClaudeCode => &["claude"],
+            App::Codex => &["codex"],
+            App::Cursor => &["agent"],
+        }
+    }
+
+    /// ChatGPT Desktop, when present — Codex's windowed host on many machines.
+    pub fn chatgpt_desktop(self) -> Option<PathBuf> {
+        if !matches!(self, App::Codex) {
+            return None;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let candidates = [
+                PathBuf::from("/Applications/ChatGPT.app"),
+                paths::home().join("Applications/ChatGPT.app"),
+            ];
+            return candidates.into_iter().find(|p| p.exists());
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
+    /// How "try" / "ask" should reach this tool on *this* machine.
+    ///
+    /// Desktop apps open outside Knowlith. CLIs open a Terminal session the
+    /// owner can see — Claude Code, Codex CLI, Cursor Agent. Preferring a
+    /// missing `.app` over a working CLI is what produced "Cursor is not
+    /// installed" while `agent` was on PATH.
+    pub fn launch_surface(self) -> LaunchSurface {
+        match self {
+            App::ClaudeDesktop => {
+                if self.application_path().is_some() {
+                    LaunchSurface::Desktop
+                } else {
+                    LaunchSurface::Missing
+                }
+            }
+            App::ClaudeCode => {
+                if self.cli_binary().is_some() {
+                    LaunchSurface::Terminal
+                } else {
+                    LaunchSurface::Missing
+                }
+            }
+            App::Codex => {
+                if self.application_path().is_some() || self.chatgpt_desktop().is_some() {
+                    LaunchSurface::Desktop
+                } else if self.cli_binary().is_some() {
+                    LaunchSurface::Terminal
+                } else {
+                    LaunchSurface::Missing
+                }
+            }
+            App::Cursor => {
+                // Prefer `agent` on PATH: the label is Cursor Agent, and Ask AI
+                // embeds a live PTY. Cursor.app alone is a last resort deep link.
+                if self.cli_binary().is_some() {
+                    LaunchSurface::Terminal
+                } else if self.application_path().is_some() {
+                    LaunchSurface::Desktop
+                } else {
+                    LaunchSurface::Missing
+                }
+            }
         }
     }
 
@@ -194,6 +299,30 @@ impl App {
                     Vec::new()
                 }
             }
+            App::Cursor => {
+                #[cfg(target_os = "macos")]
+                {
+                    vec![
+                        PathBuf::from("/Applications/Cursor.app"),
+                        paths::home().join("Applications/Cursor.app"),
+                    ]
+                }
+                #[cfg(windows)]
+                {
+                    local_app_data()
+                        .map(|base| {
+                            vec![
+                                base.join("Programs").join("cursor").join("Cursor.exe"),
+                                base.join("cursor").join("Cursor.exe"),
+                            ]
+                        })
+                        .unwrap_or_default()
+                }
+                #[cfg(all(not(target_os = "macos"), not(windows)))]
+                {
+                    Vec::new()
+                }
+            }
             App::ClaudeCode => Vec::new(),
         };
         candidates.into_iter().find(|p| p.exists())
@@ -201,13 +330,15 @@ impl App {
 
     /// Whether restarting the application is what makes a new server appear.
     ///
-    /// Claude Desktop reads its config once at launch, so a connection made
-    /// while it is running does nothing until it is restarted — and an owner
-    /// who is told "connected" and then sees no tools concludes the product
-    /// is broken. Claude Code reads on each session start and Codex on each
-    /// run, so for those a new terminal is enough.
+    /// Claude Desktop reads its config once at launch. Cursor's desktop app
+    /// does too — but Cursor *Agent* (`agent` on PATH) starts a new process
+    /// each time, so restarting a missing IDE would be the wrong instruction.
     pub fn needs_restart(self) -> bool {
-        matches!(self, App::ClaudeDesktop)
+        match self {
+            App::ClaudeDesktop => true,
+            App::Cursor => self.application_path().is_some(),
+            App::ClaudeCode | App::Codex => false,
+        }
     }
 
     /// What to tell the owner to do after connecting.
@@ -216,6 +347,10 @@ impl App {
             App::ClaudeDesktop => "Claude Desktop reads this when it starts, so it has to be restarted once.",
             App::ClaudeCode => "Open a new terminal, or type /mcp in a running session and reconnect.",
             App::Codex => "The next `codex` run picks it up; nothing to restart.",
+            App::Cursor if self.application_path().is_some() => {
+                "Cursor reads MCP when a window starts — reload the window or restart Cursor once."
+            }
+            App::Cursor => "The next `agent` session picks Knowlith up; nothing to restart.",
         }
     }
 }
@@ -299,6 +434,18 @@ mod tests {
         assert!(App::ClaudeDesktop.needs_restart());
         assert!(!App::ClaudeCode.needs_restart());
         assert!(!App::Codex.needs_restart());
+        // Cursor Agent CLI does not; Cursor.app would. The assertion is the
+        // CLI-shaped machine this product is usually developed on.
+        if App::Cursor.application_path().is_none() {
+            assert!(!App::Cursor.needs_restart());
+        }
+    }
+
+    #[test]
+    fn cursor_cli_is_the_agent_binary() {
+        // Cursor's terminal product is `agent`, not `cursor` — see
+        // https://cursor.com/docs/cli/overview.
+        assert_eq!(App::Cursor.cli_names(), &["agent"]);
     }
 
     #[test]
@@ -327,13 +474,14 @@ mod client_name_tests {
         assert_eq!(App::from_client_name("Claude Code"), Some(App::ClaudeCode));
         assert_eq!(App::from_client_name("codex"), Some(App::Codex));
         assert_eq!(App::from_client_name("codex-cli"), Some(App::Codex));
+        assert_eq!(App::from_client_name("cursor"), Some(App::Cursor));
+        assert_eq!(App::from_client_name("cursor-vscode"), Some(App::Cursor));
     }
 
     #[test]
     fn a_client_we_do_not_know_is_not_guessed_into_one_of_ours() {
-        // Saying "Codex read your rules" when it was Cursor is worse than
-        // saying nothing at all.
-        assert_eq!(App::from_client_name("cursor-vscode"), None);
+        // Saying "Codex read your rules" when it was something else is worse
+        // than saying nothing at all.
         assert_eq!(App::from_client_name("mcp-inspector"), None);
         assert_eq!(App::from_client_name(""), None);
     }

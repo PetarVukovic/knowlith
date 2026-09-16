@@ -27,6 +27,8 @@ pub enum Guide {
     Codex,
     /// `~/.claude/CLAUDE.md`, read by Claude Code in every project.
     ClaudeCode,
+    /// `~/.cursor/rules/knowlith.mdc`, picked up by Cursor agents.
+    Cursor,
 }
 
 impl Guide {
@@ -34,6 +36,7 @@ impl Guide {
         match self {
             Guide::Codex => paths::home().join(".codex").join("AGENTS.md"),
             Guide::ClaudeCode => paths::home().join(".claude").join("CLAUDE.md"),
+            Guide::Cursor => paths::home().join(".cursor").join("rules").join("knowlith.mdc"),
         }
     }
 
@@ -41,6 +44,7 @@ impl Guide {
         match self {
             Guide::Codex => "Codex",
             Guide::ClaudeCode => "Claude Code",
+            Guide::Cursor => "Cursor",
         }
     }
 }

@@ -17,6 +17,7 @@
 pub mod assets;
 pub mod auth;
 pub mod dto;
+pub mod terminal;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -50,6 +51,8 @@ struct ToolDto {
     installed: bool,
     connected: bool,
     running: bool,
+    /// `desktop` | `terminal` | `missing` — how "try" reaches this tool here.
+    launch_surface: &'static str,
     config_path: Option<String>,
     needs_restart: bool,
     refresh_hint: &'static str,
@@ -115,6 +118,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/review", get(review))
         .route("/api/review/{id}/approve", post(approve))
         .route("/api/review/{id}/reject", post(reject))
+        .route("/api/objects/{id}/suggest", post(suggest_change))
         .route("/api/sources", get(sources).post(add_source))
         .route("/api/sources/browse", post(browse))
         .route("/api/sources/preview", get(preview_source))
@@ -130,13 +134,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/usage", get(usage))
         .route("/api/work", get(work))
         .route("/api/tree", get(tree))
+        .route("/api/brain", get(brain))
         .route("/api/tools", get(tools))
         .route("/api/tools/{app}/connect", post(connect_app))
         .route("/api/tools/{app}/disconnect", post(disconnect_app))
         .route("/api/tools/{app}/open", post(open_app))
+        .route("/api/tools/{app}/try", post(try_in_app))
         .route("/api/tools/{app}/preview", get(preview_app))
+        .route("/api/terminal", get(terminal::terminal_ws))
         .route("/api/bundle", post(build_bundle))
         .route("/api/policy", get(read_policy).put(write_policy))
+        .route("/api/engines", get(list_engines))
         .route("/api/work/release", post(release_work))
         .route("/api/autostart", get(read_autostart))
         .route("/api/autostart/{state}", post(write_autostart))
@@ -157,13 +165,31 @@ pub fn router(state: AppState) -> Router {
 ///
 /// See [`auth`] for why a daemon on loopback needs this at all.
 async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    let given = request
+    let mut given = request
         .headers()
         .get(auth::HEADER)
         .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_string();
 
-    if !state.token.matches(given) {
+    // WebSocket clients cannot set custom headers from the browser. The
+    // shipped page therefore passes the token as `?token=`; Vite's proxy
+    // still attaches the header in development.
+    if given.is_empty() {
+        if let Some(query) = request.uri().query() {
+            for pair in query.split('&') {
+                if let Some(value) = pair.strip_prefix("token=") {
+                    given = value.replace('+', " ");
+                    if let Ok(decoded) = percent_decode(&given) {
+                        given = decoded;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    if !state.token.matches(&given) {
         return (
             StatusCode::UNAUTHORIZED,
             format!(
@@ -174,6 +200,37 @@ async fn guard(State(state): State<AppState>, request: Request, next: Next) -> R
             .into_response();
     }
     next.run(request).await
+}
+
+/// Minimal percent-decoding for the WebSocket token query (unreserved + %XX).
+fn percent_decode(input: &str) -> Result<String, ()> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let h = from_hex(bytes[i + 1])?;
+                let l = from_hex(bytes[i + 2])?;
+                out.push((h << 4) | l);
+                i += 3;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).map_err(|_| ())
+}
+
+fn from_hex(b: u8) -> Result<u8, ()> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        _ => Err(()),
+    }
 }
 
 pub async fn serve(state: AppState, port: u16) -> anyhow::Result<()> {
@@ -214,34 +271,61 @@ async fn health(State(state): State<AppState>) -> ApiResult<Health> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Company {
     name: String,
+    /// Owner's short description of what this company is. Empty until set.
+    profile: String,
 }
 
 async fn company(State(state): State<AppState>) -> ApiResult<Company> {
     let lake = state.lake.lock().map_err(failed)?;
-    Ok(Json(Company { name: lake.company() }))
+    let profile = lake
+        .setting("company_profile")
+        .map_err(failed)?
+        .unwrap_or_default();
+    Ok(Json(Company {
+        name: lake.company(),
+        profile,
+    }))
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Rename {
-    name: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    profile: Option<String>,
 }
 
 /// Names the company, from onboarding or from settings.
 ///
 /// Stored in the lake, so the gateway and the extension say the same thing
-/// without the daemon being restarted.
+/// without the daemon being restarted. `profile` is the schema hint for the
+/// compiler — what this firm is — not a display string.
 async fn rename_company(
     State(state): State<AppState>,
     Json(rename): Json<Rename>,
 ) -> ApiResult<Company> {
-    if rename.name.trim().is_empty() {
+    let lake = state.lake.lock().map_err(failed)?;
+    if let Some(name) = rename.name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        lake.set_company(name).map_err(failed)?;
+    } else if rename.profile.is_none() {
         return Err((StatusCode::BAD_REQUEST, "a company needs a name".into()));
     }
-    let lake = state.lake.lock().map_err(failed)?;
-    lake.set_company(&rename.name).map_err(failed)?;
-    Ok(Json(Company { name: lake.company() }))
+    if let Some(profile) = rename.profile {
+        lake.set_setting("company_profile", profile.trim())
+            .map_err(failed)?;
+    }
+    let profile = lake
+        .setting("company_profile")
+        .map_err(failed)?
+        .unwrap_or_default();
+    Ok(Json(Company {
+        name: lake.company(),
+        profile,
+    }))
 }
 
 async fn objects(State(state): State<AppState>) -> ApiResult<Vec<ObjectDto>> {
@@ -492,6 +576,23 @@ async fn reject(State(state): State<AppState>, Path(id): Path<String>) -> ApiRes
     Ok(Json(Approved { affected: Vec::new() }))
 }
 
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SuggestBody {
+    body: String,
+}
+
+/// Owner rewrote a live claim; it returns to the Inbox until they approve.
+async fn suggest_change(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<SuggestBody>,
+) -> ApiResult<serde_json::Value> {
+    let mut lake = state.lake.lock().map_err(failed)?;
+    lake.suggest_edit(&id, &payload.body).map_err(failed)?;
+    Ok(Json(serde_json::json!({ "id": id, "status": "draft" })))
+}
+
 /// Opens the machine's own folder chooser and reports what was picked.
 ///
 /// The browser cannot answer this question — it is never told where a folder
@@ -590,7 +691,16 @@ async fn add_source(
     }
 
     let id = source_id(&name, &root);
-    lake.put_source(&id, &name, &root, "folder", "codex")
+    let from_policy = {
+        let saved = lake.policy().engine;
+        if saved.is_empty() || saved == "auto" {
+            None
+        } else {
+            Some(saved)
+        }
+    };
+    let processor = normalize_processor(body.processor.as_deref().or(from_policy.as_deref()));
+    lake.put_source(&id, &name, &root, "folder", &processor)
         .map_err(failed)?;
     let queued = knowlith_worker::enqueue_rescan(&lake, &id, &root).map_err(failed)?;
 
@@ -736,6 +846,7 @@ async fn skills(State(state): State<AppState>) -> ApiResult<Vec<SkillDocDto>> {
         .filter(|o| o.kind == knowlith_core::ObjectKind::Skill && o.status != ObjectStatus::Rejected)
         .map(|skill| SkillDocDto {
             id: skill.id.clone(),
+            decided_by: skill.decided_by.clone(),
             name: skill.title.clone(),
             description: skill_description(&skill.body),
             markdown: skill.body.clone(),
@@ -837,6 +948,75 @@ async fn dismiss(
 
 async fn tree() -> ApiResult<Vec<serde_json::Value>> {
     Ok(Json(Vec::new()))
+}
+
+/// The live company brain: approved objects and the edges between them.
+///
+/// Rebuilt from the lake on every call — there is no second store. The
+/// interface lays this out as a graph; assistants listed here are the
+/// connected ports the owner can open from a node.
+async fn brain(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let objects = lake.objects().map_err(failed)?;
+    let edges = lake.edges().map_err(failed)?;
+
+    let nodes: Vec<serde_json::Value> = objects
+        .iter()
+        .filter(|o| o.status == ObjectStatus::Approved)
+        .map(|o| {
+            serde_json::json!({
+                "id": o.id,
+                "title": o.title,
+                "kind": kind_str(o.kind),
+                "status": status_str(o.status),
+            })
+        })
+        .collect();
+
+    let approved: std::collections::HashSet<&str> = objects
+        .iter()
+        .filter(|o| o.status == ObjectStatus::Approved)
+        .map(|o| o.id.as_str())
+        .collect();
+
+    let links: Vec<serde_json::Value> = edges
+        .iter()
+        .filter(|e| approved.contains(e.from_id.as_str()) && approved.contains(e.to_id.as_str()))
+        .map(|e| {
+            serde_json::json!({
+                "from": e.from_id,
+                "to": e.to_id,
+                "type": match e.kind {
+                    knowlith_core::RelationType::DependsOn => "depends_on",
+                    knowlith_core::RelationType::DerivedFrom => "derived_from",
+                    knowlith_core::RelationType::UsedBy => "used_by",
+                    knowlith_core::RelationType::ConflictsWith => "conflicts_with",
+                },
+            })
+        })
+        .collect();
+
+    let assistants: Vec<serde_json::Value> = knowlith_desktop::status_all()
+        .into_iter()
+        .filter(|s| s.connected)
+        .map(|s| {
+            serde_json::json!({
+                "slug": s.slug,
+                "label": s.label,
+                "surface": match s.app.launch_surface() {
+                    knowlith_desktop::LaunchSurface::Desktop => "desktop",
+                    knowlith_desktop::LaunchSurface::Terminal => "terminal",
+                    knowlith_desktop::LaunchSurface::Missing => "missing",
+                },
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "nodes": nodes,
+        "edges": links,
+        "assistants": assistants,
+    })))
 }
 
 async fn runs() -> ApiResult<Vec<serde_json::Value>> {
@@ -1130,6 +1310,11 @@ async fn tools(State(state): State<AppState>) -> ApiResult<Vec<ToolDto>> {
                 installed: status.installed,
                 connected: status.connected,
                 running: status.running,
+                launch_surface: match status.app.launch_surface() {
+                    knowlith_desktop::LaunchSurface::Desktop => "desktop",
+                    knowlith_desktop::LaunchSurface::Terminal => "terminal",
+                    knowlith_desktop::LaunchSurface::Missing => "missing",
+                },
                 config_path: status.config_path,
                 needs_restart: status.needs_restart,
                 refresh_hint: status.refresh_hint,
@@ -1273,6 +1458,7 @@ async fn connect_app(
     let guide = match app {
         knowlith_desktop::App::Codex => Some(knowlith_desktop::Guide::Codex),
         knowlith_desktop::App::ClaudeCode => Some(knowlith_desktop::Guide::ClaudeCode),
+        knowlith_desktop::App::Cursor => Some(knowlith_desktop::Guide::Cursor),
         knowlith_desktop::App::ClaudeDesktop => None,
     };
     let guidance = guide
@@ -1295,6 +1481,7 @@ async fn disconnect_app(Path(app): Path<String>) -> ApiResult<serde_json::Value>
     if let Some(guide) = match app {
         knowlith_desktop::App::Codex => Some(knowlith_desktop::Guide::Codex),
         knowlith_desktop::App::ClaudeCode => Some(knowlith_desktop::Guide::ClaudeCode),
+        knowlith_desktop::App::Cursor => Some(knowlith_desktop::Guide::Cursor),
         knowlith_desktop::App::ClaudeDesktop => None,
     } {
         let _ = knowlith_desktop::guidance::remove(guide);
@@ -1308,6 +1495,64 @@ async fn open_app(Path(app): Path<String>) -> ApiResult<serde_json::Value> {
     Ok(Json(serde_json::json!({
         "outcome": outcome,
         "message": outcome.message(app),
+    })))
+}
+
+#[derive(serde::Deserialize)]
+struct TryBody {
+    /// Prefills the application's composer. Never submitted by Knowlith —
+    /// the owner still presses send, and only a gateway read proves anything.
+    prompt: String,
+    /// When true, CLI hosts are prepared for the in-app PTY instead of
+    /// opening Terminal.app — the brain sidebar owns the live session.
+    #[serde(default)]
+    embedded: bool,
+}
+
+/// Opens a connected AI app with a prepared question about one skill.
+///
+/// Desktop hosts get a deep link. CLI hosts open Terminal.app, unless
+/// `embedded` is set — then the UI attaches a live PTY over `/api/terminal`.
+async fn try_in_app(
+    Path(app): Path<String>,
+    Json(body): Json<TryBody>,
+) -> ApiResult<serde_json::Value> {
+    let app = app_named(&app)?;
+    let prompt = body.prompt.trim();
+    if prompt.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "the prompt is empty.".into()));
+    }
+    let outcome = knowlith_desktop::open_with_prompt_opts(app, prompt, body.embedded);
+    let message = match (outcome.outcome, outcome.embedded) {
+        (knowlith_desktop::Outcome::Opened, _) => format!(
+            "Opened {} with the question ready. Send it there, then come back.",
+            app.label()
+        ),
+        (knowlith_desktop::Outcome::OpenedInTerminal, true) => format!(
+            "{} is ready in the live terminal beside the map.",
+            app.label()
+        ),
+        (knowlith_desktop::Outcome::OpenedInTerminal, false) => format!(
+            "Opened Terminal with {}. The question is in that session — come back when it has read Knowlith.",
+            app.label()
+        ),
+        (knowlith_desktop::Outcome::NotInstalled, _) => {
+            format!("{} is not installed on this computer.", app.label())
+        }
+        (knowlith_desktop::Outcome::NoWindow, _) => format!(
+            "{} has no deep link Knowlith can open. Copy the question and paste it there.",
+            app.label()
+        ),
+        (other, _) => other.message(app),
+    };
+    Ok(Json(serde_json::json!({
+        "outcome": outcome.outcome,
+        "surface": outcome.surface,
+        "command": outcome.command,
+        "embedded": outcome.embedded,
+        "message": message,
+        "app": app.slug(),
+        "label": app.label(),
     })))
 }
 
@@ -1362,6 +1607,10 @@ struct PolicyDto {
     /// that actually helps rather than a generic "retry".
     held: Vec<HeldDto>,
     on_battery: bool,
+    /// Set when the saved engine changed: the worker still holds the old
+    /// one until Knowlith is restarted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    engine_restart: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1370,6 +1619,63 @@ struct HeldDto {
     kind: String,
     reason: String,
     count: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineDto {
+    id: String,
+    label: String,
+    program: String,
+    installed: bool,
+    path: Option<String>,
+    version: Option<String>,
+}
+
+/// Which CLIs can read documents on this machine — for onboarding / Settings.
+async fn list_engines() -> ApiResult<Vec<EngineDto>> {
+    let mut out: Vec<EngineDto> = knowlith_engine::detect()
+        .into_iter()
+        .map(|d| EngineDto {
+            id: d.flavour.slug().to_string(),
+            label: d.label.to_string(),
+            program: d.program.to_string(),
+            installed: d.path.is_some(),
+            path: d.path,
+            version: d.version,
+        })
+        .collect();
+    out.push(EngineDto {
+        id: "managed".into(),
+        label: "Knowlith Managed".into(),
+        program: String::new(),
+        installed: false,
+        path: None,
+        version: None,
+    });
+    Ok(Json(out))
+}
+
+fn normalize_processor(raw: Option<&str>) -> String {
+    match raw.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("codex") {
+        "agent" | "cursor" | "cursor-agent" => "cursor-agent".into(),
+        "claude" | "claude-code" => "claude-code".into(),
+        "managed" => "managed".into(),
+        "auto" => "codex".into(),
+        "codex" => "codex".into(),
+        other => other.to_string(),
+    }
+}
+
+fn normalize_engine_preference(raw: &str) -> String {
+    match raw.trim() {
+        "" | "auto" => "auto".into(),
+        "agent" | "cursor" | "cursor-agent" => "cursor-agent".into(),
+        "claude" | "claude-code" => "claude-code".into(),
+        "managed" => "managed".into(),
+        "codex" => "codex".into(),
+        other => other.to_string(),
+    }
 }
 
 async fn read_policy(State(state): State<AppState>) -> ApiResult<PolicyDto> {
@@ -1391,15 +1697,18 @@ async fn read_policy(State(state): State<AppState>) -> ApiResult<PolicyDto> {
             })
             .collect(),
         on_battery: knowlith_desktop::power().on_battery(),
+        engine_restart: None,
     }))
 }
 
 async fn write_policy(
     State(state): State<AppState>,
-    Json(policy): Json<knowlith_lake::Policy>,
+    Json(mut policy): Json<knowlith_lake::Policy>,
 ) -> ApiResult<PolicyDto> {
-    {
+    policy.engine = normalize_engine_preference(&policy.engine);
+    let engine_restart = {
         let lake = state.lake.lock().map_err(failed)?;
+        let previous = normalize_engine_preference(&lake.policy().engine);
         lake.set_policy(&policy).map_err(failed)?;
         // Turning automatic reading back on should start the work that was
         // waiting for exactly that, without the owner pressing a second
@@ -1407,8 +1716,18 @@ async fn write_policy(
         if policy.processing == knowlith_lake::Processing::Automatic {
             let _ = lake.release_held();
         }
-    }
-    read_policy(State(state)).await
+        if previous != policy.engine {
+            Some(
+                "Restart Knowlith for the new reader to take effect on queued work. The choice is saved."
+                    .into(),
+            )
+        } else {
+            None
+        }
+    };
+    let Json(mut body) = read_policy(State(state)).await?;
+    body.engine_restart = engine_restart;
+    Ok(Json(body))
 }
 
 /// Lets everything that was held run now.

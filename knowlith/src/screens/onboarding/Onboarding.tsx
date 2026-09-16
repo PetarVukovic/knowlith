@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { ArrowLeft, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { background } from "@/lib/api"
 import type { Inventory, Processor, SourceKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
@@ -12,6 +13,7 @@ import { StepPreview } from "./StepPreview"
 import { StepProcessing } from "./StepProcessing"
 import { StepSource } from "./StepSource"
 import { StepWelcome } from "./StepWelcome"
+import { scheduleProductTour } from "@/components/ProductTour"
 
 /**
  * The first few minutes.
@@ -48,6 +50,7 @@ export function Onboarding() {
   const finishWizard = () => {
     setCompany(name.trim(), logo)
     completeOnboarding()
+    scheduleProductTour()
   }
 
   /**
@@ -63,7 +66,14 @@ export function Onboarding() {
     // before the first document is read and the status bar stops saying
     // "Your company" while the work is already running.
     setCompany(name.trim(), logo)
-    const result = await addSource(path)
+    // Persist who should read — the worker binds this at daemon start.
+    await background.setPolicy({
+      processing: "automatic",
+      pauseOnBattery: true,
+      largeScan: 500,
+      engine: processor,
+    })
+    const result = await addSource(path, undefined, processor)
     if (typeof result === "string") return setAddError(result)
     setStep(5)
   }

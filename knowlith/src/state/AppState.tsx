@@ -65,7 +65,7 @@ interface AppState {
   setSourceStatus: (id: string, status: Source["status"]) => void
   removeSource: (id: string) => void
   /** Adds a folder and queues the walk. Resolves to a reason when it failed. */
-  addSource: (path: string, name?: string) => Promise<Source[] | string>
+  addSource: (path: string, name?: string, processor?: string) => Promise<Source[] | string>
   /** Pulls everything from the daemon again. */
   refresh: () => Promise<void>
 
@@ -385,8 +385,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setMergeHints(hints)
   }, [])
 
-  const addSource = useCallback(async (path: string, name?: string) => {
-    const result = await folders.add(path, name)
+  const addSource = useCallback(async (path: string, name?: string, processor?: string) => {
+    const result = await folders.add(path, name, processor)
     if (apiFailed(result)) return result.error
     const next = await api.getSources()
     setSources(next)

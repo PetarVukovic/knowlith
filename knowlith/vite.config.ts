@@ -44,6 +44,7 @@ export default defineConfig({
       "/api": {
         target: daemon,
         changeOrigin: false,
+        ws: true,
         headers: token ? { "x-knowlith-token": token } : undefined,
       },
     },

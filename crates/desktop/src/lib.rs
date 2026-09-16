@@ -21,12 +21,12 @@ pub mod paths;
 pub mod pick;
 pub mod power;
 
-pub use apps::{App, Format, program_on_path};
+pub use apps::{App, Format, LaunchSurface, program_on_path};
 pub use autostart::Autostart;
 pub use bundle::Bundle;
 pub use guidance::Guide;
 pub use connect::{ConnectError, SERVER_NAME, Status, connect, disconnect, status, status_all};
 pub use icon::{Icon, company_icon};
-pub use launch::{Outcome, open_or_restart};
+pub use launch::{Outcome, TryLaunch, cli_pty_argv, open_or_restart, open_with_prompt, open_with_prompt_opts, prompt_deeplink};
 pub use pick::PickError;
 pub use power::{Power, power};

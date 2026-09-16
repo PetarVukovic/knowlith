@@ -113,11 +113,40 @@ fn decode(bytes: &[u8]) -> String {
 }
 
 /// Files that are never worth reading, recognised by name alone.
+///
+/// Dotfiles and Office lock files are noise. Keys, certs and env files are
+/// secrets — skipping them is the allowlist/denylist pattern from filesystem
+/// MCP servers, applied at the edge before anything reaches the lake.
 pub fn is_noise(name: &str) -> bool {
     name.starts_with("~$")
         || name.starts_with('.')
         || name.eq_ignore_ascii_case("Thumbs.db")
         || name.eq_ignore_ascii_case("desktop.ini")
+        || is_secret(name)
+}
+
+/// Names that must not enter the lake even if the extension is readable.
+pub fn is_secret(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "id_rsa"
+            | "id_dsa"
+            | "id_ecdsa"
+            | "id_ed25519"
+            | "credentials.json"
+            | "serviceaccount.json"
+            | "secrets.json"
+            | "auth.json"
+    ) || lower.ends_with(".pem")
+        || lower.ends_with(".key")
+        || lower.ends_with(".pfx")
+        || lower.ends_with(".p12")
+        || lower.ends_with(".keystore")
+        || lower.ends_with(".jks")
+        || lower.ends_with(".env")
+        || lower.ends_with(".env.local")
+        || lower.ends_with(".env.production")
 }
 
 #[cfg(test)]
@@ -174,6 +203,9 @@ mod tests {
     fn noise_is_recognised() {
         assert!(is_noise("~$ponuda.docx"));
         assert!(is_noise(".DS_Store"));
+        assert!(is_noise("id_rsa"));
+        assert!(is_noise("server.pem"));
+        assert!(is_noise("prod.env"));
         assert!(!is_noise("Cjenik-2026.xlsx"));
     }
 }

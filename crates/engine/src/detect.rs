@@ -32,7 +32,7 @@ impl Detected {
 /// Always returns one entry per flavour, installed or not, so the onboarding
 /// screen can show what is missing as easily as what is there.
 pub fn detect() -> Vec<Detected> {
-    [Flavour::Codex, Flavour::ClaudeCode]
+    [Flavour::Codex, Flavour::ClaudeCode, Flavour::CursorAgent]
         .into_iter()
         .map(|flavour| {
             let path = which(flavour.program());
@@ -100,11 +100,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn both_flavours_are_always_reported() {
+    fn every_flavour_is_always_reported() {
         let found = detect();
-        assert_eq!(found.len(), 2);
+        assert_eq!(found.len(), 3);
         assert!(found.iter().any(|d| d.flavour == Flavour::Codex));
         assert!(found.iter().any(|d| d.flavour == Flavour::ClaudeCode));
+        assert!(found.iter().any(|d| d.flavour == Flavour::CursorAgent));
     }
 
     #[test]

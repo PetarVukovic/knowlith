@@ -34,7 +34,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use knowlith_core::Document;
 use knowlith_engine::{Engine, EngineError};
-use knowlith_extract::{ExtractError, extract_file, is_noise};
+use knowlith_extract::{ExtractError, extract_file, is_noise, is_secret};
 use knowlith_lake::{Lake, NewJob, PRIORITY_BACKGROUND, PRIORITY_NORMAL, ScanTarget};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
@@ -325,17 +325,32 @@ impl Worker {
         let mut changed = 0usize;
         let mut unchanged = 0usize;
         let mut unreadable = 0usize;
+        let mut settling = 0usize;
+        let mut secrets = 0usize;
 
         for entry in WalkDir::new(&root).follow_links(false).into_iter().filter_map(|e| e.ok()) {
             if !entry.file_type().is_file() {
                 continue;
             }
-            if is_noise(&entry.file_name().to_string_lossy()) {
+            let name = entry.file_name().to_string_lossy();
+            if knowlith_extract::is_secret(&name) {
+                secrets += 1;
+                continue;
+            }
+            if is_noise(&name) {
                 continue;
             }
             walked += 1;
             if walked % 25 == 0 {
                 let _ = self.lake.heartbeat(job.id);
+            }
+
+            // Write-settle: a file whose mtime is still moving was often
+            // mid-copy from a NAS. Extracting it produces a half document
+            // and a content hash that will "change" again on the next pass.
+            if still_being_written(entry.path()) {
+                settling += 1;
+                continue;
             }
 
             match extract_file(entry.path()) {
@@ -359,10 +374,23 @@ impl Worker {
         }
 
         let _ = self.lake.mark_scanned(&payload.source_id);
-        Ok(format!(
+        let mut note = format!(
             "{} · {changed} changed · {unchanged} unchanged · {unreadable} not readable",
             plural(walked, "file walked", "files walked")
-        ))
+        );
+        if settling > 0 {
+            note.push_str(&format!(
+                " · {}",
+                plural(settling, "file still being written", "files still being written")
+            ));
+        }
+        if secrets > 0 {
+            note.push_str(&format!(
+                " · {}",
+                plural(secrets, "secret skipped", "secrets skipped")
+            ));
+        }
+        Ok(note)
     }
 
     fn queue_compile(&mut self, document: &Document) -> std::result::Result<(), Failure> {
@@ -386,13 +414,15 @@ impl Worker {
             .map_err(|e| Failure::Refused(format!("{} is not in the lake: {e}", payload.document_id)))?;
         let name = document.name.clone();
 
+        let company = self.lake.setting("company_profile").ok().flatten();
         let engine = Arc::clone(&self.engine);
         // Stages 1 and 2 only. What the engine says about this document is
         // stored as-is; deciding which claim is current happens once, over
         // everything, in `settle`.
         let read = self.with_heartbeat(job.id, stop, move || {
             let mut read = knowlith_compiler::Reading::default();
-            knowlith_compiler::read_one(&*engine, &document, &mut read).map(|()| read)
+            knowlith_compiler::read_one(&*engine, &document, &mut read, company.as_deref())
+                .map(|()| read)
         })??;
 
         let json: Vec<String> = read
@@ -799,6 +829,26 @@ mod policy_tests {
         assert!(!needs_a_model(KIND_RESCAN));
         assert!(!needs_a_model(KIND_SETTLE));
         assert!(!needs_a_model(KIND_RECHECK));
+    }
+}
+
+/// How long after the last write we wait before trusting the bytes.
+///
+/// Renfield-style write-settle. Separate from the compiler's `settle` job.
+const WRITE_SETTLE_SECS: u64 = 3;
+
+/// True when the file's mtime is so recent it may still be mid-copy.
+fn still_being_written(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified) = meta.modified() else {
+        return false;
+    };
+    match modified.elapsed() {
+        Ok(elapsed) => elapsed.as_secs() < WRITE_SETTLE_SECS,
+        // Clock skew / future mtime — wait rather than read half a file.
+        Err(_) => true,
     }
 }
 
