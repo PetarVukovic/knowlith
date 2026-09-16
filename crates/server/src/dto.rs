@@ -65,6 +65,15 @@ pub struct ObjectDto {
     pub valid_from: String,
     pub valid_to: Option<String>,
     pub supersedes: Option<String>,
+    /// The version this one replaced, and the one that replaced it — by
+    /// name, because `rule:sales.discount@1` is not a title the owner can
+    /// read. `superseded_by` is the reverse of `supersedes`, worked out here
+    /// rather than stored: a second column would be one more thing a merge
+    /// can leave half-written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<RelationDto>,
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decided_by: Option<String>,
@@ -286,8 +295,25 @@ pub fn relation_dto(relation: &knowlith_core::Relation) -> RelationDto {
     }
 }
 
-pub fn object_dto(object: &ContextObject, documents: &[Document]) -> ObjectDto {
+/// `all` is every object in the lake, so the two ends of a replacement can
+/// be named; the superseded version is not in the approved set and would
+/// otherwise be unreachable from here.
+pub fn object_dto(object: &ContextObject, documents: &[Document], all: &[ContextObject]) -> ObjectDto {
     let find = |id: &str| documents.iter().find(|d| d.id == id);
+    let supersedes_title = object
+        .supersedes
+        .as_ref()
+        .and_then(|id| all.iter().find(|o| o.id == *id))
+        .map(|o| o.title.clone());
+    let superseded_by = all
+        .iter()
+        .find(|o| o.supersedes.as_deref() == Some(object.id.as_str()))
+        .map(|o| RelationDto {
+            kind: "supersedes",
+            target_id: o.id.clone(),
+            target_title: o.title.clone(),
+            origin: origin_str(knowlith_core::RelationOrigin::Manual),
+        });
     ObjectDto {
         id: object.id.clone(),
         kind: kind_str(object.kind),
@@ -307,6 +333,8 @@ pub fn object_dto(object: &ContextObject, documents: &[Document]) -> ObjectDto {
         valid_from: object.valid_from.clone(),
         valid_to: object.valid_to.clone(),
         supersedes: object.supersedes.clone(),
+        supersedes_title,
+        superseded_by,
         updated_at: object.updated_at.clone(),
         decided_by: object.decided_by.clone(),
         edited_on_approval: object.edited_on_approval,

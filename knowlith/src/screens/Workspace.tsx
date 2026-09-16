@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Navigate, useNavigate, useParams } from "react-router-dom"
 import { ChevronDown, Clock, Pencil } from "lucide-react"
 import {
@@ -213,8 +213,33 @@ function MoreAbout({
               <Row label="In effect from" value={formatDate(object.validFrom)} />
               <Row label="In effect until" value={object.validTo ? formatDate(object.validTo) : "still current"} />
               <Row label="Last change" value={formatRelative(object.updatedAt)} />
-              {object.supersedes && mode === "engineer" ? (
-                <Row label="Replaced" value={object.supersedes} mono />
+              {object.supersedes ? (
+                <Row
+                  label="Replaced"
+                  value={
+                    <button
+                      type="button"
+                      className="text-accent underline-offset-4 hover:underline"
+                      onClick={() => openId(object.supersedes!)}
+                    >
+                      {object.supersedesTitle ?? "an earlier version"}
+                    </button>
+                  }
+                />
+              ) : null}
+              {object.supersededBy ? (
+                <Row
+                  label="Replaced by"
+                  value={
+                    <button
+                      type="button"
+                      className="text-accent underline-offset-4 hover:underline"
+                      onClick={() => openId(object.supersededBy!.targetId)}
+                    >
+                      {object.supersededBy.targetTitle}
+                    </button>
+                  }
+                />
               ) : null}
             </div>
             <div className="mt-3 flex items-start gap-2 rounded-md border border-line bg-surface-2 p-2.5 text-[12px] text-muted">
@@ -249,11 +274,11 @@ function MoreAbout({
   )
 }
 
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <span className="shrink-0 text-faint">{label}</span>
-      <span className={mono ? "truncate font-mono text-[11.5px] text-ink" : "truncate text-ink"}>{value}</span>
+      <span className="truncate text-ink">{value}</span>
     </div>
   )
 }

@@ -92,6 +92,10 @@ export interface ContextObject {
   validFrom: string
   validTo: string | null
   supersedes: string | null
+  /** Title of the version this replaced, resolved on the server. */
+  supersedesTitle?: string
+  /** The version that replaced this one, when there is one. */
+  supersededBy?: Relation
   updatedAt: string
   /** Set once a person decided. */
   decidedBy?: string

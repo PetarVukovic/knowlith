@@ -381,14 +381,13 @@ async fn rename_company(
 async fn objects(State(state): State<AppState>) -> ApiResult<Vec<ObjectDto>> {
     let lake = state.lake.lock().map_err(failed)?;
     let documents = lake.documents().map_err(failed)?;
+    let all = lake.objects().map_err(failed)?;
     Ok(Json(
-        lake.objects()
-            .map_err(failed)?
-            .iter()
+        all.iter()
             // The tree shows what the company has; rejected claims are kept
             // so they are not re-proposed, but they are not knowledge.
             .filter(|o| o.status != ObjectStatus::Rejected)
-            .map(|o| object_dto(o, &documents))
+            .map(|o| object_dto(o, &documents, &all))
             .collect(),
     ))
 }
