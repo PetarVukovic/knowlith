@@ -205,7 +205,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const poll = async () => {
       const next = await api.getWork()
       if (cancelled) return
-      setWork({ queued: next.queued, working: next.working })
+      // A fresh object every four seconds is a new context value every
+      // four seconds, and every screen under it re-renders for a queue
+      // that has not moved.
+      setWork((current) =>
+        current.queued === next.queued && current.working === next.working
+          ? current
+          : { queued: next.queued, working: next.working },
+      )
       setSeen((current) => {
         // Watching the queue drain is not enough. With recorded replies the
         // whole of a small company compiles between two polls, and then the

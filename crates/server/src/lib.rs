@@ -1027,9 +1027,14 @@ async fn tree() -> ApiResult<Vec<serde_json::Value>> {
 /// interface lays this out as a graph; assistants listed here are the
 /// connected ports the owner can open from a node.
 async fn brain(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
-    let lake = state.lake.lock().map_err(failed)?;
-    let objects = lake.objects().map_err(failed)?;
-    let edges = lake.edges().map_err(failed)?;
+    // The lock is dropped before `status_all()` below: that call runs
+    // `pgrep` once per assistant and took a third of a second, during which
+    // every other request — the work panel polling once a second among
+    // them — waited on the mutex for a list of processes.
+    let (objects, edges) = {
+        let lake = state.lake.lock().map_err(failed)?;
+        (lake.objects().map_err(failed)?, lake.edges().map_err(failed)?)
+    };
 
     let nodes: Vec<serde_json::Value> = objects
         .iter()
