@@ -10,13 +10,15 @@
 //! that a person could not also get from `knowlith` on the command line,
 //! which keeps the two views of the same data from drifting apart.
 
+pub mod assets;
 pub mod dto;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use knowlith_core::{ContextObject, Document, ObjectStatus};
@@ -25,6 +27,35 @@ use serde::Serialize;
 use tower_http::cors::{Any, CorsLayer};
 
 use dto::*;
+
+/// The state the interface shows for one AI application.
+///
+/// Deliberately not a boolean. "Connect" as a single verb hides the four
+/// situations an owner actually finds themselves in — the application is
+/// not here, it is here and unconnected, it is connected, or it is
+/// connected to a Knowlith that no longer exists — and only the last of
+/// those is alarming.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolDto {
+    slug: String,
+    label: String,
+    /// `missing` | `ready` | `connected` | `needs-attention`
+    state: &'static str,
+    installed: bool,
+    connected: bool,
+    running: bool,
+    config_path: Option<String>,
+    needs_restart: bool,
+    refresh_hint: &'static str,
+    /// Set when the entry points at another binary — after an upgrade that
+    /// moved it, or a copy someone deleted.
+    problem: Option<String>,
+    /// When this application last read something, so the page can say
+    /// "used 3 minutes ago" rather than only "connected".
+    last_read: Option<String>,
+    reads: i64,
+}
 
 /// The lake behind a mutex.
 ///
@@ -79,8 +110,21 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tool-reads", get(tool_reads))
         .route("/api/activity", get(activity))
         .route("/api/tree", get(tree))
+        .route("/api/tools", get(tools))
+        .route("/api/tools/{app}/connect", post(connect_app))
+        .route("/api/tools/{app}/disconnect", post(disconnect_app))
+        .route("/api/tools/{app}/open", post(open_app))
+        .route("/api/tools/{app}/preview", get(preview_app))
+        .route("/api/bundle", post(build_bundle))
+        .route("/api/policy", get(read_policy).put(write_policy))
+        .route("/api/work/release", post(release_work))
+        .route("/api/autostart", get(read_autostart))
+        .route("/api/autostart/{state}", post(write_autostart))
         .layer(cors)
         .with_state(state)
+        // Anything that is not an API route is the interface. Registered
+        // last so a future endpoint can never be shadowed by a file.
+        .fallback(interface)
 }
 
 pub async fn serve(state: AppState, port: u16) -> anyhow::Result<()> {
@@ -409,7 +453,7 @@ async fn sources(State(state): State<AppState>) -> ApiResult<Vec<SourceDto>> {
             .into_iter()
             .map(|(ext, count)| FileTypeDto { ext, count })
             .collect();
-        file_types.sort_by(|a, b| b.count.cmp(&a.count));
+        file_types.sort_by_key(|entry| std::cmp::Reverse(entry.count));
 
         let scanned = last_scan.unwrap_or_default();
         out.push(SourceDto {
@@ -653,5 +697,277 @@ mod tests {
     fn the_interfaces_words_are_used_on_the_wire() {
         assert_eq!(status_str(ObjectStatus::Proposed), "draft");
         assert_eq!(status_str(ObjectStatus::Conflicted), "conflict");
+    }
+}
+
+
+// -------------------------------------------------------- AI applications --
+
+/// Every application, what it can see, and whether it has used it.
+async fn tools(State(state): State<AppState>) -> ApiResult<Vec<ToolDto>> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let reads = lake.read_summary().unwrap_or_default();
+
+    let out = knowlith_desktop::status_all()
+        .into_iter()
+        .map(|status| {
+            // A tool's reads are recorded under the tool name the gateway
+            // used, which is per call rather than per application. Until
+            // the protocol carries the client's identity, the honest thing
+            // to report is how much has been served at all.
+            let total: i64 = reads.iter().map(|(_, n)| n).sum();
+            ToolDto {
+                state: match (&status.installed, &status.connected, &status.stale_command) {
+                    (false, ..) => "missing",
+                    (true, _, Some(_)) => "needs-attention",
+                    (true, true, None) => "connected",
+                    (true, false, None) => "ready",
+                },
+                slug: status.slug.to_string(),
+                label: status.label.to_string(),
+                installed: status.installed,
+                connected: status.connected,
+                running: status.running,
+                config_path: status.config_path,
+                needs_restart: status.needs_restart,
+                refresh_hint: status.refresh_hint,
+                problem: status.stale_command.map(|command| {
+                    format!("It is pointing at {command}, which is not this Knowlith.")
+                }),
+                last_read: None,
+                reads: total,
+            }
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+fn app_named(slug: &str) -> std::result::Result<knowlith_desktop::App, (StatusCode, String)> {
+    knowlith_desktop::App::parse(slug)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("no application called {slug}")))
+}
+
+/// What connecting would write, so the owner sees it before agreeing.
+async fn preview_app(Path(app): Path<String>) -> ApiResult<serde_json::Value> {
+    let app = app_named(&app)?;
+    Ok(Json(serde_json::json!({
+        "configPath": app.config_file().as_deref().map(knowlith_desktop::paths::display),
+        "snippet": knowlith_desktop::connect::manual_instructions(app),
+        "refreshHint": app.refresh_hint(),
+    })))
+}
+
+async fn connect_app(
+    State(state): State<AppState>,
+    Path(app): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let app = app_named(&app)?;
+    let status = knowlith_desktop::connect(app).map_err(|e| (StatusCode::CONFLICT, e.to_string()))?;
+
+    // The standing instruction is what makes the agent reach for the company
+    // unprompted. Failing to write it does not undo the connection, so it is
+    // reported rather than thrown.
+    let guide = match app {
+        knowlith_desktop::App::Codex => Some(knowlith_desktop::Guide::Codex),
+        knowlith_desktop::App::ClaudeCode => Some(knowlith_desktop::Guide::ClaudeCode),
+        knowlith_desktop::App::ClaudeDesktop => None,
+    };
+    let guidance = guide
+        .map(|guide| knowlith_desktop::guidance::write(guide, &state.company).is_ok())
+        .unwrap_or(false);
+
+    Ok(Json(serde_json::json!({
+        "connected": status.connected,
+        "configPath": status.config_path,
+        "refreshHint": status.refresh_hint,
+        "needsRestart": status.needs_restart,
+        "running": status.running,
+        "guidanceWritten": guidance,
+    })))
+}
+
+async fn disconnect_app(Path(app): Path<String>) -> ApiResult<serde_json::Value> {
+    let app = app_named(&app)?;
+    let status = knowlith_desktop::disconnect(app).map_err(failed)?;
+    if let Some(guide) = match app {
+        knowlith_desktop::App::Codex => Some(knowlith_desktop::Guide::Codex),
+        knowlith_desktop::App::ClaudeCode => Some(knowlith_desktop::Guide::ClaudeCode),
+        knowlith_desktop::App::ClaudeDesktop => None,
+    } {
+        let _ = knowlith_desktop::guidance::remove(guide);
+    }
+    Ok(Json(serde_json::json!({ "connected": status.connected })))
+}
+
+async fn open_app(Path(app): Path<String>) -> ApiResult<serde_json::Value> {
+    let app = app_named(&app)?;
+    let outcome = knowlith_desktop::open_or_restart(app);
+    Ok(Json(serde_json::json!({
+        "outcome": outcome,
+        "message": outcome.message(app),
+    })))
+}
+
+/// Builds the Claude Desktop extension and, by default, opens it.
+async fn build_bundle(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    let icon = serde_json::to_value(knowlith_desktop::company_icon(&state.company)).map_err(failed)?;
+    let tools: Vec<(String, String)> = knowlith_mcp::tools::catalogue(&icon)
+        .into_iter()
+        .map(|entry| (text_of(&entry, "name"), text_of(&entry, "description")))
+        .collect();
+    let prompts: Vec<(String, String)> = {
+        let lake = state.lake.lock().map_err(failed)?;
+        knowlith_mcp::prompts::list(&lake, &icon)
+            .into_iter()
+            .map(|entry| (text_of(&entry, "name"), text_of(&entry, "description")))
+            .collect()
+    };
+
+    let built = knowlith_desktop::bundle::build(&knowlith_desktop::bundle::Contents {
+        company: &state.company,
+        tools,
+        prompts,
+    })
+    .map_err(failed)?;
+    knowlith_desktop::bundle::reveal(&built);
+
+    Ok(Json(serde_json::json!({
+        "path": built.path,
+        "megabytes": (built.bytes as f64 / 1_048_576.0 * 10.0).round() / 10.0,
+        "version": built.version,
+    })))
+}
+
+fn text_of(value: &serde_json::Value, key: &str) -> String {
+    value.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+}
+
+// -------------------------------------------------- background processing --
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PolicyDto {
+    policy: knowlith_lake::Policy,
+    /// What is sitting still and why, so the interface offers the button
+    /// that actually helps rather than a generic "retry".
+    held: Vec<HeldDto>,
+    on_battery: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HeldDto {
+    kind: String,
+    reason: String,
+    count: i64,
+}
+
+async fn read_policy(State(state): State<AppState>) -> ApiResult<PolicyDto> {
+    let lake = state.lake.lock().map_err(failed)?;
+    Ok(Json(PolicyDto {
+        policy: lake.policy(),
+        held: lake
+            .held()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(kind, reason, count)| HeldDto { kind, reason, count })
+            .collect(),
+        on_battery: knowlith_desktop::power().on_battery(),
+    }))
+}
+
+async fn write_policy(
+    State(state): State<AppState>,
+    Json(policy): Json<knowlith_lake::Policy>,
+) -> ApiResult<PolicyDto> {
+    {
+        let lake = state.lake.lock().map_err(failed)?;
+        lake.set_policy(&policy).map_err(failed)?;
+        // Turning automatic reading back on should start the work that was
+        // waiting for exactly that, without the owner pressing a second
+        // button they have no reason to know about.
+        if policy.processing == knowlith_lake::Processing::Automatic {
+            let _ = lake.release_held();
+        }
+    }
+    read_policy(State(state)).await
+}
+
+/// Lets everything that was held run now.
+async fn release_work(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let released = lake.release_held().map_err(failed)?;
+    Ok(Json(serde_json::json!({ "released": released })))
+}
+
+// ------------------------------------------------------ the login service --
+
+async fn read_autostart() -> ApiResult<knowlith_desktop::Autostart> {
+    Ok(Json(knowlith_desktop::autostart::status()))
+}
+
+async fn write_autostart(Path(state): Path<String>) -> ApiResult<knowlith_desktop::Autostart> {
+    let result = match state.as_str() {
+        "on" => knowlith_desktop::autostart::enable(7717),
+        "off" => knowlith_desktop::autostart::disable(),
+        other => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("{other} is not \"on\" or \"off\""),
+            ));
+        }
+    };
+    Ok(Json(result.map_err(failed)?))
+}
+
+
+// ---------------------------------------------------------- the interface --
+
+/// Serves the built interface, or explains why there is not one.
+async fn interface(uri: Uri) -> Response {
+    let path = uri.path();
+
+    // An API path that got here is a real 404, and must not be answered
+    // with an HTML page — a fetch that receives `<!doctype html>` where it
+    // expected JSON fails with a parse error that points nowhere.
+    if path.starts_with("/api/") {
+        return (StatusCode::NOT_FOUND, "no such endpoint").into_response();
+    }
+
+    if let Some((bytes, kind)) = assets::file(path) {
+        // Vite fingerprints asset filenames, so anything under `/assets/`
+        // is safe to cache for a long time; the page itself never is, or an
+        // upgrade would keep serving yesterday's interface.
+        let cache = if path.starts_with("/assets/") {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-cache"
+        };
+        return (
+            [(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, cache)],
+            bytes,
+        )
+            .into_response();
+    }
+
+    match assets::index() {
+        // Every other path belongs to the router in the browser.
+        Some(page) => (
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            page,
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            "The interface was not built into this binary.\n\n\
+             A release build has it. From a source checkout, run `npm ci && npm run build` in\n\
+             the knowlith folder and build again — or run `npm run dev` and use port 5173.\n\n\
+             The API on this port works either way.\n",
+        )
+            .into_response(),
     }
 }

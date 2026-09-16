@@ -9,6 +9,8 @@ authors.workspace = true
 
 [dependencies]
 knowlith-core.workspace = true
+knowlith-desktop.workspace = true
+knowlith-mcp.workspace = true
 knowlith-lake.workspace = true
 knowlith-worker.workspace = true
 

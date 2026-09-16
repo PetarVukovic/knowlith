@@ -8,6 +8,35 @@ shows it. They talk over HTTP on `127.0.0.1`. With the daemon stopped the
 interface falls back to a demo company and says so in the status bar, so you
 can see what the product does before installing anything.
 
+## Install
+
+One command. Nothing is sent anywhere, nothing needs an administrator, and
+everything it writes lives under your home directory.
+
+```sh
+# macOS and Linux
+curl -fsSL https://raw.githubusercontent.com/OWNER/knowlith/main/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/OWNER/knowlith/main/install.ps1 | iex
+```
+
+Then:
+
+```sh
+knowlith scan ~/Documents/YourCompany   # read a folder
+knowlith serve                          # the interface, on http://127.0.0.1:7717
+knowlith connect                        # hand it to Claude and Codex
+knowlith autostart on                   # keep working when the window is closed
+```
+
+The interface is compiled into the binary, so `serve` opens a real interface
+on a machine that has never seen Node.js. Removing Knowlith is deleting
+`~/Knowlith`, the binary, and whatever `knowlith autostart off` and
+`knowlith disconnect` leave behind — which is nothing.
+
 ## The Rust side
 
 ```
@@ -17,8 +46,10 @@ crates/lake/     SQLite: the evidence gate on write, versions, the graph, the jo
 crates/graph/    impact, propagation order and cycle detection over approved objects
 crates/engine/   where the model runs: the owner's own CLI as a child process, or a replay
 crates/compiler/ documents to knowledge; reading, settling, relating, drafting skills
-crates/server/   the local HTTP API the interface talks to
+crates/server/   the local HTTP API, and the interface baked into the binary
 crates/worker/   the loop that drains the queue, so work happens without being asked
+crates/mcp/      the gateway: approved knowledge served to AI tools over stdio
+crates/desktop/  what this machine is — paths, app configs, login service, the icon
 crates/cli/      the `knowlith` command
 ```
 
@@ -206,6 +237,78 @@ misses entirely because the two claims land in different groups.
 **Does this rule actually depend on that one?** Proposed by the engine, stored
 as suggested, removable in one click. See the sixth decision above.
 
+## Giving it to your AI tools
+
+```sh
+knowlith connect            # every application that is installed
+knowlith connect codex      # or one of them
+knowlith connect --dry-run  # show what would be written, write nothing
+knowlith tools              # what each one currently says
+```
+
+Each application is edited in place: the entry is added, everything else in
+the file stays, and a timestamped copy of the original is kept beside it. A
+Codex `config.toml` keeps its comments, because it is edited as TOML rather
+than as text.
+
+Claude Desktop can also take it as an extension, which is the path that
+shows the owner what it does before they enable it:
+
+```sh
+knowlith bundle --install    # writes ~/Knowlith/knowlith.mcpb and opens it
+```
+
+### What an agent can ask
+
+Eleven tools, ten of which only read. Every answer carries the document, the
+locator and the quote, so the agent can cite rather than assert.
+
+| Tool | Answers |
+| --- | --- |
+| `get_relevant_context` | everything the company has decided that touches this piece of work |
+| `search_context` | approved rules, processes and terms by their own words |
+| `get_context` | one of them in full, with what it rests on |
+| `lookup_value` | a figure, read out of the row it is written in |
+| `get_source_evidence` | the passage in the owner's own document, word for word |
+| `get_process` | how the company does something, in its own order |
+| `get_skill` | a procedure the owner approved for an agent to run |
+| `what_breaks_if` | what rests on a rule — the question a folder cannot answer |
+| `list_pending` | subjects the owner has not decided, named but never answered |
+| `check_coverage` | what the agent never looked at |
+| `propose_change` | the one write: a suggestion, refused unless it quotes a real document |
+
+`get_relevant_context` and `check_coverage` are the pair that matter. A
+retrieval system cannot tell you what it did not return; here the approved
+set is finite and related, so the things a question touches can be listed up
+front and ticked off as they are read. An agent that has not read the
+warranty is told so before it claims to have checked the company's rules.
+
+The gate is the other half. An `approved` object is served in full; a
+`conflicted` or `proposed` one has its **subject** named and its answer
+withheld; a `superseded` or `rejected` one is not mentioned. Hiding an
+undecided question does not stop an agent answering it — it removes the one
+signal that would have stopped it.
+
+## Working in the background
+
+The daemon is registered with the operating system's own login service —
+`launchd`, Task Scheduler, `systemd --user` — so closing the window changes
+nothing. The queue is a table, so a crash, a closed laptop or a network that
+comes back an hour later all resume rather than restart.
+
+What it may do on its own is the owner's:
+
+```
+Automatically read changes   ·  Ask first  ·  Manual only
+Pause model calls on battery
+Ask before more than N files at once
+```
+
+Reading a folder, comparing documents and re-checking quotes are arithmetic
+and always run. The three jobs that call a model are the ones these govern —
+and a job that is held is **held**, not deferred, so a laptop left unplugged
+overnight does not age its own queue into failure.
+
 ## Known limits
 
 **A price written in two formats used to be two figures.** `5.000`,
@@ -225,6 +328,15 @@ zero until the owner approves something.
 
 ## Not implemented here
 
-Knowlith Managed — `ManagedEngine` says so rather than pretending — and the
-MCP gateway that will serve approved context to AI tools. Everything else in
-this README runs.
+Knowlith Managed. `ManagedEngine` says so rather than pretending.
+
+Windows is built and tested on every release, and every path, process and
+configuration location goes through `crates/desktop` — but it has not been
+run by hand on a Windows machine. The parts most likely to need a second
+pass are the scheduled task and Claude Desktop's install location.
+
+Per-application read counts. The gateway records every serve, but the
+protocol does not carry which client asked, so the interface reports how
+much has been served rather than by whom.
+
+Everything else in this README runs.

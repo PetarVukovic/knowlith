@@ -16,6 +16,9 @@
 
 mod jobs;
 mod merge;
+mod migrate;
+mod policy;
+mod serve;
 
 use std::path::Path;
 
@@ -27,9 +30,19 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub use jobs::{Job, JobState, NewJob, PRIORITY_BACKGROUND, PRIORITY_NORMAL};
 pub use merge::MergeHint;
+pub use migrate::SCHEMA_VERSION;
+pub use policy::{DEFAULT_LARGE_SCAN, Held, Policy, Processing};
+pub use serve::{Case, Row};
 
 const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 1;
+
+/// How long a writer waits for another connection to finish before giving up.
+///
+/// Three processes share this file: the interface, the background worker and
+/// the gateway an AI tool spawns. Without a timeout, a write that lands
+/// during someone else's commit fails instantly with `SQLITE_BUSY`, and the
+/// owner sees "could not save" for a lock that was gone a millisecond later.
+const BUSY_TIMEOUT_MS: u32 = 5_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LakeError {
@@ -85,14 +98,9 @@ impl Lake {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS as u64))?;
         conn.execute_batch(SCHEMA)?;
-
-        let current: Option<i64> = conn
-            .query_row("SELECT version FROM schema_version", [], |r| r.get(0))
-            .optional()?;
-        if current.is_none() {
-            conn.execute("INSERT INTO schema_version (version) VALUES (?1)", params![SCHEMA_VERSION])?;
-        }
+        migrate::run(&conn)?;
 
         Ok(Self { conn })
     }
@@ -322,6 +330,16 @@ impl Lake {
         for span in &object.evidence {
             Self::write_evidence(tx, &object.id, span)?;
         }
+
+        // The search index is maintained here rather than by a trigger so
+        // that it lives and dies inside the same transaction as the object:
+        // an approval that rolls back must not leave the gateway able to
+        // find a rule that no longer exists.
+        tx.execute("DELETE FROM objects_fts WHERE object_id = ?1", params![object.id])?;
+        tx.execute(
+            "INSERT INTO objects_fts (title, body, object_id) VALUES (?1, ?2, ?3)",
+            params![object.title, object.body, object.id],
+        )?;
 
         // Only the edges this compile produced. A recompile regenerates
         // structural edges from the text, and must not throw away what the
@@ -681,6 +699,16 @@ impl Lake {
                  updated_at = ?3, stale_since = NULL
              WHERE id = ?1",
             params![object_id, body, at, decided_by, edited as i64],
+        )?;
+
+        // The owner edited the wording; the index has to say what the rule
+        // now says, or an agent searching for the approved text does not
+        // find the approved object.
+        tx.execute("DELETE FROM objects_fts WHERE object_id = ?1", params![object_id])?;
+        tx.execute(
+            "INSERT INTO objects_fts (title, body, object_id)
+             SELECT title, ?2, id FROM objects WHERE id = ?1",
+            params![object_id, body],
         )?;
 
         // Everything that uses this now rests on something that moved. This

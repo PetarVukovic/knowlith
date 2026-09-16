@@ -1,0 +1,104 @@
+{
+  "dependencies": [
+    {
+      "from": "process:postupak-odobravanja-popusta",
+      "to": "rule:prag-prometa-kupca",
+      "why": "Korak provjere prometa koristi prag prometa definiran tim pravilom."
+    },
+    {
+      "from": "process:postupak-odobravanja-popusta",
+      "to": "rule:redovni-popust-od-5",
+      "why": "Granica od 5% do koje popust prolazi bez eskalacije proizlazi iz tog pravila."
+    },
+    {
+      "from": "process:postupak-odobravanja-popusta",
+      "to": "rule:povecani-popust-do-10",
+      "why": "Slanje zahtjeva direktoru za popuste veće od 5% ovisi o pravilu o pisanoj suglasnosti direktora."
+    },
+    {
+      "from": "process:postupak-odobravanja-popusta",
+      "to": "rule:evidencija-odobrenih-popusta",
+      "why": "Odobreni popusti veći od 5% moraju se evidentirati prema tom pravilu."
+    },
+    {
+      "from": "rule:popust-od-5-za-stalne-kupce",
+      "to": "rule:popust-za-stalne-kupce",
+      "why": "Koristi pojam stalnog kupca koji je definiran tim pravilom."
+    },
+    {
+      "from": "rule:vrijeme-izlaska-na-teren-za-ugovorne-korisnike",
+      "to": "rule:rok-izlaska-na-teren",
+      "why": "Mijenja rok od 24 sata utvrđen tim pravilom."
+    },
+    {
+      "from": "fact:razlog-produljenja-roka",
+      "to": "rule:vrijeme-izlaska-na-teren-za-ugovorne-korisnike",
+      "why": "Objašnjava razlog produljenog roka izlaska utvrđenog tim pravilom."
+    },
+    {
+      "from": "rule:rok-izlaska-na-teren",
+      "to": "process:prijava-kvara",
+      "why": "Rok se računa od prijave kvara koja se podnosi tim postupkom."
+    },
+    {
+      "from": "process:ispunjavanje-servisnog-naloga",
+      "to": "rule:evidentiranje-prijave-istog-radnog-dana",
+      "why": "Pravilo određuje rok u kojem se prijava mora unijeti u servisni nalog."
+    },
+    {
+      "from": "rule:evidentiranje-prijave-istog-radnog-dana",
+      "to": "process:prijava-kvara",
+      "why": "Koristi prijavu kvara kako je definirana tim postupkom."
+    },
+    {
+      "from": "process:potpis-primopredajnog-zapisnika",
+      "to": "rule:potpisi-obiju-strana",
+      "why": "Pravilo određuje tko sve mora potpisati zapisnik."
+    },
+    {
+      "from": "process:potpis-primopredajnog-zapisnika",
+      "to": "rule:izjava-narucitelja-o-pregledu-radova",
+      "why": "Pravilo određuje pravni učinak potpisa naručitelja u tom koraku."
+    },
+    {
+      "from": "rule:potpisi-obiju-strana",
+      "to": "fact:izvodac-radova",
+      "why": "Tko je predstavnik izvođača ovisi o tome tko je izvođač."
+    },
+    {
+      "from": "rule:rok-za-izdavanje-racuna",
+      "to": "process:potpis-primopredajnog-zapisnika",
+      "why": "Rok se računa od potpisa zapisnika iz tog postupka."
+    },
+    {
+      "from": "rule:jamstveni-rok-na-ugradnju",
+      "to": "process:potpis-primopredajnog-zapisnika",
+      "why": "Početak jamstvenog roka vezan je uz primopredaju iz tog postupka."
+    },
+    {
+      "from": "fact:jamstveni-rok-na-ugradnju",
+      "to": "process:potpis-primopredajnog-zapisnika",
+      "why": "Rok teče od dana primopredaje koja se provodi tim postupkom."
+    },
+    {
+      "from": "rule:naplata-izlaska-na-teren",
+      "to": "rule:jamstveni-rok-na-ugradnju",
+      "why": "Besplatan izlazak ovisi o tome traje li jamstveni rok na ugradnju."
+    },
+    {
+      "from": "rule:naplata-izlaska-na-teren",
+      "to": "fact:jamstveni-rok-na-opremu",
+      "why": "Je li uređaj u jamstvenom roku ovisi o jamstvenom roku opreme."
+    },
+    {
+      "from": "rule:iskljucenja-iz-jamstva",
+      "to": "rule:uvjet-redovnog-godisnjeg-servisa",
+      "why": "Isključenje zbog izostanka servisa oslanja se na uvjet redovnog godišnjeg servisa."
+    },
+    {
+      "from": "rule:sto-jamstvo-ne-pokriva",
+      "to": "rule:uvjet-redovnog-godisnjeg-servisa",
+      "why": "Koristi pojam redovnog godišnjeg servisa definiran tim pravilom."
+    }
+  ]
+}

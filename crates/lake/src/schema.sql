@@ -256,3 +256,47 @@ CREATE TABLE IF NOT EXISTS candidates (
     created_at   TEXT NOT NULL,
     PRIMARY KEY (document_id, ordinal)
 );
+
+-- ------------------------------------------------------------ retrieval --
+
+-- Objects are searched by their own words, not by the words of the documents
+-- they came from. An approved rule is written in the owner's language and is
+-- short; the paragraph behind it is long and may be a scanned contract. An
+-- agent asking "what is the payment term" should match the rule.
+--
+-- Diacritics folded here for the same reason as in `blocks_fts`: an agent
+-- writing "placanje" is not making a mistake, it is typing what a keyboard
+-- gave it.
+CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(
+    title,
+    body,
+    object_id UNINDEXED,
+    tokenize = "unicode61 remove_diacritics 2"
+);
+
+-- ---------------------------------------------------------------- cases --
+
+-- One piece of work an agent was asked to do.
+--
+-- This table is what lets the gateway say "you have not looked at the
+-- warranty" instead of answering whatever was asked and hoping. Retrieval
+-- systems cannot normally make that statement: having returned five
+-- passages, they have no idea what the sixth would have been. Here the set
+-- of approved objects is finite and related, so the ones a question touches
+-- can be listed up front and ticked off as they are actually read.
+CREATE TABLE IF NOT EXISTS cases (
+    id           TEXT PRIMARY KEY,
+    tenant_id    TEXT NOT NULL DEFAULT 'local',
+    question     TEXT NOT NULL,
+    -- The object ids the gateway said were relevant when the case opened.
+    -- Stored rather than recomputed, so closing a case measures what was
+    -- actually asked for and not what the lake looks like now.
+    areas_json   TEXT NOT NULL,
+    opened_at    TEXT NOT NULL,
+    closed_at    TEXT,
+    -- What the agent said it concluded. Kept for the owner to read, never
+    -- served back as knowledge.
+    summary      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cases_open ON cases(closed_at, opened_at DESC);

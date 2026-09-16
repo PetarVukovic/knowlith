@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/extract", "crates/lake", "crates/graph", "crates/engine", "crates/compiler", "crates/server", "crates/worker", "crates/cli"]
+members = ["crates/core", "crates/extract", "crates/lake", "crates/graph", "crates/engine", "crates/compiler", "crates/desktop", "crates/mcp", "crates/server", "crates/worker", "crates/cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,8 @@ authors = ["Knowlith contributors"]
 
 [workspace.dependencies]
 knowlith-core = { path = "crates/core" }
+knowlith-desktop = { path = "crates/desktop" }
+knowlith-mcp = { path = "crates/mcp" }
 knowlith-compiler = { path = "crates/compiler" }
 knowlith-engine = { path = "crates/engine" }
 knowlith-extract = { path = "crates/extract" }
@@ -37,6 +39,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 tower-http = { version = "0.7", features = ["cors"] }
 sha2 = "0.10"
 thiserror = "2"
+toml_edit = "0.23"
 zip = { version = "4", default-features = false, features = ["deflate"] }
 
 [profile.release]

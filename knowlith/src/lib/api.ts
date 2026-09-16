@@ -10,7 +10,12 @@
 import * as fixtures from "./mock"
 import { sleep } from "./utils"
 import type {
+  AiTool,
+  AutostartState,
   CompilerRun,
+  ConnectPreview,
+  Policy,
+  PolicyState,
   SourceDocument,
   ToolRead,
   ContextObject,
@@ -202,3 +207,95 @@ export const api = {
 }
 
 export type ScanResult = Awaited<ReturnType<typeof api.scanFolder>>
+
+/**
+ * Everything about handing Knowlith to the AI applications on this machine.
+ *
+ * Every one of these needs a real daemon: there is nothing to demonstrate
+ * about connecting an application that is not there, and a fixture that
+ * said "connected" would be a lie the owner acts on.
+ */
+export const tools = {
+  async list(): Promise<AiTool[]> {
+    return get<AiTool[]>("/api/tools", [])
+  },
+
+  /** What would be written, so the owner agrees to something specific. */
+  async preview(slug: string): Promise<ConnectPreview | null> {
+    if (!(await connected())) return null
+    try {
+      const response = await fetch(`${DAEMON}/api/tools/${slug}/preview`)
+      if (!response.ok) return null
+      return (await response.json()) as ConnectPreview
+    } catch {
+      return null
+    }
+  },
+
+  async connect(slug: string) {
+    return post<{ connected: boolean; refreshHint: string; needsRestart: boolean; running: boolean }>(
+      `/api/tools/${slug}/connect`,
+    )
+  },
+
+  async disconnect(slug: string) {
+    return post<{ connected: boolean }>(`/api/tools/${slug}/disconnect`)
+  },
+
+  /** Opens the application, restarting it when that is what it takes. */
+  async open(slug: string) {
+    return post<{ message: string }>(`/api/tools/${slug}/open`)
+  },
+
+  /** Builds the Claude Desktop extension and opens its install screen. */
+  async bundle() {
+    return post<{ path: string; megabytes: number; version: string }>("/api/bundle")
+  },
+}
+
+export const background = {
+  async policy(): Promise<PolicyState | null> {
+    if (!(await connected())) return null
+    try {
+      const response = await fetch(`${DAEMON}/api/policy`)
+      if (!response.ok) return null
+      return (await response.json()) as PolicyState
+    } catch {
+      return null
+    }
+  },
+
+  async setPolicy(policy: Policy): Promise<PolicyState | null> {
+    if (!(await connected())) return null
+    try {
+      const response = await fetch(`${DAEMON}/api/policy`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(policy),
+      })
+      if (!response.ok) return null
+      return (await response.json()) as PolicyState
+    } catch {
+      return null
+    }
+  },
+
+  async release() {
+    return post<{ released: number }>("/api/work/release")
+  },
+
+  async autostart(): Promise<AutostartState | null> {
+    if (!(await connected())) return null
+    try {
+      const response = await fetch(`${DAEMON}/api/autostart`)
+      if (!response.ok) return null
+      return (await response.json()) as AutostartState
+    } catch {
+      return null
+    }
+  },
+
+  async setAutostart(on: boolean) {
+    return post<AutostartState>(`/api/autostart/${on ? "on" : "off"}`)
+  },
+}

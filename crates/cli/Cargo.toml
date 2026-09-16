@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 knowlith-core.workspace = true
+knowlith-desktop.workspace = true
+knowlith-mcp.workspace = true
 knowlith-compiler.workspace = true
 knowlith-engine.workspace = true
 knowlith-extract.workspace = true

@@ -1,5 +1,6 @@
 [package]
-name = "knowlith-worker"
+name = "knowlith-desktop"
+description = "Where things live on this machine, and how to hand Knowlith to the AI apps installed on it."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,14 +8,10 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-knowlith-core.workspace = true
-knowlith-desktop.workspace = true
-knowlith-compiler.workspace = true
-knowlith-engine.workspace = true
-knowlith-extract.workspace = true
-knowlith-lake.workspace = true
+anyhow.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-walkdir.workspace = true
+toml_edit.workspace = true
+zip.workspace = true

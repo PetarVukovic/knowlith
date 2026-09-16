@@ -1,0 +1,144 @@
+# Builds the binaries the installers download.
+#
+# Four targets, each built on its own operating system rather than
+# cross-compiled. `rusqlite`'s bundled SQLite compiles C, and cross-compiling
+# C toolchains is the kind of thing that works until the day it does not —
+# on a release, in front of someone trying to install.
+#
+# The interface is built once and embedded into every binary, so a company
+# gets one file and no Node.js.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build, for a dry run"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  interface:
+    name: interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: knowlith/package-lock.json
+      - run: npm ci
+        working-directory: knowlith
+      - run: npm run build
+        working-directory: knowlith
+      - uses: actions/upload-artifact@v4
+        with:
+          name: interface
+          path: knowlith/dist
+          retention-days: 1
+
+  build:
+    name: ${{ matrix.target }}
+    needs: interface
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One target failing must not cancel the others: a release with three
+      # of four platforms is worth publishing, and the fourth can follow.
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: interface
+          path: knowlith/dist
+
+      - name: Test
+        # The tests are the same everywhere and are what makes a Windows
+        # release something other than a hope.
+        run: cargo test --workspace --target ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} --bin knowlith
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME:-dev}"
+          name="knowlith-${version}-${{ matrix.target }}"
+          mkdir -p "dist/${name}"
+          cp "target/${{ matrix.target }}/release/knowlith" "dist/${name}/"
+          cp README.md LICENSE "dist/${name}/" 2>/dev/null || true
+          tar -czf "dist/${name}.tar.gz" -C "dist/${name}" .
+          shasum -a 256 "dist/${name}.tar.gz" | awk -v n="${name}.tar.gz" '{print $1"  "n}' > "dist/${name}.sha256"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $name = "knowlith-$version-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path "dist/$name" -Force | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/knowlith.exe" "dist/$name/"
+          Copy-Item README.md "dist/$name/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "dist/$name/*" -DestinationPath "dist/$name.zip" -Force
+          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "dist/$name.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+
+      - name: Collect checksums
+        # One file the installers can fetch, rather than one per target.
+        run: cat dist/*.sha256 > dist/checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          generate_release_notes: true

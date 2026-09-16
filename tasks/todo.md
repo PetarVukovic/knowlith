@@ -1,83 +1,54 @@
-# Next: the MCP gateway
+# Where this stands
 
-The last unbuilt piece of the loop. Everything up to it works: a folder is read,
-compiled, settled across documents, related into a graph, drafted into skills and
-approved in the interface — and then the approved knowledge sits in SQLite and
-reaches nothing. `tool_reads` is an empty table, which is why no screen says
-"read by 3 AI tools": it would not be true.
+The gateway is built. A folder becomes knowledge, the owner approves it, and
+an AI tool on the same machine can read it — with the document, the locator
+and the quote attached to every answer.
 
-## Shape
+## Done this round
 
-A stdio server the client spawns, not an HTTP port. Same pattern as the engine:
-the client owns the process lifetime, the boundary is the user account on this
-Mac, and there is no network and no authentication to invent.
+- `crates/mcp` — JSON-RPC over stdio, 11 tools, skills as prompts, the
+  company card as a resource, `listChanged` when the owner approves
+  something mid-conversation, a panic in one tool refused rather than fatal.
+- `crates/desktop` — every path, application config, login registration,
+  power reading and the company's icon, in one crate so the Windows story is
+  four files rather than eleven thousand lines.
+- Claude Desktop, Claude Code and Codex connected in place, with a backup,
+  atomically, preserving comments and everything else in the file.
+- `knowlith.mcpb`, so Claude Desktop can install it with its own screen.
+- Standing instructions written into `AGENTS.md` and `CLAUDE.md`, inside
+  markers, so the agent knows when to reach for the company.
+- The background service registered with `launchd` / Task Scheduler /
+  `systemd --user`, with a policy for what it may spend on its own.
+- The interface compiled into the binary; `curl | sh` and `irm | iex`
+  installers; a release workflow that builds and tests four targets.
 
-```json
-{ "mcpServers": { "knowlith": { "command": "knowlith", "args": ["mcp"] } } }
-```
+## Next, in order
 
-It opens its own connection to `lake.sqlite` — a third one, next to `server` and
-`worker`. WAL is what makes that safe, and not sharing a mutex is what keeps a
-long agent call from freezing the interface.
+1. **Run it on a real Windows machine.** Everything is written for it and
+   the tests run there in CI, but the scheduled task, Claude Desktop's
+   install path and `claude.cmd` on `PATH` have never met a real desktop.
 
-Read-only, with exactly one exception: it writes `tool_reads`.
+2. **Per-application read counts.** `tool_reads` records every serve, but
+   the protocol does not carry the client's identity, so "Claude read your
+   pricing 5 times today" cannot honestly be said yet. The client's name
+   arrives in `initialize`; carrying it through to each read is small.
 
-## The gate
+3. **The activity feed.** The data is already there — `tool_reads`,
+   `cases`, approvals, job outcomes. What is missing is one screen that
+   turns it into "Codex used *Odobravanje popusta* for a quote", which is
+   what makes an owner feel the thing is alive.
 
-This is the product decision, not a technical one.
+4. **Knowlith Managed.** `ManagedEngine` still says it does not exist.
 
-| Object state | What the agent gets |
-| --- | --- |
-| `approved` + at least one verified span | the text, the quote and the source |
-| `approved` + `stale_since` set | the same, flagged: the source moved after approval |
-| `conflicted` | the *name* of the open question, never either answer |
-| `proposed` | the same — named, not given |
-| `superseded`, `rejected` | nothing at all |
+## Decisions that were made
 
-The middle rows matter more than they look. Hiding an undecided question does
-not stop an agent answering it — it makes the agent invent an answer. Told
-"there is an open question about payment terms", an agent says so and asks the
-owner. Told nothing, it writes 30 days because that sounds right.
-
-Serving a stale answer silently and withholding one silently are both worse than
-saying which it is.
-
-## Tools
-
-| Tool | Answers | Why it is separate |
-| --- | --- | --- |
-| `search_knowledge` | "what does this company say about complaints" | FTS5, diacritics folded, approved objects only |
-| `get_rules` | the preload at the start of a conversation | the small card that always applies: VAT, terms, currency |
-| `read_source` | "show me the exact passage" | so the agent quotes verbatim instead of paraphrasing |
-| `lookup_value` | "what does installing three units cost" | an exact row read, never similarity |
-| `what_breaks_if` | "I am changing the turnover threshold" | the graph — the one thing nothing else here has |
-| `what_this_rests_on` | attached to every rule returned | a discount rule without its threshold is incomplete |
-| `list_pending` | "what has the owner not decided" | so the agent knows when it must not answer |
-
-A figure is never returned from prose. Price rows were dropped from the approval
-queue for this reason: a price is something the daemon reads, not something a
-model recalls. Retrieved by similarity a price comes back *close*; read from the
-row it comes back right or not at all.
-
-Every result carries its document name, locator and quote, so the agent's answer
-can cite. Every serve writes a `tool_reads` row.
-
-## Decisions the owner has to make first
-
-1. **May an agent write back?** The proposal is yes, but only as `proposed`, so
-   anything an agent suggests lands in the same review queue as everything the
-   compiler produces. No second path to becoming knowledge. The alternative is
-   strictly read-only.
-2. **Skills as MCP prompts or as tools?** Prompts give `/knowlith:odobri-popust`
-   in Claude Code, which feels far better; tools let the agent reach for one
-   itself. Probably both surfaces over the same object.
-3. **Preload or search only?** Fifty-one objects fit in a context window and
-   three thousand do not. A small always-loaded company card plus search for
-   everything else — but what belongs on that card is a product decision, not a
-   technical one.
-
-## After that
-
-- Knowlith Managed. `ManagedEngine` currently says it does not exist rather than
-  pretending, which is the right placeholder but not a product.
-- Amounts written in words are not recognised as figures.
+- **An agent may write, as `proposed` only.** `propose_change` goes through
+  the same evidence gate as the compiler: the quote is located in a real
+  document or the suggestion is refused. There is no second path to
+  becoming company knowledge.
+- **Skills are prompts and tools.** A prompt so the owner can type one; a
+  tool so an agent mid-task can reach for one. Same object.
+- **Neither preload nor search alone.** `get_relevant_context` returns the
+  map of what is relevant, which is small, always accurate, and forces the
+  retrieval rather than replacing it. The company card stays as a resource
+  for clients that attach one.

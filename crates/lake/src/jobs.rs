@@ -174,10 +174,50 @@ impl Lake {
         Ok(())
     }
 
+    /// Puts a leased job back down without counting it as an attempt.
+    ///
+    /// Held is not failed and it is not deferred. The work is fine, the
+    /// moment is wrong — the owner is on battery, or asked to be asked —
+    /// and it must not age towards `dead` while it waits, which is exactly
+    /// what repeated deferral would do to a laptop left unplugged overnight.
+    pub fn hold(&self, job_id: i64, reason: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE jobs
+             SET state = 'held', last_error = ?2, lease_until = NULL,
+                 attempts = max(attempts - 1, 0)
+             WHERE id = ?1",
+            params![job_id, reason],
+        )?;
+        Ok(())
+    }
+
+    /// Lets every held job run. What the owner presses when they plug in or
+    /// say go.
+    pub fn release_held(&self) -> Result<usize> {
+        let released = self.conn.execute(
+            "UPDATE jobs SET state = 'queued', run_after = ?1, last_error = NULL
+             WHERE state = 'held'",
+            params![Utc::now().to_rfc3339()],
+        )?;
+        Ok(released)
+    }
+
+    /// Held jobs, with why, so the interface can say which button helps.
+    pub fn held(&self) -> Result<Vec<(String, String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, coalesce(last_error, 'held'), count(*)
+             FROM jobs WHERE state = 'held' GROUP BY kind, last_error",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// How much of one kind of work is still outstanding.
     pub fn pending_of_kind(&self, kind: &str) -> Result<i64> {
         Ok(self.conn.query_row(
-            "SELECT count(*) FROM jobs WHERE kind = ?1 AND state IN ('queued', 'leased')",
+            "SELECT count(*) FROM jobs WHERE kind = ?1 AND state IN ('queued', 'leased', 'held')",
             params![kind],
             |r| r.get(0),
         )?)

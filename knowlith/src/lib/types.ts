@@ -278,3 +278,60 @@ export interface Company {
   employees: string
   industry: string
 }
+
+/**
+ * One AI application on this machine, as the daemon sees it.
+ *
+ * `state` rather than a boolean because "Connect" hides the four situations
+ * an owner is actually in, and only one of them is alarming. An application
+ * that is connected to a Knowlith which no longer exists looks identical to
+ * a working one unless the difference is named.
+ */
+export interface AiTool {
+  slug: "claude-desktop" | "claude-code" | "codex"
+  label: string
+  state: "missing" | "ready" | "connected" | "needs-attention"
+  installed: boolean
+  connected: boolean
+  /** Whether the application has a window open right now. */
+  running: boolean
+  configPath: string | null
+  needsRestart: boolean
+  refreshHint: string
+  /** Set when something is wrong that the owner can repair. */
+  problem: string | null
+  reads: number
+}
+
+/** What connecting would write, shown before it is written. */
+export interface ConnectPreview {
+  configPath: string | null
+  snippet: string
+  refreshHint: string
+}
+
+/** What the background service is allowed to do on its own. */
+export interface Policy {
+  processing: "automatic" | "ask" | "manual"
+  pauseOnBattery: boolean
+  largeScan: number
+}
+
+export interface HeldWork {
+  kind: string
+  reason: string
+  count: number
+}
+
+export interface PolicyState {
+  policy: Policy
+  held: HeldWork[]
+  onBattery: boolean
+}
+
+/** Whether the daemon starts with the machine. */
+export interface AutostartState {
+  enabled: boolean
+  location: string | null
+  running: boolean
+}

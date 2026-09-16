@@ -161,6 +161,66 @@ enum Command {
         #[arg(long, default_value_t = 120)]
         timeout: u64,
     },
+    /// Serve this company's approved knowledge to an AI tool over stdio.
+    ///
+    /// Not run by hand. An AI application starts this, speaks JSON-RPC on
+    /// stdin and stdout, and stops it when it closes. Everything a person
+    /// would want to read goes to stderr, because a single stray line on
+    /// stdout ends the session.
+    Mcp {
+        #[arg(long, default_value = "Termoval d.o.o.")]
+        company: String,
+    },
+    /// Hand Knowlith to the AI applications on this machine.
+    Connect {
+        /// `claude-desktop`, `claude-code` or `codex`. All of them when omitted.
+        app: Option<String>,
+        /// Show what would be written, and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also open the application, restarting it if it needs that.
+        #[arg(long)]
+        open: bool,
+        /// Also write the standing instruction that tells the agent when to
+        /// reach for the company.
+        #[arg(long, default_value_t = true)]
+        guidance: bool,
+        #[arg(long, default_value = "Termoval d.o.o.")]
+        company: String,
+    },
+    /// Take Knowlith back out of an application's settings.
+    Disconnect {
+        app: Option<String>,
+    },
+    /// Which AI applications can see this company, and which cannot.
+    Tools,
+    /// Build the Claude Desktop extension, so it can be installed with a
+    /// double-click instead of by editing a configuration file.
+    Bundle {
+        #[arg(long, default_value = "Termoval d.o.o.")]
+        company: String,
+        /// Open it, which is what shows Claude Desktop's install screen.
+        #[arg(long)]
+        install: bool,
+    },
+    /// Keep the background service running when the window is closed.
+    Autostart {
+        #[command(subcommand)]
+        what: AutostartCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AutostartCommand {
+    /// Register with this machine's login service and start now.
+    On {
+        #[arg(long, default_value_t = 7717)]
+        port: u16,
+    },
+    /// Remove the registration and stop.
+    Off,
+    /// Whether it is registered, and whether it is answering.
+    Show,
 }
 
 fn main() -> Result<()> {
@@ -224,6 +284,21 @@ fn main() -> Result<()> {
             println!("noted — that pair will not be offered again");
             Ok(())
         }
+        Command::Mcp { company } => {
+            drop(lake);
+            knowlith_mcp::serve(knowlith_mcp::Options { db, company })
+        }
+        Command::Connect {
+            app,
+            dry_run,
+            open,
+            guidance,
+            company,
+        } => connect(app.as_deref(), dry_run, open, guidance, &company),
+        Command::Disconnect { app } => disconnect(app.as_deref()),
+        Command::Tools => tools_status(),
+        Command::Bundle { company, install } => bundle(&lake, &company, install),
+        Command::Autostart { what } => autostart(what),
     }
 }
 
@@ -677,11 +752,13 @@ fn ask(instructions: &str, document: Option<&Path>, engine: &str, timeout: u64) 
     }
 }
 
+/// The lake lives beside the knowledge, in a folder the owner can open,
+/// back up and take with them.
+///
+/// Resolved through `knowlith-desktop` rather than from `HOME`, which does
+/// not exist on Windows and is set to a private root by Git Bash.
 fn default_db() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    // The lake lives beside the knowledge, in a folder the owner can open,
-    // back up and take with them.
-    Path::new(&home).join("Knowlith/data/lake.sqlite")
+    knowlith_desktop::paths::lake_db()
 }
 
 fn scan(lake: &mut Lake, folder: &Path, source: &str, dry_run: bool) -> Result<()> {
@@ -923,4 +1000,216 @@ fn human_bytes(bytes: u64) -> String {
     } else {
         format!("{value:.1} {}", UNITS[unit])
     }
+}
+
+// ------------------------------------------------------- AI applications --
+
+/// Hands Knowlith to one application, or to every one that is installed.
+///
+/// Reports per application rather than as one success or failure: a machine
+/// with Claude Desktop and no Codex is the normal case, and "connected 1 of
+/// 3" reads as a failure when it is the right answer.
+fn connect(
+    app: Option<&str>,
+    dry_run: bool,
+    open: bool,
+    guidance: bool,
+    company: &str,
+) -> Result<()> {
+    let targets = chosen(app)?;
+
+    for target in targets {
+        let status = knowlith_desktop::status(target);
+        if !status.installed {
+            println!("{} — not on this machine", target.label());
+            continue;
+        }
+
+        if dry_run {
+            println!("{} — would write into {}", target.label(), status.config_path.unwrap_or_default());
+            println!("{}", indent(&knowlith_desktop::connect::manual_instructions(target)));
+            continue;
+        }
+
+        match knowlith_desktop::connect(target) {
+            Ok(now) => {
+                println!("{} — connected", target.label());
+                println!("  {}", now.config_path.unwrap_or_default());
+                println!("  {}", target.refresh_hint());
+            }
+            Err(e) => {
+                println!("{} — not connected: {e}", target.label());
+                println!("{}", indent(&knowlith_desktop::connect::manual_instructions(target)));
+                continue;
+            }
+        }
+
+        if guidance {
+            let guide = match target {
+                knowlith_desktop::App::Codex => Some(knowlith_desktop::Guide::Codex),
+                knowlith_desktop::App::ClaudeCode => Some(knowlith_desktop::Guide::ClaudeCode),
+                // Claude Desktop has no standing-instructions file; what it
+                // reads is the server's own `instructions`, which it gets
+                // anyway.
+                knowlith_desktop::App::ClaudeDesktop => None,
+            };
+            if let Some(guide) = guide {
+                match knowlith_desktop::guidance::write(guide, company) {
+                    Ok(path) => println!("  told {} when to use it — {}", guide.label(), path.display()),
+                    Err(e) => println!("  could not write the standing instruction: {e}"),
+                }
+            }
+        }
+
+        if open {
+            let outcome = knowlith_desktop::open_or_restart(target);
+            println!("  {}", outcome.message(target));
+        }
+    }
+    Ok(())
+}
+
+fn disconnect(app: Option<&str>) -> Result<()> {
+    for target in chosen(app)? {
+        match knowlith_desktop::disconnect(target) {
+            Ok(_) => println!("{} — removed", target.label()),
+            Err(e) => println!("{} — could not remove: {e}", target.label()),
+        }
+    }
+    Ok(())
+}
+
+/// What every application on this machine currently says about Knowlith.
+fn tools_status() -> Result<()> {
+    for status in knowlith_desktop::status_all() {
+        let state = if !status.installed {
+            "not installed".to_string()
+        } else if status.stale_command.is_some() {
+            "needs attention".to_string()
+        } else if status.connected {
+            "connected".to_string()
+        } else {
+            "not connected".to_string()
+        };
+        println!("{} — {state}", status.label);
+
+        if let Some(stale) = &status.stale_command {
+            println!("  it is pointing at {stale}, which is not this Knowlith");
+            println!("  run `knowlith connect {}` to repair it", status.slug);
+        }
+        if let Some(path) = &status.config_path {
+            println!("  {path}");
+        }
+        if status.installed && !status.connected {
+            println!("  run `knowlith connect {}`", status.slug);
+        }
+    }
+    Ok(())
+}
+
+fn bundle(lake: &Lake, company: &str, install: bool) -> Result<()> {
+    // The manifest lists what the extension can do, so Claude Desktop's
+    // install screen shows the tools by name instead of a count. The list
+    // comes from the gateway itself, which is the only way it cannot drift.
+    let icon = serde_json::to_value(knowlith_desktop::company_icon(company))?;
+    let tools = knowlith_mcp::tools::catalogue(&icon)
+        .into_iter()
+        .map(|entry| {
+            (
+                entry["name"].as_str().unwrap_or_default().to_string(),
+                entry["description"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    let prompts = knowlith_mcp::prompts::list(lake, &icon)
+        .into_iter()
+        .map(|entry| {
+            (
+                entry["name"].as_str().unwrap_or_default().to_string(),
+                entry["description"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+
+    let built = knowlith_desktop::bundle::build(&knowlith_desktop::bundle::Contents {
+        company,
+        tools,
+        prompts,
+    })?;
+
+    println!("{}", built.path);
+    println!("  {:.1} MB · version {}", built.bytes as f64 / 1_048_576.0, built.version);
+
+    if install {
+        knowlith_desktop::bundle::reveal(&built);
+        println!("  opened — Claude Desktop will show what it installs before it does");
+    } else {
+        println!("  open it, or run again with --install, to let Claude Desktop install it");
+    }
+    Ok(())
+}
+
+fn autostart(what: AutostartCommand) -> Result<()> {
+    match what {
+        AutostartCommand::On { port } => {
+            let state = knowlith_desktop::autostart::enable(port)?;
+            println!("the background service starts with this machine");
+            if let Some(location) = state.location {
+                println!("  {location}");
+            }
+            println!(
+                "  {}",
+                if state.running {
+                    "it is running now"
+                } else {
+                    "it is not answering yet — give it a moment"
+                }
+            );
+        }
+        AutostartCommand::Off => {
+            let state = knowlith_desktop::autostart::disable()?;
+            println!("removed — nothing starts on its own any more");
+            if state.running {
+                println!("  something is still answering on the port; it will stop when it exits");
+            }
+        }
+        AutostartCommand::Show => {
+            let state = knowlith_desktop::autostart::status();
+            println!(
+                "{}",
+                if state.enabled {
+                    "registered to start with this machine"
+                } else {
+                    "not registered — the window has to be open for anything to happen"
+                }
+            );
+            if let Some(location) = state.location {
+                println!("  {location}");
+            }
+            println!(
+                "  {}",
+                if state.running { "running now" } else { "not running" }
+            );
+        }
+    }
+    Ok(())
+}
+
+fn chosen(app: Option<&str>) -> Result<Vec<knowlith_desktop::App>> {
+    match app {
+        None => Ok(knowlith_desktop::App::ALL.to_vec()),
+        Some(name) => match knowlith_desktop::App::parse(name) {
+            Some(app) => Ok(vec![app]),
+            None => anyhow::bail!(
+                "unknown application \"{name}\". Try claude-desktop, claude-code or codex."
+            ),
+        },
+    }
+}
+
+fn indent(text: &str) -> String {
+    text.lines()
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }

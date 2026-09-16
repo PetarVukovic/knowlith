@@ -73,8 +73,13 @@ impl Drop for Folder {
     }
 }
 
+/// A worker on mains power.
+///
+/// Pinned rather than read, because the policy holds expensive jobs when a
+/// laptop is unplugged — and a test suite whose result depends on whether
+/// the machine running it has a charger attached is worse than no test.
 fn worker(engine: Arc<dyn Engine>) -> Worker {
-    Worker::new(Lake::in_memory().unwrap(), engine)
+    Worker::new(Lake::in_memory().unwrap(), engine).on_mains()
 }
 
 #[test]
@@ -232,4 +237,78 @@ fn an_empty_queue_is_an_idle_tick_once_the_housekeeping_has_run() {
     assert!(!first.idle());
 
     assert!(worker.tick(&flag).unwrap().idle());
+}
+
+
+#[test]
+fn an_unplugged_laptop_holds_the_work_instead_of_burning_the_battery() {
+    let folder = Folder::new("battery");
+    folder.write("cjenik.md", "Montaža split sustava: 150 EUR.");
+
+    let mut worker = Worker::new(Lake::in_memory().unwrap(), Arc::new(Scripted("[]"))).unplugged();
+    worker
+        .lake()
+        .put_source("s1", "Prodaja", &folder.path(), "folder", "codex")
+        .unwrap();
+
+    let stop = AtomicBool::new(false);
+
+    // The free half still runs: the folder is read whatever the power says.
+    let mut compiled = false;
+    for _ in 0..12 {
+        let tick = worker.tick(&stop).unwrap();
+        if let Some(outcome) = &tick.outcome {
+            if outcome.starts_with("held:") {
+                compiled = true;
+                assert!(outcome.contains("battery"), "{outcome}");
+                break;
+            }
+        }
+    }
+    assert!(compiled, "the compile job was never reached");
+    assert!(worker.lake().document_count().unwrap() > 0, "reading the folder was held too");
+
+    // Held is not failed: plugging in releases it, and the attempt count
+    // was not spent waiting.
+    let held = worker.lake().held().unwrap();
+    assert!(!held.is_empty(), "nothing was recorded as held");
+    let released = worker.lake().release_held().unwrap();
+    assert!(released > 0);
+    assert!(worker.lake().held().unwrap().is_empty());
+}
+
+#[test]
+fn an_owner_who_turned_automatic_reading_off_gets_no_model_calls() {
+    let folder = Folder::new("manual");
+    folder.write("uvjeti.md", "Rok plaćanja je 30 dana.");
+
+    let mut worker = Worker::new(Lake::in_memory().unwrap(), Arc::new(Scripted("[]"))).on_mains();
+    worker
+        .lake()
+        .set_policy(&knowlith_lake::Policy {
+            processing: knowlith_lake::Processing::Manual,
+            pause_on_battery: false,
+            large_scan: 500,
+        })
+        .unwrap();
+    worker
+        .lake()
+        .put_source("s1", "Uvjeti", &folder.path(), "folder", "codex")
+        .unwrap();
+
+    let stop = AtomicBool::new(false);
+    for _ in 0..12 {
+        worker.tick(&stop).unwrap();
+    }
+
+    let held = worker.lake().held().unwrap();
+    assert!(
+        held.iter().any(|(_, reason, _)| reason == "manual"),
+        "expected work held for manual, got {held:?}"
+    );
+    assert_eq!(
+        worker.lake().object_ids(None).unwrap().len(),
+        0,
+        "something was compiled despite automatic reading being off"
+    );
 }

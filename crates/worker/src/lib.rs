@@ -99,6 +99,10 @@ pub struct Worker {
     /// Kept so a rescan can tell whether a file it walked is the same one the
     /// lake already read.
     rescan_hours: i64,
+    /// Set only by tests. Reading the real power state would make every
+    /// test in this crate depend on whether the laptop running it happens
+    /// to be plugged in, which is the kind of failure nobody reproduces.
+    power: Option<bool>,
 }
 
 impl Worker {
@@ -109,7 +113,24 @@ impl Worker {
             .flatten()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_RESCAN_HOURS);
-        Self { lake, engine, rescan_hours }
+        Self {
+            lake,
+            engine,
+            rescan_hours,
+            power: None,
+        }
+    }
+
+    /// Pins the power state, for tests.
+    pub fn on_mains(mut self) -> Self {
+        self.power = Some(false);
+        self
+    }
+
+    /// Pins the power state to battery, for tests.
+    pub fn unplugged(mut self) -> Self {
+        self.power = Some(true);
+        self
     }
 
     pub fn open(db: &Path, engine: Arc<dyn Engine>) -> Result<Self> {
@@ -142,6 +163,18 @@ impl Worker {
             return Ok(tick);
         };
         tick.ran = Some(job.kind.clone());
+
+        // Expensive work is the owner's to allow. A job that needs a model
+        // is put back down rather than deferred, because deferring ages it
+        // towards `dead` and a laptop left unplugged overnight would wake
+        // up having thrown its own queue away.
+        if needs_a_model(&job.kind) {
+            if let Err(held) = self.lake.policy().may_run_ai(self.on_battery()) {
+                self.lake.hold(job.id, held.as_str())?;
+                tick.outcome = Some(format!("held: {}", held.reason()));
+                return Ok(tick);
+            }
+        }
 
         let outcome = self.dispatch(&job, stop);
         match outcome {
@@ -245,6 +278,15 @@ impl Worker {
         }
 
         Ok(queued)
+    }
+
+    /// Whether this machine is on battery right now.
+    ///
+    /// Read once per job rather than cached: the interesting moment is
+    /// exactly the one where someone unplugs a laptop mid-queue.
+    fn on_battery(&self) -> bool {
+        self.power
+            .unwrap_or_else(|| knowlith_desktop::power::power().on_battery())
     }
 
     fn dispatch(&mut self, job: &knowlith_lake::Job, stop: &AtomicBool) -> std::result::Result<String, Failure> {
@@ -696,4 +738,32 @@ pub fn enqueue_recheck(lake: &Lake) -> Result<bool> {
         // Never ahead of a document somebody added a minute ago.
         priority: PRIORITY_BACKGROUND,
     })?)
+}
+
+/// Whether a kind of job calls a model.
+///
+/// The division that the whole policy rests on. Reading a folder, comparing
+/// what was read and re-checking stored quotes are arithmetic and run
+/// whatever the owner has chosen; the three that ask an engine are the ones
+/// that cost money.
+pub fn needs_a_model(kind: &str) -> bool {
+    matches!(kind, KIND_COMPILE | KIND_SKILLS | KIND_RELATE)
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_three_that_call_an_engine_are_governed() {
+        assert!(needs_a_model(KIND_COMPILE));
+        assert!(needs_a_model(KIND_SKILLS));
+        assert!(needs_a_model(KIND_RELATE));
+
+        // These cost nothing and must keep running on battery, or a laptop
+        // on a train stops noticing that its own files changed.
+        assert!(!needs_a_model(KIND_RESCAN));
+        assert!(!needs_a_model(KIND_SETTLE));
+        assert!(!needs_a_model(KIND_RECHECK));
+    }
 }
