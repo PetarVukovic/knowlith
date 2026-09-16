@@ -176,22 +176,17 @@ async function get<T>(path: string, demo: T, empty: T): Promise<T> {
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T | null> {
-  return send<T>("POST", path, body)
+  return mutate<T>("POST", path, body)
 }
 
-async function send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T | null> {
-  if (!(await connected())) return null
-  try {
-    const response = await ask(path, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body ?? {}),
-    })
-    if (!response.ok) return null
-    return (await response.json()) as T
-  } catch {
-    return null
-  }
+/** A write that either happened or did not; the caller keeps its own row until it did. */
+async function mutate<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T | null> {
+  const result = await send<T>(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  })
+  return failed(result) ? null : result
 }
 
 export const api = {
@@ -235,7 +230,7 @@ export const api = {
   },
   /** Pause or resume the worker's reading of one folder. `null` when the daemon did not take it. */
   async setSourcePaused(id: string, paused: boolean) {
-    return send<{ status: "paused" | "active"; message: string }>(
+    return mutate<{ status: "paused" | "active"; message: string }>(
       "PUT",
       `/api/sources/${encodeURIComponent(id)}/status`,
       { paused },
@@ -243,7 +238,7 @@ export const api = {
   },
   /** Stop reading a folder for good. Files and approved context are untouched. */
   async removeSource(id: string) {
-    return send<{ message: string }>("DELETE", `/api/sources/${encodeURIComponent(id)}`)
+    return mutate<{ message: string }>("DELETE", `/api/sources/${encodeURIComponent(id)}`)
   },
   async getSkills(): Promise<SkillDoc[]> {
     return get<SkillDoc[]>("/api/skills", fixtures.skills, [])

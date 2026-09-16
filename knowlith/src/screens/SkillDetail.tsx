@@ -29,7 +29,7 @@ export function SkillDetail() {
           <TrustStrip
             className="mt-3"
             status={skill.status}
-            confidence={skill.evidence.length > 2 ? 0.95 : 0.88}
+            confidence={skill.confidence}
             evidenceCount={skill.evidence.length}
             decidedBy={skill.decidedBy ?? undefined}
           />

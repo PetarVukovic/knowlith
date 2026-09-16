@@ -1010,6 +1010,7 @@ async fn skills(State(state): State<AppState>) -> ApiResult<Vec<SkillDocDto>> {
                 .map(|e| evidence_dto(e, documents.iter().find(|d| d.id == e.document_id)))
                 .collect(),
             status: status_str(skill.status),
+            confidence: skill.confidence.0,
             version: skill.version,
             updated_at: skill.updated_at.clone(),
         })

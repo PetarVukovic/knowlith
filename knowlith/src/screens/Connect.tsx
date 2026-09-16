@@ -125,7 +125,7 @@ export function Connect() {
           ? `What does ${companyName} say that I should check before I answer a customer?`
           : `Using the ${companyName} knowledge server, what has been approved so far?`
       const result = await toolsApi.try(tool.slug, prompt)
-      setNote(result?.message ?? null)
+      setNote(result && "message" in result ? result.message : (result?.error ?? null))
       setBusy(null)
       void refresh()
       return

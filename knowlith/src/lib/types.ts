@@ -255,6 +255,8 @@ export interface SkillDoc {
   status: ObjectStatus
   /** Who approved it. Absent when nobody has — never a stand-in name. */
   decidedBy: string | null
+  /** The compiler's score, from the row — never derived on the page. */
+  confidence: number
   version: number
   updatedAt: string
 }

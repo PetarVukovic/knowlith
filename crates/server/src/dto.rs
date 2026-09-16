@@ -399,6 +399,10 @@ pub struct SkillDocDto {
     /// product can put on a screen, so the field exists and is `None`
     /// rather than being filled in by the page.
     pub decided_by: Option<String>,
+    /// The compiler's own score for this skill. The page used to show
+    /// 0.95 or 0.88 depending on whether it had more than two spans — a
+    /// number with the shape of a measurement and nothing behind it.
+    pub confidence: f32,
     pub version: u32,
     pub updated_at: String,
 }
