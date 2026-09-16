@@ -45,12 +45,12 @@ everything it writes lives under your home directory.
 
 ```sh
 # macOS and Linux
-curl -fsSL https://raw.githubusercontent.com/OWNER/knowlith/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.sh | sh
 ```
 
 ```powershell
 # Windows
-irm https://raw.githubusercontent.com/OWNER/knowlith/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.ps1 | iex
 ```
 
 Then:

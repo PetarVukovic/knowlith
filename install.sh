@@ -1,7 +1,7 @@
 #!/bin/sh
 # Knowlith installer for macOS and Linux.
 #
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/knowlith/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.sh | sh
 #
 # Written in POSIX sh rather than bash, because macOS ships bash 3.2 and the
 # one thing an installer may never do is fail on the machine it was written
@@ -14,7 +14,7 @@
 
 set -eu
 
-REPO="${KNOWLITH_REPO:-OWNER/knowlith}"
+REPO="${KNOWLITH_REPO:-PetarVukovic/knowlith}"
 VERSION="${KNOWLITH_VERSION:-latest}"
 BIN_DIR="${KNOWLITH_BIN_DIR:-$HOME/.local/bin}"
 
@@ -22,16 +22,6 @@ say() { printf '  %s\n' "$*"; }
 die() { printf '\nknowlith: %s\n' "$*" >&2; exit 1; }
 
 printf '\nKnowlith\n'
-
-# Until the repository is published, the placeholder above points nowhere.
-# Saying that beats a download that fails with a GitHub 404, which reads as
-# "the release is broken" rather than "this has not shipped yet".
-case "$REPO" in
-  OWNER/*) die "this installer has not been pointed at a repository yet.
-  Set KNOWLITH_REPO=owner/name, or build from source:
-    git clone <repo> && cd knowlith && npm ci && npm run build
-    cd .. && cargo build --release --bin knowlith" ;;
-esac
 
 # ---------------------------------------------------------------- platform --
 

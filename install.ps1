@@ -1,7 +1,7 @@
 <#
 Knowlith installer for Windows.
 
-    irm https://raw.githubusercontent.com/OWNER/knowlith/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.ps1 | iex
 
 No administrator rights. Everything lands under the user's own profile, so
 uninstalling is deleting two folders and one scheduled task.
@@ -13,7 +13,7 @@ exactly the machines that most need an installer.
 
 $ErrorActionPreference = 'Stop'
 
-$Repo    = if ($env:KNOWLITH_REPO)    { $env:KNOWLITH_REPO }    else { 'OWNER/knowlith' }
+$Repo    = if ($env:KNOWLITH_REPO)    { $env:KNOWLITH_REPO }    else { 'PetarVukovic/knowlith' }
 $Version = if ($env:KNOWLITH_VERSION) { $env:KNOWLITH_VERSION } else { 'latest' }
 $BinDir  = if ($env:KNOWLITH_BIN_DIR) { $env:KNOWLITH_BIN_DIR } else { Join-Path $env:LOCALAPPDATA 'Knowlith\bin' }
 
@@ -22,17 +22,6 @@ function Fail { param($Text) Write-Host ""; Write-Host "knowlith: $Text" -Foregr
 
 Write-Host ""
 Write-Host "Knowlith"
-
-# The placeholder points nowhere until the repository is published, and a
-# GitHub 404 reads as a broken release rather than as an unshipped one.
-if ($Repo -like 'OWNER/*') {
-    Fail @"
-this installer has not been pointed at a repository yet.
-  Set KNOWLITH_REPO=owner/name, or build from source:
-    git clone <repo>; cd knowlith; npm ci; npm run build
-    cd ..; cargo build --release --bin knowlith
-"@
-}
 
 # ---------------------------------------------------------------- platform --
 

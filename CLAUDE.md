@@ -138,10 +138,8 @@ captures sessions through hooks; there is nothing to call by hand.
 
 Honest about the prototype edges, so nobody builds on them believing otherwise:
 
-- `StepProcessing.tsx` hardcodes `detected: true` for Codex and Claude Code.
-  `knowlith engines` knows the truth and is not exposed over HTTP.
 - `StepAccess` is a checkbox. It requests no operating-system permission.
 - Google Drive and OneDrive say "Coming soon" and are not started.
-- `install.sh`, `install.ps1` and `README.md` carry `OWNER/knowlith`
-  placeholders, guarded so they fail with an explanation rather than a 404.
-  Publication is deferred by the owner's decision.
+- `install.sh` / `install.ps1` download a GitHub Release asset from
+  `PetarVukovic/knowlith`. Until a release is cut, use `scripts/dev.sh`
+  or build the binary from source.
