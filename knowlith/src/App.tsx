@@ -16,8 +16,21 @@ import { Workspace } from "@/screens/Workspace"
 import { AppProvider, useApp } from "@/state/AppState"
 
 function Root() {
-  const { onboarded } = useApp()
-  return <Navigate to={onboarded ? "/home" : "/onboarding"} replace />
+  const { onboarded, ready, firstRun } = useApp()
+  if (!ready) return null
+  if (!onboarded) return <Navigate to="/onboarding" replace />
+  // First-run stays on review → connect until that path ends. Home is the
+  // reward for finishing, not a side door while the queue is still empty.
+  if (firstRun === "review") return <Navigate to="/review" replace />
+  if (firstRun === "connect") return <Navigate to="/connect" replace />
+  return <Navigate to="/home" replace />
+}
+
+function GuardHome() {
+  const { firstRun } = useApp()
+  if (firstRun === "review") return <Navigate to="/review" replace />
+  if (firstRun === "connect") return <Navigate to="/connect" replace />
+  return <Home />
 }
 
 export function App() {
@@ -29,7 +42,7 @@ export function App() {
             <Route path="/" element={<Root />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route element={<AppShell />}>
-              <Route path="/home" element={<Home />} />
+              <Route path="/home" element={<GuardHome />} />
               <Route path="/browse" element={<Browse />} />
               <Route path="/brain" element={<Brain />} />
               <Route path="/discovery" element={<Discovery />} />

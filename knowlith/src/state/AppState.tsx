@@ -174,7 +174,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setToolReads(reads)
       setActivity(act)
       setMergeHints(hints)
-      setLive(await usingDaemon())
+      const daemon = await usingDaemon()
+      setLive(daemon)
+      // A wiped lake with a leftover "onboarded" flag used to drop the owner
+      // on an empty Home. The wizard is the only honest screen until a folder
+      // has actually been attached.
+      if (daemon && s.length === 0) {
+        setOnboarded(false)
+        store("knowlith.onboarded", "no")
+        setFirstRunState(null)
+        store("knowlith.firstRun", "")
+      }
       setReady(true)
     })()
     return () => {

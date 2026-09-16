@@ -13,6 +13,7 @@ import {
   Wrench,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { scheduleProductTour } from "@/components/ProductTour"
 import { tools as toolsApi } from "@/lib/api"
 import type { AiTool, ConnectPreview, Usage } from "@/lib/types"
 import { formatRelative } from "@/lib/utils"
@@ -313,16 +314,18 @@ export function Connect() {
             variant="primary"
             onClick={() => {
               setFirstRun(null)
+              scheduleProductTour()
               navigate("/home")
             }}
           >
-            Done
+            Open company home
             <ArrowRight />
           </Button>
           <button
             type="button"
             onClick={() => {
               setFirstRun(null)
+              scheduleProductTour()
               navigate("/home")
             }}
             className="text-[12px] text-faint underline-offset-4 transition-colors hover:text-muted hover:underline"

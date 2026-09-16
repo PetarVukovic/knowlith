@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react"
 import { AlertTriangle, Check, Loader2 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import type { Health } from "@/lib/types"
 import { cn, formatCount } from "@/lib/utils"
@@ -32,11 +31,9 @@ const POLL_MS = 2000
 export function StepBuilding({
   company,
   onDone,
-  onLeave,
 }: {
   company: string
   onDone: () => void
-  onLeave: () => void
 }) {
   const [work, setWork] = useState<Health | null>(null)
   /** The most the queue ever held, which is what the bar is a fraction of. */
@@ -68,13 +65,14 @@ export function StepBuilding({
       // company compiles in under a second, and a screen that only watches
       // the queue would wait here forever for work that is already done.
       if (outstanding > 0 || next.objects > 0) seenWork = true
-      // Finished means the queue is empty after there was something to do.
-      // Without that guard this screen would advance during the second
-      // between the folder being added and the first job being picked up.
-      // Everything is fetched before the next screen appears, so it opens
-      // with the company's own numbers rather than with zeros that fill in a
-      // few seconds later.
+      // Finished means the queue is empty after there was something to do,
+      // *and* the discovery counts are non-zero. Advancing on an empty queue
+      // alone used to open Home before any rule or process had landed.
       if (seenWork && outstanding === 0) {
+        const found = await api.getDiscovery()
+        if (cancelled) return
+        const knowledge = found.rules + found.processes + found.terms + found.skills
+        if (knowledge === 0 && next.objects === 0) return
         cancelled = true
         await pull.current()
         done.current()
@@ -163,9 +161,10 @@ export function StepBuilding({
         })}
       </ul>
 
-      <Button variant="ghost" size="sm" onClick={onLeave} className="mt-9">
-        Let it run in the background
-      </Button>
+      <p className="mt-9 text-[12.5px] leading-relaxed text-faint">
+        The company home opens after this finishes — not before. Closing the
+        window is fine; the read keeps going on this machine.
+      </p>
     </div>
   )
 }

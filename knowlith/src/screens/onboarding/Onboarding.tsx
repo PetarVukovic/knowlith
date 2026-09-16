@@ -13,8 +13,6 @@ import { StepPreview } from "./StepPreview"
 import { StepProcessing } from "./StepProcessing"
 import { StepSource } from "./StepSource"
 import { StepWelcome } from "./StepWelcome"
-import { scheduleProductTour } from "@/components/ProductTour"
-
 /**
  * The first few minutes.
  *
@@ -23,6 +21,10 @@ import { scheduleProductTour } from "@/components/ProductTour"
  * show what is in there before touching it, then read it. The owner reaches
  * their first approved rule before meeting a single technical idea — no
  * connectors, no configuration, no vocabulary they would have to learn.
+ *
+ * Home stays closed until the folder has been read and the first-run path
+ * (review → connect) has finished. Escaping early used to open an empty
+ * dashboard and look like the product had nothing to say.
  */
 const DECISIONS = 4
 
@@ -47,10 +49,12 @@ export function Onboarding() {
     (step === 2 && granted) ||
     (step === 3 && (processor === "managed" || allowStart))
 
-  const finishWizard = () => {
+  /** Enter the real app only after the first read has produced something. */
+  const enterApp = (next: "review") => {
     setCompany(name.trim(), logo)
     completeOnboarding()
-    scheduleProductTour()
+    setFirstRun(next)
+    navigate(`/${next}`)
   }
 
   /**
@@ -139,24 +143,13 @@ export function Onboarding() {
         ) : null}
 
         {step === 5 ? (
-          <StepBuilding
-            company={name.trim() || "your company"}
-            onDone={() => setStep(6)}
-            onLeave={() => {
-              finishWizard()
-              navigate("/home")
-            }}
-          />
+          <StepBuilding company={name.trim() || "your company"} onDone={() => setStep(6)} />
         ) : null}
 
         {step === 6 ? (
           <StepDiscovery
             company={name.trim() || "your company"}
-            onReview={() => {
-              finishWizard()
-              setFirstRun("review")
-              navigate("/review")
-            }}
+            onReview={() => enterApp("review")}
           />
         ) : null}
 
@@ -175,19 +168,6 @@ export function Onboarding() {
               <ArrowRight />
             </Button>
           </div>
-        ) : null}
-
-        {step < 5 ? (
-          <button
-            type="button"
-            onClick={() => {
-              finishWizard()
-              navigate("/home")
-            }}
-            className="mt-10 text-[12px] text-faint underline-offset-4 transition-colors hover:text-muted hover:underline"
-          >
-            Skip and look around first
-          </button>
         ) : null}
       </div>
     </div>
