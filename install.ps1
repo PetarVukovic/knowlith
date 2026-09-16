@@ -73,13 +73,21 @@ try {
         Fail "could not download $url`n  If that version has no Windows build, the release page lists what there is."
     }
 
-    # A mismatch stops the install. A missing checksums file does not: an
-    # older release may predate it.
+    # Fails closed, like install.sh: no checksums file or no entry for this
+    # archive stops the install rather than trusting a binary nobody vouched
+    # for. KNOWLITH_ALLOW_UNVERIFIED=1 is the owner saying so out loud.
+    $sums = Join-Path $work 'checksums.txt'
+    $reason = $null
     try {
-        $sums = Join-Path $work 'checksums.txt'
         Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/$Version/checksums.txt" -OutFile $sums -UseBasicParsing
+    } catch {
+        $reason = 'this release publishes no checksums.txt'
+    }
+    if (-not $reason) {
         $line = Select-String -Path $sums -Pattern ([Regex]::Escape($archive)) | Select-Object -First 1
-        if ($line) {
+        if (-not $line) {
+            $reason = "checksums.txt has no entry for $archive"
+        } else {
             $expected = ($line.Line -split '\s+')[0]
             $actual = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
             if ($actual -ne $expected.ToLower()) {
@@ -87,8 +95,13 @@ try {
             }
             Say 'checksum matches'
         }
-    } catch {
-        # No checksums published for this release.
+    }
+    if ($reason) {
+        if ($env:KNOWLITH_ALLOW_UNVERIFIED -eq '1') {
+            Say "installing unverified because KNOWLITH_ALLOW_UNVERIFIED=1 ($reason)"
+        } else {
+            Fail "the download could not be verified: $reason.`n  Nothing was installed. To install anyway, set KNOWLITH_ALLOW_UNVERIFIED=1 and run again."
+        }
     }
 
     Expand-Archive -Path $zip -DestinationPath $work -Force
@@ -140,7 +153,8 @@ try {
     Write-Host "  knowlith connect                                   hand it to Claude and Codex"
     Write-Host "  knowlith autostart on                              keep it running when you close the window"
     Write-Host ""
-    Write-Host "Everything it reads stays in your Knowlith folder. Nothing is sent anywhere."
+    Write-Host "What it reads is kept in your Knowlith folder. Knowlith itself sends nothing anywhere;"
+    Write-Host "the AI tool you choose to read with (Claude, Codex, Cursor) sends document text to its vendor."
     Write-Host ""
 }
 finally {

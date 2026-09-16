@@ -81,21 +81,42 @@ curl -fsSL "$url" -o "$work/$archive" \
   || die "could not download $url
   If that version has no build for $target, the release page lists what there is."
 
-# The checksum is published beside the archive. A missing checksums file is
-# not fatal — an older release may not have one — but a mismatch is.
-if curl -fsSL "https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt" -o "$work/checksums.txt" 2>/dev/null; then
+# The checksum is published beside the archive and the install fails closed:
+# no checksums file, no entry for this archive, no sha256 tool — each of those
+# stops here rather than installing a binary nobody has vouched for. This
+# used to be optional "for older releases"; there are no older releases, and
+# an installer that verifies only when convenient verifies nothing. The
+# owner can still say so explicitly with KNOWLITH_ALLOW_UNVERIFIED=1.
+verify() {
+  curl -fsSL "https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt" -o "$work/checksums.txt" 2>/dev/null \
+    || return 1
   expected="$(grep " ${archive}\$" "$work/checksums.txt" | awk '{print $1}' || true)"
-  if [ -n "$expected" ]; then
-    if command -v shasum >/dev/null 2>&1; then
-      actual="$(shasum -a 256 "$work/$archive" | awk '{print $1}')"
-    elif command -v sha256sum >/dev/null 2>&1; then
-      actual="$(sha256sum "$work/$archive" | awk '{print $1}')"
-    else
-      actual="$expected"
-      say "no sha256 tool here — skipping the checksum"
-    fi
-    [ "$actual" = "$expected" ] || die "the download does not match its published checksum. Nothing was installed."
-    say "checksum matches"
+  [ -n "$expected" ] || return 2
+  if command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$work/$archive" | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$work/$archive" | awk '{print $1}')"
+  else
+    return 3
+  fi
+  [ "$actual" = "$expected" ] || die "the download does not match its published checksum. Nothing was installed."
+  say "checksum matches"
+}
+
+if verify; then
+  :
+else
+  # `$?` here is verify's own status; behind a `!` it would be the negation's.
+  case "$?" in
+    1) reason="this release publishes no checksums.txt" ;;
+    2) reason="checksums.txt has no entry for $archive" ;;
+    *) reason="neither shasum nor sha256sum is installed here" ;;
+  esac
+  if [ "${KNOWLITH_ALLOW_UNVERIFIED:-}" = "1" ]; then
+    say "installing unverified because KNOWLITH_ALLOW_UNVERIFIED=1 ($reason)"
+  else
+    die "the download could not be verified: $reason.
+  Nothing was installed. To install anyway: KNOWLITH_ALLOW_UNVERIFIED=1 sh install.sh"
   fi
 fi
 
@@ -156,4 +177,5 @@ printf '  %s scan ~/Documents/YourCompany   read a folder\n' "knowlith"
 printf '  %s serve                          open the interface on http://127.0.0.1:7717\n' "knowlith"
 printf '  %s connect                        hand it to Claude and Codex\n' "knowlith"
 printf '  %s autostart on                   keep it running when you close the window\n' "knowlith"
-printf '\nEverything it reads stays in ~/Knowlith. Nothing is sent anywhere.\n\n'
+printf '\nWhat it reads is kept in ~/Knowlith. Knowlith itself sends nothing anywhere;\n'
+printf 'the AI tool you choose to read with (Claude, Codex, Cursor) sends document text to its vendor.\n\n'
