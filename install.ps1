@@ -23,6 +23,17 @@ function Fail { param($Text) Write-Host ""; Write-Host "knowlith: $Text" -Foregr
 Write-Host ""
 Write-Host "Knowlith"
 
+# The placeholder points nowhere until the repository is published, and a
+# GitHub 404 reads as a broken release rather than as an unshipped one.
+if ($Repo -like 'OWNER/*') {
+    Fail @"
+this installer has not been pointed at a repository yet.
+  Set KNOWLITH_REPO=owner/name, or build from source:
+    git clone <repo>; cd knowlith; npm ci; npm run build
+    cd ..; cargo build --release --bin knowlith
+"@
+}
+
 # ---------------------------------------------------------------- platform --
 
 $arch = $env:PROCESSOR_ARCHITECTURE

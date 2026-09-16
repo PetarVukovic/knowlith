@@ -23,6 +23,16 @@ die() { printf '\nknowlith: %s\n' "$*" >&2; exit 1; }
 
 printf '\nKnowlith\n'
 
+# Until the repository is published, the placeholder above points nowhere.
+# Saying that beats a download that fails with a GitHub 404, which reads as
+# "the release is broken" rather than "this has not shipped yet".
+case "$REPO" in
+  OWNER/*) die "this installer has not been pointed at a repository yet.
+  Set KNOWLITH_REPO=owner/name, or build from source:
+    git clone <repo> && cd knowlith && npm ci && npm run build
+    cd .. && cargo build --release --bin knowlith" ;;
+esac
+
 # ---------------------------------------------------------------- platform --
 
 os="$(uname -s)"
