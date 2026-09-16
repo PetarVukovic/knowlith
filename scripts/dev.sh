@@ -9,6 +9,11 @@
 # difference here is that the interface is served by Vite instead of being
 # baked into the binary.
 #
+# Vite forwards `/api` to the daemon rather than letting the browser reach
+# it directly, and attaches the daemon's token on the way. So the page is
+# same-origin here exactly as it is in the shipped binary, and the token
+# never enters the browser at all.
+#
 # Ctrl-C stops both. Nothing is installed and nothing is registered to start
 # at login: this is a workbench, not an install.
 
@@ -60,11 +65,15 @@ DAEMON=$!
 sleep 2
 kill -0 "$DAEMON" 2>/dev/null || { printf '\n'; tail -20 "$ROOT/dev.log" >&2; die "the daemon exited — $ROOT/dev.log"; }
 
+# Written by the daemon on first start. Vite reads it to talk to the API,
+# so it has to be there before Vite is started, not merely soon after.
+[ -f "$ROOT/api.token" ] || die "the daemon did not write $ROOT/api.token — see $ROOT/dev.log"
+
 say "log      $ROOT/dev.log"
 say "interface http://localhost:$UI_PORT"
 printf '\n  Ctrl-C stops both.\n\n'
 
-(cd knowlith && npm run dev -- --port "$UI_PORT" --strictPort) &
+(cd knowlith && KNOWLITH_HOME="$ROOT" KNOWLITH_PORT="$PORT" npm run dev -- --port "$UI_PORT" --strictPort) &
 UI=$!
 
 wait "$UI"

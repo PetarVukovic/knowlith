@@ -58,11 +58,40 @@ const LATENCY = 120
 const DAEMON: string = (() => {
   const explicit = (import.meta.env.VITE_KNOWLITH_API as string | undefined)?.replace(/\/$/, "")
   if (explicit) return explicit
-  if (!import.meta.env.DEV && typeof window !== "undefined" && window.location.protocol.startsWith("http")) {
-    return window.location.origin
-  }
-  return "http://127.0.0.1:7717"
+  // Same origin either way: the daemon serves this page in the shipped
+  // product, and in development Vite forwards `/api` to it. Nothing here
+  // ever talks across origins, which is what lets the daemon refuse every
+  // request that does.
+  return ""
 })()
+
+/**
+ * The daemon's API token.
+ *
+ * The daemon listens on loopback, which keeps the network out but not the
+ * browser: any page the owner opens can send a request to `127.0.0.1`. So
+ * every request carries a secret only the owner's own machine has, and the
+ * daemon turns away the rest.
+ *
+ * The daemon writes it into the page it serves. Under `npm run dev` the
+ * page comes from Vite instead, and the proxy in `vite.config.ts` attaches
+ * the header in Node — so in development this is empty and nothing is
+ * missing.
+ */
+const TOKEN: string = (() => {
+  try {
+    return document.querySelector<HTMLMetaElement>('meta[name="knowlith-token"]')?.content ?? ""
+  } catch {
+    return ""
+  }
+})()
+
+/** Every request to the daemon, and the only place the token is attached. */
+function ask(path: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers)
+  if (TOKEN) headers.set("x-knowlith-token", TOKEN)
+  return fetch(`${DAEMON}${path}`, { ...init, headers })
+}
 
 /**
  * Whether the daemon answered, decided once per page load.
@@ -78,7 +107,7 @@ function connected(): Promise<boolean> {
     try {
       const controller = new AbortController()
       const timer = window.setTimeout(() => controller.abort(), 1500)
-      const response = await fetch(`${DAEMON}/api/health`, { signal: controller.signal })
+      const response = await ask("/api/health", { signal: controller.signal })
       window.clearTimeout(timer)
       return response.ok
     } catch {
@@ -124,7 +153,7 @@ export function showingDemo(): boolean {
 async function get<T>(path: string, demo: T, empty: T): Promise<T> {
   if (await connected()) {
     try {
-      const response = await fetch(`${DAEMON}${path}`)
+      const response = await ask(path)
       if (response.ok) return (await response.json()) as T
     } catch {
       /* fall through to empty, never to the demo */
@@ -146,7 +175,7 @@ async function get<T>(path: string, demo: T, empty: T): Promise<T> {
 async function post<T>(path: string, body?: unknown): Promise<T | null> {
   if (!(await connected())) return null
   try {
-    const response = await fetch(`${DAEMON}${path}`, {
+    const response = await ask(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body ?? {}),
@@ -342,7 +371,7 @@ async function send<T>(path: string, init?: RequestInit): Promise<T | { error: s
     return { error: "Knowlith is not running on this machine." }
   }
   try {
-    const response = await fetch(`${DAEMON}${path}`, init)
+    const response = await ask(path, init)
     if (!response.ok) {
       const text = (await response.text()).trim()
       return { error: text || `the daemon answered ${response.status}` }
@@ -367,7 +396,7 @@ export const tools = {
   async preview(slug: string): Promise<ConnectPreview | null> {
     if (!(await connected())) return null
     try {
-      const response = await fetch(`${DAEMON}/api/tools/${slug}/preview`)
+      const response = await ask(`/api/tools/${slug}/preview`)
       if (!response.ok) return null
       return (await response.json()) as ConnectPreview
     } catch {
@@ -400,7 +429,7 @@ export const background = {
   async policy(): Promise<PolicyState | null> {
     if (!(await connected())) return null
     try {
-      const response = await fetch(`${DAEMON}/api/policy`)
+      const response = await ask("/api/policy")
       if (!response.ok) return null
       return (await response.json()) as PolicyState
     } catch {
@@ -411,7 +440,7 @@ export const background = {
   async setPolicy(policy: Policy): Promise<PolicyState | null> {
     if (!(await connected())) return null
     try {
-      const response = await fetch(`${DAEMON}/api/policy`, {
+      const response = await ask("/api/policy", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(policy),
@@ -430,7 +459,7 @@ export const background = {
   async autostart(): Promise<AutostartState | null> {
     if (!(await connected())) return null
     try {
-      const response = await fetch(`${DAEMON}/api/autostart`)
+      const response = await ask("/api/autostart")
       if (!response.ok) return null
       return (await response.json()) as AutostartState
     } catch {
@@ -453,7 +482,7 @@ export const background = {
 async function putCompanyName(name: string): Promise<void> {
   if (!(await connected())) return
   try {
-    await fetch(`${DAEMON}/api/company`, {
+    await ask("/api/company", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),

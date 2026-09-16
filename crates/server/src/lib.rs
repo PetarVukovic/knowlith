@@ -6,25 +6,30 @@
 //! loopback, and the daemon on the other side of it never leaves the disk
 //! except through an engine the owner chose.
 //!
+//! Loopback is not the same as private. Every `/api` route is behind
+//! [`auth`], because the owner's own browser will happily carry a request
+//! to this port for any page they have open.
+//!
 //! Every endpoint here answers from the lake. Nothing is computed on the fly
 //! that a person could not also get from `knowlith` on the command line,
 //! which keeps the two views of the same data from drifting apart.
 
 pub mod assets;
+pub mod auth;
 pub mod dto;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Request, State};
 use axum::http::{StatusCode, Uri, header};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use knowlith_core::{ContextObject, Document, ObjectStatus};
 use knowlith_lake::Lake;
 use serde::Serialize;
-use tower_http::cors::{Any, CorsLayer};
 
 use dto::*;
 
@@ -67,14 +72,27 @@ struct ToolDto {
 pub struct AppState {
     lake: Arc<Mutex<Lake>>,
     company: Arc<str>,
+    token: auth::Token,
 }
 
 impl AppState {
     pub fn new(lake: Lake, company: impl Into<Arc<str>>) -> Self {
+        Self::with_token(lake, company, auth::Token::load())
+    }
+
+    /// The same, with a secret somebody else chose. Tests use this; so
+    /// would anything that has to hand the identical token to a second
+    /// process.
+    pub fn with_token(lake: Lake, company: impl Into<Arc<str>>, token: auth::Token) -> Self {
         Self {
             lake: Arc::new(Mutex::new(lake)),
             company: company.into(),
+            token,
         }
+    }
+
+    pub fn token(&self) -> &auth::Token {
+        &self.token
     }
 }
 
@@ -85,13 +103,11 @@ fn failed(e: impl std::fmt::Display) -> (StatusCode, String) {
 }
 
 pub fn router(state: AppState) -> Router {
-    // The interface is served by Vite during development, on another port.
-    // Loopback-only binding is what keeps this safe, not the origin header.
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
+    // No cross-origin allowance of any kind. During development the
+    // interface is served by Vite on another port, and rather than opening
+    // a hole here for it, Vite forwards `/api` to this daemon itself — so
+    // the page is always same-origin with the API, in development and in
+    // the shipped binary alike.
     Router::new()
         .route("/api/health", get(health))
         .route("/api/company", get(company).put(rename_company))
@@ -123,11 +139,40 @@ pub fn router(state: AppState) -> Router {
         .route("/api/work/release", post(release_work))
         .route("/api/autostart", get(read_autostart))
         .route("/api/autostart/{state}", post(write_autostart))
-        .layer(cors)
-        .with_state(state)
+        // `route_layer`, not `layer`: a path that matched nothing must come
+        // out as 404 from the interface below, not as 401 from here. A
+        // missing endpoint reported as "unauthorised" sends whoever is
+        // debugging it looking for a permission problem that is not there.
+        .route_layer(axum::middleware::from_fn_with_state(state.clone(), guard))
         // Anything that is not an API route is the interface. Registered
-        // last so a future endpoint can never be shadowed by a file.
+        // last so a future endpoint can never be shadowed by a file, and
+        // outside the guard above so it stays reachable without a token —
+        // it is the page that carries the token in the first place.
         .fallback(interface)
+        .with_state(state)
+}
+
+/// Turns away everything that did not come from the owner's own interface.
+///
+/// See [`auth`] for why a daemon on loopback needs this at all.
+async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let given = request
+        .headers()
+        .get(auth::HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+
+    if !state.token.matches(given) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            format!(
+                "this request did not carry the token from {}",
+                auth::file().display()
+            ),
+        )
+            .into_response();
+    }
+    next.run(request).await
 }
 
 pub async fn serve(state: AppState, port: u16) -> anyhow::Result<()> {
@@ -1232,7 +1277,11 @@ async fn write_autostart(Path(state): Path<String>) -> ApiResult<knowlith_deskto
 // ---------------------------------------------------------- the interface --
 
 /// Serves the built interface, or explains why there is not one.
-async fn interface(uri: Uri) -> Response {
+///
+/// The page leaves here carrying the API token, which is safe for exactly
+/// one reason: this response has no cross-origin allowance on it, so a
+/// browser will not hand its text to a page from anywhere else.
+async fn interface(State(state): State<AppState>, uri: Uri) -> Response {
     let path = uri.path();
 
     // An API path that got here is a real 404, and must not be answered
@@ -1251,6 +1300,13 @@ async fn interface(uri: Uri) -> Response {
         } else {
             "no-cache"
         };
+        if kind.starts_with("text/html") {
+            return (
+                [(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, cache)],
+                auth::inject(bytes, &state.token),
+            )
+                .into_response();
+        }
         return (
             [(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, cache)],
             bytes,
@@ -1265,7 +1321,7 @@ async fn interface(uri: Uri) -> Response {
                 (header::CONTENT_TYPE, "text/html; charset=utf-8"),
                 (header::CACHE_CONTROL, "no-cache"),
             ],
-            page,
+            auth::inject(page, &state.token),
         )
             .into_response(),
         None => (

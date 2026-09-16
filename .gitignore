@@ -12,3 +12,6 @@
 
 # Screenshots taken while testing.
 *.png
+
+# The daemon API secret, written per machine.
+api.token

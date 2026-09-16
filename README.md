@@ -135,6 +135,28 @@ than approved — seven pairs to decide about, and 55 graph edges.
 The lake defaults to `~/Knowlith/data/lake.sqlite`; pass `--db` for another
 path. `scan --dry-run` counts without storing.
 
+### The API is not open to every page you have open
+
+The daemon listens on `127.0.0.1`, and for a while a comment in the router
+claimed that made it private. It does not. Loopback keeps the network out,
+but the browser will carry a request to `127.0.0.1` on behalf of any website
+the owner visits — and the endpoints that add a folder would have let such a
+page pick a directory, have the daemon read it, and read the text back.
+
+So the daemon writes a secret to `~/Knowlith/api.token`, readable only by the
+owner, and turns away every `/api` request that does not carry it in an
+`x-knowlith-token` header. The page the daemon serves is given the token
+inside its own HTML. There is no cross-origin allowance of any kind:
+`scripts/dev.sh` has Vite forward `/api` to the daemon and attach the header
+in Node, so the browser is same-origin in development exactly as it is in the
+shipped binary.
+
+Anything talking to the API by hand needs the header:
+
+```sh
+curl -H "x-knowlith-token: $(cat ~/Knowlith/api.token)" http://127.0.0.1:7717/api/health
+```
+
 ### Six decisions worth knowing before reading the code
 
 **Offsets point into the rendition, not the file.** For a PDF or a
