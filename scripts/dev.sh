@@ -1,7 +1,8 @@
 #!/bin/sh
 # Both halves of the product, one command, hot reload on the interface.
 #
-#   sh scripts/dev.sh
+#   sh scripts/dev.sh            carry on from what is already there
+#   sh scripts/dev.sh --fresh    start from an empty company
 #
 # The daemon is a debug build so a Rust change costs seconds, not minutes.
 # The interface runs on Vite, so a React change is instant. They talk over
@@ -16,10 +17,22 @@
 #
 # Ctrl-C stops both. Nothing is installed and nothing is registered to start
 # at login: this is a workbench, not an install.
+#
+# `--fresh` moves the existing company aside rather than deleting it. A
+# lake is the only copy of what somebody approved, and a testing flag is
+# no reason to be the thing that loses it.
 
 set -eu
 
 cd "$(dirname "$0")/.."
+
+FRESH=""
+for arg in "$@"; do
+  case "$arg" in
+    --fresh) FRESH="yes" ;;
+    *) printf '\nunknown option: %s\n\n' "$arg" >&2; exit 2 ;;
+  esac
+done
 
 PORT="${KNOWLITH_PORT:-7717}"
 UI_PORT="${KNOWLITH_UI_PORT:-5173}"
@@ -37,6 +50,12 @@ lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 \
   && die "something is already listening on $PORT — stop it, or set KNOWLITH_PORT"
 
 [ -d knowlith/node_modules ] || { say 'installing interface dependencies'; (cd knowlith && npm ci >/dev/null 2>&1) || die 'npm ci failed'; }
+
+if [ -n "$FRESH" ] && [ -d "$ROOT" ]; then
+  ASIDE="$ROOT.$(date +%Y%m%d-%H%M%S)"
+  mv "$ROOT" "$ASIDE"
+  say "previous company moved to $ASIDE"
+fi
 
 mkdir -p "$ROOT"
 
