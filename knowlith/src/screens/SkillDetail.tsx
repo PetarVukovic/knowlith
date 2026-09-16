@@ -26,6 +26,25 @@ export function SkillDetail() {
           <p className="mt-1 max-w-[54ch] text-[12.5px] text-faint">{kindMeta("skill").meaning}</p>
           <h1 className="mt-2 text-[20px] font-semibold tracking-[-0.015em] text-ink">{skill.name}</h1>
           <p className="mt-1.5 max-w-[62ch] text-[13px] text-muted">{skill.description}</p>
+          <p className="mt-2 max-w-[62ch] text-[12.5px] text-muted">
+            {skill.draftedFrom ? (
+              <>
+                Drafted by Knowlith when you confirmed the process{" "}
+                <button
+                  type="button"
+                  className="text-accent underline-offset-4 hover:underline"
+                  onClick={() => open(skill.draftedFrom!.targetId)}
+                >
+                  {skill.draftedFrom.targetTitle}
+                </button>
+                . It rests on {skill.requires.length}{" "}
+                {skill.requires.length === 1 ? "confirmed item" : "confirmed items"} listed under Built
+                on, and on nothing else.
+              </>
+            ) : (
+              "Not drafted from a process on record."
+            )}
+          </p>
           <TrustStrip
             className="mt-3"
             status={skill.status}

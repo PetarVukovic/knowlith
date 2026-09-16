@@ -257,6 +257,8 @@ export interface SkillDoc {
   decidedBy: string | null
   /** The compiler's score, from the row — never derived on the page. */
   confidence: number
+  /** The confirmed process this skill was drafted from; absent for a hand-written one. */
+  draftedFrom: Relation | null
   version: number
   updatedAt: string
 }

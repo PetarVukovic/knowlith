@@ -1010,6 +1010,15 @@ async fn skills(State(state): State<AppState>) -> ApiResult<Vec<SkillDocDto>> {
                 .collect(),
             status: status_str(skill.status),
             confidence: skill.confidence.0,
+            drafted_from: skill
+                .relations
+                .iter()
+                .filter(|r| r.kind == knowlith_core::RelationType::DependsOn)
+                .find(|r| {
+                    all.iter()
+                        .any(|o| o.id == r.target_id && o.kind == knowlith_core::ObjectKind::Process)
+                })
+                .map(relation_dto),
             version: skill.version,
             updated_at: skill.updated_at.clone(),
         })

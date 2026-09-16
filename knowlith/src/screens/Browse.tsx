@@ -140,11 +140,27 @@ export function Browse() {
         ))}
       </div>
 
+      {filter === "skill" ? (
+        // The one place the rule is written down for the owner. It mirrors
+        // the compiler exactly (crates/compiler/src/skills.rs): a skill is
+        // drafted per confirmed process, from that process and what it
+        // depends on, scored by its weakest source, and waits for approval.
+        <div className="mt-5 rounded-lg border border-line bg-surface-2 px-4 py-3 text-[12.5px] leading-relaxed text-muted">
+          <span className="font-medium text-ink">Where skills come from.</span> Each time you confirm a
+          process, Knowlith drafts one skill for it — a task an assistant can carry out using that
+          process and the rules and terms it depends on, and nothing else. Its confidence is that of the
+          weakest thing it rests on. The draft waits under For review; no assistant sees it until you
+          confirm it, and a process you have not confirmed produces no skill.
+        </div>
+      ) : null}
+
       {visible.length === 0 ? (
         <p className="mt-8 text-[13px] text-faint">
           {rows.length === 0
             ? "Nothing here yet. Confirm items under For review after a source is read."
-            : "Nothing matches that search."}
+            : filter === "skill"
+              ? "No skills yet. Confirm a process under For review and one will be drafted from it."
+              : "Nothing matches that search."}
         </p>
       ) : (
         <ul className="mt-5 grid gap-px overflow-hidden rounded-lg border border-line bg-line">

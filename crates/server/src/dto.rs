@@ -403,6 +403,10 @@ pub struct SkillDocDto {
     /// 0.95 or 0.88 depending on whether it had more than two spans — a
     /// number with the shape of a measurement and nothing behind it.
     pub confidence: f32,
+    /// The approved process this skill was drafted from — the one event
+    /// that makes a skill exist. Owners asked "where did this come from";
+    /// the answer is a row, so it is on the wire, not in a tooltip.
+    pub drafted_from: Option<RelationDto>,
     pub version: u32,
     pub updated_at: String,
 }
