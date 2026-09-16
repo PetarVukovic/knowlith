@@ -48,18 +48,6 @@ export function SkillDetail() {
         kind="skill"
         status={skill.status}
         company={companyName}
-        context={
-          <>
-            <p className="text-[12px] text-muted">{kindMeta("skill").label}</p>
-            <h2 className="mt-1 text-[18px] font-semibold tracking-[-0.015em] text-ink">
-              {skill.name}
-            </h2>
-            <p className="mt-1.5 text-[13px] text-muted">{skill.description}</p>
-            <div className="prose-claim mt-4">
-              <Markdown source={skill.markdown} />
-            </div>
-          </>
-        }
       />
 
       <div className="mt-7 grid gap-5 lg:grid-cols-[1fr_300px]">

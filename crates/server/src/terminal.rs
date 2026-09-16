@@ -1,11 +1,12 @@
-//! Live PTY sessions for Claude Code / Codex / Cursor Agent inside the UI.
+//! Headless CLI runs for the company chat.
 //!
-//! The browser speaks WebSocket; this module owns a real pseudo-terminal on
-//! the owner's machine. That is what makes the brain sidebar a *live*
-//! terminal rather than a transcript of a command we opened elsewhere.
+//! The browser speaks WebSocket; this module runs the owner's own Claude /
+//! Codex / Cursor CLI on a pseudo-terminal on the owner's machine, in print
+//! mode, and streams what it writes. The PTY is there because the CLIs
+//! behave differently on a pipe (buffering, no MCP status), not because
+//! anything on the page is a terminal — the page shows bubbles.
 
-use std::io::{Read, Write};
-use std::sync::Arc;
+use std::io::Read;
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
@@ -38,34 +39,25 @@ pub async fn terminal_ws(
             return axum::http::StatusCode::UNAUTHORIZED.into_response();
         }
     }
-    ws.on_upgrade(handle_socket).into_response()
+    let server_key = knowlith_desktop::server_key(&state.company);
+    ws.on_upgrade(move |socket| handle_socket(socket, server_key))
+        .into_response()
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum ClientMsg {
-    /// Start a CLI session. Only CLI surfaces are accepted.
+    /// Ask one question of one CLI. Only CLI surfaces are accepted.
     Start { app: String, prompt: String },
-    /// Raw keystrokes / paste from xterm.
-    Input { data: String },
-    /// xterm reported a resize.
-    Resize { cols: u16, rows: u16 },
 }
 
-async fn handle_socket(socket: WebSocket) {
+async fn handle_socket(socket: WebSocket, server_key: String) {
     let (mut sink, mut stream) = socket.split();
 
     let start = loop {
         match stream.next().await {
             Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMsg>(&text) {
                 Ok(ClientMsg::Start { app, prompt }) => break (app, prompt),
-                Ok(_) => {
-                    let _ = sink
-                        .send(Message::Text(
-                            r#"{"type":"error","message":"send a start frame first"}"#.into(),
-                        ))
-                        .await;
-                }
                 Err(e) => {
                     let msg = serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"bad json\"".into());
                     let _ = sink
@@ -89,7 +81,7 @@ async fn handle_socket(socket: WebSocket) {
             .await;
         return;
     };
-    let Some((binary, args)) = knowlith_desktop::cli_pty_argv(app, &prompt) else {
+    let Some((binary, args)) = knowlith_desktop::cli_print_argv(app, &server_key, &prompt) else {
         let _ = sink
             .send(Message::Text(
                 r#"{"type":"error","message":"that assistant has no CLI on this machine"}"#.into(),
@@ -98,9 +90,7 @@ async fn handle_socket(socket: WebSocket) {
         return;
     };
 
-    let command_line = knowlith_desktop::open_with_prompt_opts(app, &prompt, true)
-        .command
-        .unwrap_or_default();
+    let command_line = knowlith_desktop::cli_command_line(app, &prompt).unwrap_or_default();
 
     let pty_system = native_pty_system();
     let pair = match pty_system.openpty(PtySize {
@@ -123,13 +113,13 @@ async fn handle_socket(socket: WebSocket) {
     for arg in &args {
         cmd.arg(arg);
     }
-    // Without a colour-capable TERM the CLIs emit plain text — the sidebar
-    // looked black-and-white while Terminal.app on the same machine was fine.
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env("FORCE_COLOR", "1");
-    cmd.env("CLICOLOR_FORCE", "1");
-    cmd.env_remove("NO_COLOR");
+    // Chat wants plain prose. Colour + a capable TERM makes CLIs paint
+    // spinners and boxes into the reply.
+    cmd.env("TERM", "dumb");
+    cmd.env("NO_COLOR", "1");
+    cmd.env_remove("FORCE_COLOR");
+    cmd.env_remove("COLORTERM");
+    cmd.env_remove("CLICOLOR_FORCE");
     if let Some(home) = std::env::var_os("HOME") {
         cmd.cwd(home);
     }
@@ -155,18 +145,9 @@ async fn handle_socket(socket: WebSocket) {
             return;
         }
     };
-    let mut writer = match pair.master.take_writer() {
-        Ok(w) => w,
-        Err(e) => {
-            let msg = serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"writer\"".into());
-            let _ = sink
-                .send(Message::Text(format!(r#"{{"type":"error","message":{msg}}}"#).into()))
-                .await;
-            return;
-        }
-    };
-
-    let master = Arc::new(std::sync::Mutex::new(pair.master));
+    // Kept alive until the child exits: dropping the master closes the
+    // child's terminal under it.
+    let _master = pair.master;
 
     let ready = serde_json::json!({
         "type": "ready",
@@ -194,34 +175,12 @@ async fn handle_socket(socket: WebSocket) {
     loop {
         tokio::select! {
             incoming = stream.next() => {
+                // Nothing goes to the child after the question: the run is
+                // one prompt, one answer. Closing the socket kills it, which
+                // is the chat's Stop button.
                 match incoming {
-                    Some(Ok(Message::Text(text))) => {
-                        match serde_json::from_str::<ClientMsg>(&text) {
-                            Ok(ClientMsg::Input { data }) => {
-                                let _ = writer.write_all(data.as_bytes());
-                                let _ = writer.flush();
-                            }
-                            Ok(ClientMsg::Resize { cols, rows }) => {
-                                if let Ok(mut m) = master.lock() {
-                                    let _ = m.resize(PtySize {
-                                        rows: rows.max(8),
-                                        cols: cols.max(20),
-                                        pixel_width: 0,
-                                        pixel_height: 0,
-                                    });
-                                }
-                            }
-                            Ok(ClientMsg::Start { .. }) => {}
-                            Err(_) => {}
-                        }
-                    }
-                    Some(Ok(Message::Binary(bin))) => {
-                        let _ = writer.write_all(&bin);
-                        let _ = writer.flush();
-                    }
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                     Some(Ok(_)) => {}
-                    Some(Err(_)) => break,
                 }
             }
             chunk = out_rx.recv() => {

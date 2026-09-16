@@ -136,7 +136,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/usage", get(usage))
         .route("/api/work", get(work))
-        .route("/api/tree", get(tree))
         .route("/api/brain", get(brain))
         .route("/api/tools", get(tools))
         .route("/api/tools/{app}/connect", post(connect_app))
@@ -1080,10 +1079,6 @@ async fn dismiss(
     Ok(Json(Approved { affected: Vec::new() }))
 }
 
-async fn tree() -> ApiResult<Vec<serde_json::Value>> {
-    Ok(Json(Vec::new()))
-}
-
 /// The live company brain: approved objects and the edges between them.
 ///
 /// Rebuilt from the lake on every call — there is no second store. The
@@ -1656,16 +1651,12 @@ struct TryBody {
     /// Prefills the application's composer. Never submitted by Knowlith —
     /// the owner still presses send, and only a gateway read proves anything.
     prompt: String,
-    /// When true, CLI hosts are prepared for the in-app PTY instead of
-    /// opening Terminal.app — the brain sidebar owns the live session.
-    #[serde(default)]
-    embedded: bool,
 }
 
-/// Opens a connected AI app with a prepared question about one skill.
+/// Opens a connected AI app outside Knowlith with a prepared question.
 ///
-/// Desktop hosts get a deep link. CLI hosts open Terminal.app, unless
-/// `embedded` is set — then the UI attaches a live PTY over `/api/terminal`.
+/// Desktop hosts get a deep link; CLI hosts open Terminal.app. Asking
+/// inside Knowlith is the company chat, over `/api/terminal`.
 async fn try_in_app(
     Path(app): Path<String>,
     Json(body): Json<TryBody>,
@@ -1675,34 +1666,29 @@ async fn try_in_app(
     if prompt.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "the prompt is empty.".into()));
     }
-    let outcome = knowlith_desktop::open_with_prompt_opts(app, prompt, body.embedded);
-    let message = match (outcome.outcome, outcome.embedded) {
-        (knowlith_desktop::Outcome::Opened, _) => format!(
+    let outcome = knowlith_desktop::open_with_prompt(app, prompt);
+    let message = match outcome.outcome {
+        knowlith_desktop::Outcome::Opened => format!(
             "Opened {} with the question ready. Send it there, then come back.",
             app.label()
         ),
-        (knowlith_desktop::Outcome::OpenedInTerminal, true) => format!(
-            "{} is ready in the live terminal beside the map.",
-            app.label()
-        ),
-        (knowlith_desktop::Outcome::OpenedInTerminal, false) => format!(
+        knowlith_desktop::Outcome::OpenedInTerminal => format!(
             "Opened Terminal with {}. The question is in that session — come back when it has read Knowlith.",
             app.label()
         ),
-        (knowlith_desktop::Outcome::NotInstalled, _) => {
+        knowlith_desktop::Outcome::NotInstalled => {
             format!("{} is not installed on this computer.", app.label())
         }
-        (knowlith_desktop::Outcome::NoWindow, _) => format!(
+        knowlith_desktop::Outcome::NoWindow => format!(
             "{} has no deep link Knowlith can open. Copy the question and paste it there.",
             app.label()
         ),
-        (other, _) => other.message(app),
+        other => other.message(app),
     };
     Ok(Json(serde_json::json!({
         "outcome": outcome.outcome,
         "surface": outcome.surface,
         "command": outcome.command,
-        "embedded": outcome.embedded,
         "message": message,
         "app": app.slug(),
         "label": app.label(),

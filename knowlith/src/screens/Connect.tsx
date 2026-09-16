@@ -111,10 +111,8 @@ export function Connect() {
       // CLI assistants have no desktop window — Open on Connect used to call
       // the daemon, get "not installed", and contradict the Connected badge.
       if (tool.launchSurface === "terminal") {
-        setNote(
-          `${tool.label} runs beside the company map. Pick a node and Ask AI for a live session.`,
-        )
-        navigate("/brain")
+        setNote(`${tool.label} answers in the chat beside the company brain.`)
+        navigate(`/brain?agent=${encodeURIComponent(tool.slug)}`)
         return
       }
       setBusy(tool.slug)
@@ -174,8 +172,35 @@ export function Connect() {
 
   const anyConnected = (tools ?? []).some((tool) => tool.connected)
 
+  // Connecting anything finishes the first-run gate — Home stops bouncing.
+  useEffect(() => {
+    if (firstRun === "connect" && anyConnected) {
+      setFirstRun(null)
+    }
+  }, [firstRun, anyConnected, setFirstRun])
+
   return (
     <div className="mx-auto w-full max-w-[720px] px-5 py-10">
+      {firstRun === "connect" ? (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3">
+          <p className="text-[13px] text-ink">
+            Connect an assistant below, or open Home and come back later.
+          </p>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => {
+              setFirstRun(null)
+              scheduleProductTour()
+              navigate("/home")
+            }}
+          >
+            Open Home
+            <ArrowRight />
+          </Button>
+        </div>
+      ) : null}
+
       <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.022em] text-ink">
         AI assistants
       </h1>
@@ -250,6 +275,17 @@ export function Connect() {
                       {tool.problem} Repairing points it back at this one; nothing else in that file
                       is touched.
                     </span>
+                  </p>
+                ) : null}
+
+                {tool.slug === "claude-desktop" && tool.installed && tool.connected ? (
+                  // Claude runs local servers in its chat window only. A
+                  // Cowork session gets remote connectors and nothing from
+                  // this machine, and an owner who asks there and hears a
+                  // guess has no way of knowing why.
+                  <p className="mt-3 text-[12px] text-muted">
+                    Readable in Claude Desktop chat. Cowork sessions cannot reach servers on this Mac, so
+                    ask in the chat.
                   </p>
                 ) : null}
 

@@ -89,26 +89,6 @@ export function Workspace() {
         kind={object.kind}
         status={object.status}
         company={companyName}
-        context={
-          <>
-            <div className="flex flex-wrap items-center gap-2 text-[12px]">
-              <KindIcon kind={object.kind} />
-              <span className="text-muted">{kindMeta(object.kind).label}</span>
-            </div>
-            <h2 className="mt-2 text-[18px] font-semibold tracking-[-0.015em] text-ink">
-              {object.title}
-            </h2>
-            <div className="prose-claim mt-4">
-              <Markdown source={object.body} />
-            </div>
-            <div className="mt-6">
-              <h3 className="text-[13px] font-semibold text-ink">Where this comes from</h3>
-              <div className="mt-2">
-                <EvidenceList items={object.evidence} />
-              </div>
-            </div>
-          </>
-        }
       />
 
       <div className="mt-6 grid gap-8 lg:grid-cols-2 lg:gap-10">

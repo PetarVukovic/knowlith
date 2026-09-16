@@ -15,6 +15,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::apps::App;
+use crate::paths;
 
 /// How long to wait for an application to actually go away after being asked.
 const QUIT_GRACE: Duration = Duration::from_secs(8);
@@ -165,32 +166,16 @@ pub fn open(app: App) {
 
 /// Opens the application with a prompt already sitting in its composer.
 ///
-/// Desktop hosts get a deep link. CLI hosts get a Terminal session unless
-/// `embedded` is true — then the caller is embedding a live PTY and must
-/// not also bounce Terminal.app.
+/// Desktop hosts get a deep link; CLI hosts get a Terminal window. The
+/// in-app way to ask is the company chat, which runs the CLI headless over
+/// `/api/terminal` — there used to be a third path, an xterm in a side
+/// panel, and two ways of doing one thing meant two sets of bugs.
 pub fn open_with_prompt(app: App, prompt: &str) -> TryLaunch {
-    open_with_prompt_opts(app, prompt, false)
-}
-
-/// Same as [`open_with_prompt`], with control over whether a system Terminal
-/// window is opened for CLI hosts.
-///
-/// When `embedded` is set and a CLI binary exists, we take the terminal path
-/// even if [`App::launch_surface`] would prefer a desktop app (Codex +
-/// ChatGPT.app). The brain sidebar owns that PTY; bouncing Terminal.app or a
-/// deep link would hide the live session the owner asked for.
-pub fn open_with_prompt_opts(app: App, prompt: &str, embedded: bool) -> TryLaunch {
-    let surface = if embedded && app.cli_binary().is_some() {
-        crate::apps::LaunchSurface::Terminal
-    } else {
-        app.launch_surface()
-    };
-    match surface {
+    match app.launch_surface() {
         crate::apps::LaunchSurface::Missing => TryLaunch {
             outcome: Outcome::NotInstalled,
             surface: "missing",
             command: None,
-            embedded: false,
         },
         crate::apps::LaunchSurface::Desktop => {
             let Some(url) = prompt_deeplink(app, prompt) else {
@@ -198,7 +183,6 @@ pub fn open_with_prompt_opts(app: App, prompt: &str, embedded: bool) -> TryLaunc
                     outcome: Outcome::NoWindow,
                     surface: "desktop",
                     command: None,
-                    embedded: false,
                 };
             };
             open_url(&url);
@@ -206,7 +190,6 @@ pub fn open_with_prompt_opts(app: App, prompt: &str, embedded: bool) -> TryLaunc
                 outcome: Outcome::Opened,
                 surface: "desktop",
                 command: None,
-                embedded: false,
             }
         }
         crate::apps::LaunchSurface::Terminal => {
@@ -215,33 +198,85 @@ pub fn open_with_prompt_opts(app: App, prompt: &str, embedded: bool) -> TryLaunc
                     outcome: Outcome::NotInstalled,
                     surface: "terminal",
                     command: None,
-                    embedded: false,
                 };
             };
             let command = terminal_command(app, &binary, prompt);
-            if !embedded {
-                open_in_terminal(&command);
-            }
+            open_in_terminal(&command);
             TryLaunch {
                 outcome: Outcome::OpenedInTerminal,
                 surface: "terminal",
                 command: Some(command),
-                embedded,
             }
         }
     }
 }
 
-/// Argv for an embedded PTY session (no shell wrapping).
-pub fn cli_pty_argv(app: App, prompt: &str) -> Option<(std::path::PathBuf, Vec<String>)> {
+/// The shell line the chat shows for a headless run, so the owner can see
+/// what was started on their machine.
+pub fn cli_command_line(app: App, prompt: &str) -> Option<String> {
+    let binary = app.cli_binary()?;
+    Some(terminal_command(app, &binary, prompt))
+}
+
+/// Non-interactive argv: plain text on stdout, then exit.
+///
+/// Used by the company-brain chat so the owner sees an answer, not a TUI.
+/// MCP from the owner's config stays on — that is how Knowlith is read.
+///
+/// `server_key` is the `mcpServers` key Connect wrote (`knowlith-<company>`).
+/// Each CLI, run headless, has its own way of quietly *not* calling a tool
+/// and answering from the model instead; the flags below are what stop
+/// that, because an answer with no read behind it is the one thing this
+/// chat may not show.
+pub fn cli_print_argv(app: App, server_key: &str, prompt: &str) -> Option<(std::path::PathBuf, Vec<String>)> {
     let binary = app.cli_binary()?;
     let args = match app {
+        App::ClaudeCode => vec![
+            "--print".into(),
+            "--output-format".into(),
+            "text".into(),
+            // Headless `-p` starts in manual permission mode and there is no
+            // host to approve a tool call, so every MCP read is denied and
+            // Claude answers from context. `mcp__<server>` allows the tools
+            // of that one server and nothing else.
+            "--allowedTools".into(),
+            format!("mcp__{server_key}"),
+            // The daemon's cwd is whatever folder it was started from. A
+            // headless `-p` run connects every server in that folder's
+            // `.mcp.json` and runs its hooks — servers nobody trusted for
+            // this question. Strict mode hands Claude exactly one server:
+            // ours, pointed at this binary, so the answer can only have
+            // been read from the company's own lake.
+            "--strict-mcp-config".into(),
+            "--mcp-config".into(),
+            serde_json::json!({
+                "mcpServers": {
+                    server_key: { "type": "stdio", "command": paths::binary(), "args": ["mcp"] }
+                }
+            })
+            .to_string(),
+            prompt.to_string(),
+        ],
+        App::Codex => vec![
+            "exec".into(),
+            "--color".into(),
+            "never".into(),
+            // `exec` refuses to start outside a git repository, and the
+            // daemon's cwd is the owner's home. The engine's own path already
+            // passes this (crates/engine/src/cli.rs); the chat has to too.
+            "--skip-git-repo-check".into(),
+            // A chat question is not a session worth a rollout file each.
+            "--ephemeral".into(),
+            prompt.to_string(),
+        ],
         App::Cursor => vec![
+            "--print".into(),
             "--mode=ask".into(),
+            "--output-format".into(),
+            "text".into(),
             "--approve-mcps".into(),
             prompt.to_string(),
         ],
-        App::ClaudeCode | App::Codex => vec![prompt.to_string()],
         App::ClaudeDesktop => return None,
     };
     Some((binary, args))
@@ -254,8 +289,6 @@ pub struct TryLaunch {
     /// `desktop` | `terminal` | `missing`
     pub surface: &'static str,
     pub command: Option<String>,
-    /// True when the CLI was prepared for an in-app PTY, not Terminal.app.
-    pub embedded: bool,
 }
 
 /// The documented deep link that prefills `prompt` in this application's chat.
@@ -551,5 +584,35 @@ mod tests {
         assert_eq!(claude, "/opt/bin/claude -- 'hi'");
         let codex = terminal_command(App::Codex, std::path::Path::new("/opt/bin/codex"), "hi");
         assert_eq!(codex, "/opt/bin/codex -- 'hi'");
+    }
+
+    #[test]
+    fn chat_print_argv_is_non_interactive() {
+        // Brain chat must not open a TUI — that painted boxes into bubbles.
+        let (_, claude) = cli_print_argv(App::ClaudeCode, "knowlith-bb", "What do we charge?").unwrap();
+        assert!(claude.iter().any(|a| a == "--print"));
+        assert!(claude.ends_with(&["What do we charge?".into()]));
+        // Without this every read is denied and Claude answers from its head.
+        assert!(claude.windows(2).any(|w| w[0] == "--allowedTools" && w[1] == "mcp__knowlith-bb"));
+        // Only our server, whatever `.mcp.json` sits in the daemon's cwd.
+        assert!(claude.iter().any(|a| a == "--strict-mcp-config"));
+        let config = claude
+            .windows(2)
+            .find(|w| w[0] == "--mcp-config")
+            .map(|w| w[1].clone())
+            .expect("an inline mcp config");
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(parsed["mcpServers"]["knowlith-bb"]["args"][0], "mcp");
+        assert_eq!(parsed["mcpServers"].as_object().unwrap().len(), 1);
+
+        let (_, codex) = cli_print_argv(App::Codex, "knowlith-bb", "What do we charge?").unwrap();
+        assert_eq!(codex[0], "exec");
+        assert!(codex.iter().any(|a| a == "never"));
+        // The daemon's cwd is not a git repo; exec would refuse to start.
+        assert!(codex.iter().any(|a| a == "--skip-git-repo-check"));
+
+        let (_, cursor) = cli_print_argv(App::Cursor, "knowlith-bb", "What do we charge?").unwrap();
+        assert!(cursor.iter().any(|a| a == "--print"));
+        assert!(cursor.iter().any(|a| a == "--approve-mcps"));
     }
 }

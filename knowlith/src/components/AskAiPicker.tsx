@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { AppWindow, Loader2, Terminal } from "lucide-react"
+import { AppWindow, Loader2, MessageSquare, Terminal } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -17,21 +17,25 @@ export type AskPickResult = {
   command: string | null
   message: string
   slug: string
-  embedded: boolean
 }
 
+/** CLI assistants the company chat can run on this machine. */
+export const CHAT_SLUGS = new Set(["claude-code", "codex", "cursor"])
+
 /**
- * Asks which connected AI to open, then launches that one for real.
+ * Asks which connected AI should answer, then hands the question over.
  *
- * With `embedded`, CLI hosts prepare a live in-app PTY (no Terminal.app).
- * Desktop apps still open outside.
+ * Two doors, and the dialog says which is which: a CLI assistant answers
+ * inside Knowlith's own chat (`onAskInside`), a desktop app opens outside
+ * with the question ready. There used to be a third — an xterm in a side
+ * panel — and two ways of asking inside was one too many.
  */
 export function AskAiPicker({
   open,
   onOpenChange,
   prompt,
   about,
-  embedded = false,
+  onAskInside,
   onLaunched,
   onNeedsConnect,
 }: {
@@ -39,8 +43,8 @@ export function AskAiPicker({
   onOpenChange: (open: boolean) => void
   prompt: string
   about?: string
-  /** Prefer the in-app live terminal for CLI assistants (Company brain). */
-  embedded?: boolean
+  /** When given, CLI assistants go here instead of a Terminal window. */
+  onAskInside?: (slug: string) => void
   onLaunched: (result: AskPickResult) => void
   onNeedsConnect: () => void
 }) {
@@ -62,21 +66,17 @@ export function AskAiPicker({
   }, [open])
 
   const choices = (tools ?? []).filter((t) => t.connected && t.launchSurface !== "missing")
-
-  /** CLI hosts the brain can keep beside the map (not Claude Desktop). */
-  const canEmbedLive = (tool: AiTool) =>
-    tool.launchSurface === "terminal" ||
-    tool.slug === "claude-code" ||
-    tool.slug === "codex" ||
-    tool.slug === "cursor"
+  const inside = (tool: AiTool) => onAskInside !== undefined && CHAT_SLUGS.has(tool.slug)
 
   const pick = async (tool: AiTool) => {
+    if (inside(tool)) {
+      onOpenChange(false)
+      onAskInside?.(tool.slug)
+      return
+    }
     setBusy(tool.slug)
     setError(null)
-    // Always ask the daemon for an in-app PTY when the brain embeds; the
-    // server falls back to a desktop deep link when there is no CLI.
-    const wantEmbedded = embedded && canEmbedLive(tool)
-    const result = await toolsApi.try(tool.slug, prompt, { embedded: wantEmbedded })
+    const result = await toolsApi.try(tool.slug, prompt)
     setBusy(null)
     if (failed(result)) {
       setError(result.error)
@@ -88,11 +88,17 @@ export function AskAiPicker({
       command: result.command,
       message: result.message,
       slug: result.app,
-      // If an older daemon omits the field, still open LiveTerminal when we
-      // requested an embed and the surface is a CLI session.
-      embedded: result.embedded === true || (wantEmbedded && result.surface === "terminal"),
     })
     onOpenChange(false)
+  }
+
+  const describe = (tool: AiTool): string => {
+    if (inside(tool)) return "Answers here, in Knowlith's chat"
+    if (tool.launchSurface === "terminal") {
+      const bin = tool.slug === "cursor" ? "agent" : tool.slug === "claude-code" ? "claude" : "codex"
+      return `Runs \`${bin}\` in a Terminal window with the question`
+    }
+    return "Opens the desktop app with the question ready"
   }
 
   return (
@@ -100,13 +106,10 @@ export function AskAiPicker({
       <DialogContent className="max-w-[420px]">
         <DialogTitle>Which AI should answer?</DialogTitle>
         <DialogDescription>
-          {embedded
-            ? about
-              ? `About “${about}”. CLI assistants open live beside the map; desktop apps open outside.`
-              : "CLI assistants open live beside the map; desktop apps open outside."
-            : about
-              ? `About “${about}”. Pick an assistant — CLIs open Terminal; desktop apps open outside.`
-              : "Pick an assistant. CLIs open a real Terminal window; desktop apps open outside Knowlith."}
+          {about ? `About “${about}”. ` : ""}
+          {onAskInside
+            ? "CLI assistants answer here; desktop apps open outside Knowlith."
+            : "CLIs open a Terminal window; desktop apps open outside Knowlith."}
         </DialogDescription>
 
         <p className="mt-3 rounded-md bg-surface-2 px-3 py-2 text-[12.5px] italic text-muted">
@@ -134,8 +137,11 @@ export function AskAiPicker({
         ) : (
           <ul className="mt-4 grid gap-2">
             {choices.map((tool) => {
-              const live = embedded && canEmbedLive(tool)
-              const terminal = tool.launchSurface === "terminal" || live
+              const Icon = inside(tool)
+                ? MessageSquare
+                : tool.launchSurface === "terminal"
+                  ? Terminal
+                  : AppWindow
               return (
                 <li key={tool.slug}>
                   <button
@@ -149,29 +155,11 @@ export function AskAiPicker({
                     )}
                   >
                     <span className="grid size-9 shrink-0 place-items-center rounded-md bg-surface-2 text-muted">
-                      {terminal ? <Terminal className="size-4" /> : <AppWindow className="size-4" />}
+                      <Icon className="size-4" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[13.5px] font-medium text-ink">{tool.label}</span>
-                      <span className="block text-[12px] text-muted">
-                        {live
-                          ? tool.slug === "cursor"
-                            ? "Live `agent` session beside the map"
-                            : tool.slug === "claude-code"
-                              ? "Live `claude` session beside the map"
-                              : tool.slug === "codex"
-                                ? "Live `codex` session beside the map"
-                                : "Live terminal beside the map"
-                          : tool.slug === "cursor" && tool.launchSurface === "terminal"
-                            ? "Runs `agent` in a real Terminal window (Cursor Agent CLI)"
-                            : tool.slug === "claude-code"
-                              ? "Runs `claude` in a real Terminal window"
-                              : tool.slug === "codex" && tool.launchSurface === "terminal"
-                                ? "Runs `codex` in a real Terminal window"
-                                : tool.launchSurface === "terminal"
-                                  ? "Opens a real Terminal window with the question"
-                                  : "Opens the desktop app with the question ready"}
-                      </span>
+                      <span className="block text-[12px] text-muted">{describe(tool)}</span>
                     </span>
                     {busy === tool.slug ? (
                       <Loader2 className="size-4 shrink-0 animate-spin text-faint" />

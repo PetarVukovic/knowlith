@@ -1,5 +1,7 @@
 import { Navigate, Route, BrowserRouter as Router, Routes } from "react-router-dom"
+import { useEffect } from "react"
 import { AppShell } from "@/components/AppShell"
+import { scheduleProductTour } from "@/components/ProductTour"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Activity } from "@/screens/Activity"
 import { Brain } from "@/screens/Brain"
@@ -19,17 +21,27 @@ function Root() {
   const { onboarded, ready, firstRun } = useApp()
   if (!ready) return null
   if (!onboarded) return <Navigate to="/onboarding" replace />
-  // First-run stays on review → connect until that path ends. Home is the
-  // reward for finishing, not a side door while the queue is still empty.
+  // First landing after approve still goes review → connect. Sidebar Home
+  // is not blocked the same way — see GuardHome.
   if (firstRun === "review") return <Navigate to="/review" replace />
   if (firstRun === "connect") return <Navigate to="/connect" replace />
   return <Navigate to="/home" replace />
 }
 
 function GuardHome() {
-  const { firstRun } = useApp()
+  const { firstRun, setFirstRun } = useApp()
+
+  // Choosing Home ends the forced “connect an assistant” gate. Otherwise
+  // knowlith.firstRun stays "connect" forever and every Home click bounces
+  // back to AI assistants — even after the owner already uses Brain/chat.
+  useEffect(() => {
+    if (firstRun === "connect") {
+      setFirstRun(null)
+      scheduleProductTour()
+    }
+  }, [firstRun, setFirstRun])
+
   if (firstRun === "review") return <Navigate to="/review" replace />
-  if (firstRun === "connect") return <Navigate to="/connect" replace />
   return <Home />
 }
 

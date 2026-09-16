@@ -276,15 +276,6 @@ export interface CompilerRun {
   stage: "structural" | "candidates" | "consolidation" | "validation" | "done"
 }
 
-export interface TreeNode {
-  id: string
-  label: string
-  kind?: ObjectKind
-  status?: ObjectStatus
-  children?: TreeNode[]
-  objectId?: string
-}
-
 export interface Company {
   name: string
   initials: string

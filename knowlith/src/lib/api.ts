@@ -39,7 +39,6 @@ import type {
   SkillDoc,
   Source,
   SourceAdded,
-  TreeNode,
   Usage,
   Work,
 } from "./types"
@@ -212,9 +211,6 @@ export const api = {
     } catch {
       /* next save will carry it */
     }
-  },
-  async getTree(): Promise<TreeNode[]> {
-    return get<TreeNode[]>("/api/tree", fixtures.contextTree, [])
   },
   async getObjects(): Promise<ContextObject[]> {
     return get<ContextObject[]>("/api/objects", fixtures.contextObjects, [])
@@ -469,7 +465,7 @@ export const tools = {
    * Opens the application with a prompt prefilled in its composer.
    * The host does not submit it — the owner still presses send.
    */
-  async try(slug: string, prompt: string, opts?: { embedded?: boolean }) {
+  async try(slug: string, prompt: string) {
     return send<{
       outcome: string
       surface: "desktop" | "terminal" | "missing"
@@ -477,11 +473,10 @@ export const tools = {
       message: string
       app: string
       label: string
-      embedded: boolean
     }>(`/api/tools/${slug}/try`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, embedded: opts?.embedded ?? false }),
+      body: JSON.stringify({ prompt }),
     })
   },
 
@@ -491,7 +486,7 @@ export const tools = {
   },
 }
 
-/** WebSocket URL for the live CLI PTY (token query for the shipped page). */
+/** WebSocket URL for a headless CLI run (token query for the shipped page). */
 export function terminalSocketUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
   const qs = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ""

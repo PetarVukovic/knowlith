@@ -9,7 +9,6 @@ import type {
   ReviewItem,
   SkillDoc,
   Source,
-  TreeNode,
 } from "./types"
 
 /**
@@ -856,60 +855,6 @@ export const compilerRuns: CompilerRun[] = [
     rejectedUnsupported: 6,
     rejectedDuplicate: 29,
     stage: "done",
-  },
-]
-
-export const contextTree: TreeNode[] = [
-  {
-    id: "t-company",
-    label: "Company",
-    children: [
-      { id: "t-company-profile", label: "Profile", objectId: "term:bez-pdv", kind: "term", status: "approved" },
-    ],
-  },
-  {
-    id: "t-rules",
-    label: "Rules",
-    children: [
-      { id: "t-r1", label: "Odobravanje popusta", objectId: "rule:sales.discount", kind: "rule", status: "approved" },
-      { id: "t-r2", label: "Rok valjanosti ponude", objectId: "rule:sales.offer-validity", kind: "rule", status: "approved" },
-      { id: "t-r3", label: "Rok plaćanja i avans", objectId: "rule:sales.payment-terms", kind: "rule", status: "approved" },
-      { id: "t-r4", label: "Jamstveni rok na ugradnju", objectId: "rule:service.warranty", kind: "rule", status: "approved" },
-      { id: "t-r5", label: "Vrijeme izlaska na teren", objectId: "rule:service.response-time", kind: "rule", status: "draft" },
-      { id: "t-r6", label: "Broj krugova izmjena", objectId: "rule:sales.revision-rounds", kind: "rule", status: "draft" },
-    ],
-  },
-  {
-    id: "t-processes",
-    label: "Processes",
-    children: [
-      { id: "t-p1", label: "Izrada ponude", objectId: "process:sales.quote", kind: "process", status: "approved" },
-      { id: "t-p2", label: "Servisni nalog", objectId: "process:service.intervention", kind: "process", status: "approved" },
-      { id: "t-p3", label: "Izdavanje računa", objectId: "process:finance.invoice", kind: "process", status: "approved" },
-    ],
-  },
-  {
-    id: "t-knowledge",
-    label: "Knowledge",
-    children: [
-      { id: "t-k1", label: "Cjenik 2026", objectId: "fact:price.list-2026", kind: "fact", status: "approved" },
-      { id: "t-k2", label: "bez PDV-a", objectId: "term:bez-pdv", kind: "term", status: "approved" },
-      { id: "t-k3", label: "primopredajni zapisnik", objectId: "term:primopredajni-zapisnik", kind: "term", status: "approved" },
-    ],
-  },
-  {
-    id: "t-skills",
-    label: "Skills",
-    children: [
-      { id: "t-s1", label: "Izradi ponudu za klimatizaciju", objectId: "skill:quote-hvac", kind: "skill", status: "approved" },
-      { id: "t-s2", label: "Sastavi servisni izvještaj", objectId: "skill:service-report", kind: "skill", status: "approved" },
-      { id: "t-s3", label: "Provjeri ovlast za popust", objectId: "skill:check-discount", kind: "skill", status: "draft" },
-    ],
-  },
-  {
-    id: "t-sources",
-    label: "Sources",
-    children: sources.map((s) => ({ id: `t-src-${s.id}`, label: s.name })),
   },
 ]
 

@@ -11,7 +11,6 @@ import type {
   Source,
   SourceDocument,
   ToolRead,
-  TreeNode,
 } from "@/lib/types"
 
 type Activity = Awaited<ReturnType<typeof api.getRecentActivity>>
@@ -44,7 +43,6 @@ interface AppState {
   /** Data URL of the uploaded mark, or null for initials. */
   companyLogo: string | null
   objects: ContextObject[]
-  tree: TreeNode[]
   review: ReviewItem[]
   sources: Source[]
   skills: SkillDoc[]
@@ -112,7 +110,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [companyName, setCompanyName] = useState("")
   const [companyLogo, setCompanyLogo] = useState<string | null>(null)
   const [objects, setObjects] = useState<ContextObject[]>([])
-  const [tree, setTree] = useState<TreeNode[]>([])
   const [review, setReview] = useState<ReviewItem[]>([])
   const [sources, setSources] = useState<Source[]>([])
   const [skills, setSkills] = useState<SkillDoc[]>([])
@@ -145,10 +142,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [c, o, t, r, s, sk, d, ru, docs, reads, act, hints] = await Promise.all([
+      const [c, o, r, s, sk, d, ru, docs, reads, act, hints] = await Promise.all([
         api.getCompany(),
         api.getObjects(),
-        api.getTree(),
         api.getReviewQueue(),
         api.getSources(),
         api.getSkills(),
@@ -164,7 +160,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // the folder name. Never overwritten with a literal from this file.
       if (c.name.trim()) setCompanyName(c.name)
       setObjects(o)
-      setTree(t)
       setReview(r)
       setSources(s)
       setSkills(sk)
@@ -396,9 +391,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * tick catches up.
    */
   const refresh = useCallback(async () => {
-    const [o, t, r, s, sk, d, ru, docs, hints] = await Promise.all([
+    const [o, r, s, sk, d, ru, docs, hints] = await Promise.all([
       api.getObjects(),
-      api.getTree(),
       api.getReviewQueue(),
       api.getSources(),
       api.getSkills(),
@@ -408,7 +402,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       api.getMergeHints(),
     ])
     setObjects(o)
-    setTree(t)
     setReview(r)
     setSources(s)
     setSkills(sk)
@@ -454,7 +447,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCompany,
       companyLogo,
       objects,
-      tree,
       review,
       sources,
       skills,
@@ -493,7 +485,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCompany,
       companyLogo,
       objects,
-      tree,
       review,
       sources,
       skills,

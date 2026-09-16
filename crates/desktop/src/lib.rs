@@ -30,6 +30,9 @@ pub use connect::{
     server_key, status, status_all,
 };
 pub use icon::{Icon, company_icon};
-pub use launch::{Outcome, TryLaunch, cli_pty_argv, open_or_restart, open_with_prompt, open_with_prompt_opts, prompt_deeplink};
+pub use launch::{
+    Outcome, TryLaunch, cli_command_line, cli_print_argv, open_or_restart, open_with_prompt,
+    prompt_deeplink,
+};
 pub use pick::PickError;
 pub use power::{Power, power};

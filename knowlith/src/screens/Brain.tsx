@@ -1,22 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import {
-  ExternalLink,
-  Maximize2,
-  Minimize2,
-  Network,
-  RefreshCw,
-  Terminal,
-  X,
-} from "lucide-react"
-import { AskAiPicker, type AskPickResult } from "@/components/AskAiPicker"
-import { kindMeta } from "@/components/Domain"
-import { LiveTerminal } from "@/components/LiveTerminal"
+import { Maximize2, Minimize2, Network, RefreshCw } from "lucide-react"
+import { CompanyChat, edgeKeysAmong, type ChatLit } from "@/components/CompanyChat"
 import { ResizeHandle, usePanelSize } from "@/components/Resizable"
 import { Button } from "@/components/ui/button"
 import { brain as brainApi } from "@/lib/api"
-import { objectTryPrompt } from "@/lib/askAi"
-import type { BrainEdge, BrainNode, CompanyBrain, ObjectKind } from "@/lib/types"
+import type { BrainNode, CompanyBrain, ObjectKind } from "@/lib/types"
 import { useApp } from "@/state/AppState"
 import { cn } from "@/lib/utils"
 
@@ -26,19 +15,13 @@ type Selection =
   | { kind: "edge"; from: string; to: string; type: string }
   | null
 
-type AgentSession = AskPickResult & {
-  prompt: string
-  about: string
-}
-
 const VIEW_W = 1200
 const VIEW_H = 800
 
 /**
- * Interactive company brain: drag nodes freely, click edges, pick which AI
- * answers. CLI assistants open a live PTY beside the map; desktop apps open
- * outside. Labels appear only for the hovered or selected node so the map
- * stays readable at production density.
+ * Interactive company brain: drag nodes freely, click edges. Ask AI is a
+ * chat beside the map powered by the owner's local CLI (never a Knowlith→API
+ * call). While the agent reads, those nodes and paths light up on the map.
  */
 export function Brain() {
   const { companyName } = useApp()
@@ -49,17 +32,9 @@ export function Brain() {
   const [positions, setPositions] = useState<Map<string, Pos>>(new Map())
   const [selection, setSelection] = useState<Selection>(null)
   const [hoverId, setHoverId] = useState<string | null>(null)
-  const [session, setSession] = useState<AgentSession | null>(null)
-  const [hint, setHint] = useState<string | null>(null)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
   const [fullscreen, setFullscreen] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [pendingAsk, setPendingAsk] = useState<{
-    prompt: string
-    about: string
-    nodeId: string
-  } | null>(null)
 
   const drag = useRef<{
     mode: "node" | "pan"
@@ -74,6 +49,20 @@ export function Brain() {
   const svgRef = useRef<SVGSVGElement>(null)
 
   const [kindFilter, setKindFilter] = useState<ObjectKind | "all">("all")
+  const [litIds, setLitIds] = useState<string[]>([])
+  const [litEdges, setLitEdges] = useState<string[]>([])
+
+  const onChatLit = useCallback(
+    (lit: ChatLit) => {
+      setLitIds(lit.nodeIds)
+      if (data) {
+        setLitEdges(edgeKeysAmong(lit.nodeIds, data.edges))
+      } else {
+        setLitEdges([])
+      }
+    },
+    [data],
+  )
 
   const load = useCallback(async () => {
     const next = await brainApi.get()
@@ -103,12 +92,6 @@ export function Brain() {
     return () => window.removeEventListener("keydown", onKey)
   }, [fullscreen])
 
-  // Live ask needs map + terminal without the nav chrome — leaving the shell
-  // on squeezes both into a third of the screen.
-  useEffect(() => {
-    if (session?.embedded) setFullscreen(true)
-  }, [session?.embedded])
-
   /** Screen → graph world (accounts for pan + zoom on the inner group). */
   const clientToWorld = (clientX: number, clientY: number): Pos => {
     const svg = svgRef.current
@@ -128,26 +111,8 @@ export function Brain() {
     return VIEW_W / svg.getBoundingClientRect().width
   }
 
-  const promptForNode = (node: BrainNode) => {
-    const kind = (["rule", "process", "term", "skill", "fact"].includes(node.kind)
-      ? node.kind
-      : "fact") as ObjectKind
-    return objectTryPrompt(kind, node.title, companyName)
-  }
-
-  const askAboutNode = (node: BrainNode) => {
-    setPendingAsk({
-      prompt: promptForNode(node),
-      about: node.title,
-      nodeId: node.id,
-    })
-    setPickerOpen(true)
-  }
-
-  const selectNode = (id: string, autoAsk: boolean) => {
+  const selectNode = (id: string) => {
     setSelection({ kind: "node", id })
-    const node = data?.nodes.find((n) => n.id === id)
-    if (autoAsk && node) askAboutNode(node)
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -177,22 +142,7 @@ export function Brain() {
   }
 
   const selectedNode =
-    selection?.kind === "node" ? data?.nodes.find((n) => n.id === selection.id) : null
-  const selectedEdge =
-    selection?.kind === "edge"
-      ? data?.edges.find(
-          (e) =>
-            e.from === selection.from && e.to === selection.to && e.type === selection.type,
-        )
-      : null
-
-  const related = selectedNode
-    ? (data?.edges ?? []).filter(
-        (e) => e.from === selectedNode.id || e.to === selectedNode.id,
-      )
-    : []
-
-  const liveSession = Boolean(session?.embedded)
+    selection?.kind === "node" ? data?.nodes.find((n) => n.id === selection.id) ?? null : null
 
   return (
     <div
@@ -205,13 +155,13 @@ export function Brain() {
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col",
-          fullscreen || liveSession ? "px-0 pt-0" : "px-3 pt-3",
+          fullscreen ? "px-0 pt-0" : "px-3 pt-3",
         )}
       >
         <div
           className={cn(
             "flex shrink-0 items-center gap-2",
-            fullscreen || liveSession
+            fullscreen
               ? "border-b border-line bg-surface px-3 py-1.5"
               : "px-1 pb-2",
           )}
@@ -220,9 +170,9 @@ export function Brain() {
             <Network className="size-3.5 shrink-0 text-faint" />
             <span className="truncate">Company brain</span>
           </h1>
-          {!liveSession && !fullscreen ? (
+          {!fullscreen ? (
             <p className="hidden min-w-0 flex-1 truncate text-[12px] text-muted lg:block">
-              Click a node · Ask AI opens live beside the map
+              Click a node · ask beside the map — lit paths follow what the agent reads
             </p>
           ) : (
             <span className="min-w-0 flex-1" />
@@ -264,14 +214,10 @@ export function Brain() {
           </div>
         </div>
 
-        {hint && !liveSession ? (
-          <p className="px-1 pb-1 text-[12px] text-muted">{hint}</p>
-        ) : null}
-
         <div
           className={cn(
             "relative min-h-0 flex-1 overflow-hidden bg-surface",
-            fullscreen || liveSession ? "border-0" : "rounded-lg border border-line",
+            fullscreen ? "border-0" : "rounded-lg border border-line",
           )}
         >
           {!data || data.nodes.length === 0 ? (
@@ -309,6 +255,15 @@ export function Brain() {
                 e.currentTarget.setPointerCapture(e.pointerId)
               }}
             >
+              <defs>
+                <filter id="brain-lit-glow" x="-80%" y="-80%" width="260%" height="260%">
+                  <feGaussianBlur stdDeviation="3.5" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
               <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
                 <BrainSilhouette />
                 {(data.edges ?? []).map((edge) => {
@@ -323,6 +278,7 @@ export function Brain() {
                   const touched =
                     selection?.kind === "node" &&
                     (selection.id === edge.from || selection.id === edge.to)
+                  const lit = litEdges.includes(`${edge.from}|${edge.to}`)
                   return (
                     <g key={`${edge.from}-${edge.to}-${edge.type}`}>
                       <line
@@ -349,14 +305,17 @@ export function Brain() {
                         x2={b.x}
                         y2={b.y}
                         stroke={
-                          active
-                            ? "var(--color-accent, #2563eb)"
-                            : touched
-                              ? "#94a3b8"
-                              : "var(--color-line, #d4d4d4)"
+                          lit
+                            ? "#f59e0b"
+                            : active
+                              ? "var(--color-accent, #2563eb)"
+                              : touched
+                                ? "#94a3b8"
+                                : "var(--color-line, #d4d4d4)"
                         }
-                        strokeWidth={active ? 2.5 : touched ? 1.8 : 1.2}
-                        className="pointer-events-none"
+                        strokeWidth={lit ? 3.2 : active ? 2.5 : touched ? 1.8 : 1.2}
+                        opacity={litIds.length > 0 && !lit ? 0.22 : 1}
+                        className={cn("pointer-events-none", lit && "brain-edge-lit")}
                       />
                     </g>
                   )
@@ -371,12 +330,13 @@ export function Brain() {
                     (kindFilter === "fact" && (node.kind === "term" || node.kind === "fact"))
                   const active = selection?.kind === "node" && selection.id === node.id
                   const hovered = hoverId === node.id
-                  const showLabel = active || hovered
+                  const lit = litIds.includes(node.id)
+                  const showLabel = active || hovered || lit
                   return (
                     <g
                       key={node.id}
                       transform={`translate(${pos.x}, ${pos.y})`}
-                      opacity={matches ? 1 : 0.18}
+                      opacity={matches ? (litIds.length > 0 && !lit ? 0.28 : 1) : 0.18}
                       className="cursor-grab active:cursor-grabbing"
                       onPointerEnter={() => setHoverId(node.id)}
                       onPointerLeave={() =>
@@ -403,21 +363,25 @@ export function Brain() {
                         drag.current = null
                         if (!wasDrag) {
                           e.stopPropagation()
-                          selectNode(node.id, true)
+                          selectNode(node.id)
                         }
                       }}
                     >
                       <circle
-                        r={active ? 20 : hovered ? 17 : 15}
+                        r={lit ? 22 : active ? 20 : hovered ? 17 : 15}
                         fill={kindFill(node.kind)}
                         stroke={
-                          active
-                            ? "var(--color-accent, #2563eb)"
-                            : hovered
-                              ? "#cbd5e1"
-                              : "#fff"
+                          lit
+                            ? "#fbbf24"
+                            : active
+                              ? "var(--color-accent, #2563eb)"
+                              : hovered
+                                ? "#cbd5e1"
+                                : "#fff"
                         }
-                        strokeWidth={active ? 3 : 2}
+                        strokeWidth={lit ? 4 : active ? 3 : 2}
+                        className={lit ? "brain-node-lit" : undefined}
+                        filter={lit ? "url(#brain-lit-glow)" : undefined}
                       />
                       {showLabel ? (
                         <g className="pointer-events-none">
@@ -466,264 +430,60 @@ export function Brain() {
         className="flex shrink-0 flex-col border-l border-line bg-bg"
         style={{ width: side.width }}
       >
-        {liveSession && session ? (
-          <div className="min-h-0 flex-1">
-            <LiveTerminal
-              key={`${session.slug}:${session.prompt}`}
-              app={session.slug}
-              prompt={session.prompt}
-              label={`${session.label} · ${session.about}`}
-              onClose={() => setSession(null)}
-            />
-          </div>
-        ) : (
-          <>
-            <div className="border-b border-line px-3 py-2.5">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-faint">
-                Ask AI
-              </div>
-              <p className="mt-0.5 text-[12px] text-muted">
-                Pick a node, then an assistant — live CLI opens here.
-              </p>
-            </div>
-
-            {data ? (
-              <div className="border-b border-line px-3 py-2.5">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-faint">
-                  Index
-                </div>
-                <ul className="mt-2 space-y-1">
-                  {(
-                    [
-                      ["all", "Everything", "#94a3b8"],
-                      ["rule", "Rules", "#3b82f6"],
-                      ["process", "Processes", "#10b981"],
-                      ["skill", "AI skills", "#f59e0b"],
-                      ["fact", "Terms & facts", "#8b5cf6"],
-                    ] as const
-                  ).map(([id, label, color]) => {
-                    const count =
-                      id === "all"
-                        ? data.nodes.length
-                        : data.nodes.filter((n) =>
-                            id === "fact"
-                              ? n.kind === "fact" || n.kind === "term"
-                              : n.kind === id,
-                          ).length
-                    const active = kindFilter === id
-                    return (
-                      <li key={id}>
-                        <button
-                          type="button"
-                          onClick={() => setKindFilter(id)}
-                          className={cn(
-                            "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px]",
-                            active ? "bg-accent-soft text-ink" : "text-muted hover:bg-surface-2",
-                          )}
-                        >
-                          <span
-                            className="size-2.5 shrink-0 rounded-full"
-                            style={{ background: color }}
-                            aria-hidden
-                          />
-                          <span className="min-w-0 flex-1 font-medium">{label}</span>
-                          <span className="tabular-nums text-faint">{count}</span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            ) : null}
-
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {!selection ? (
-                <p className="px-3 py-5 text-[13px] text-faint">
-                  Select a node or an edge on the map.
-                </p>
-              ) : null}
-
-              {selectedNode ? (
-                <div className="border-b border-line px-3 py-3">
-                  <div className="text-[11px] uppercase tracking-wide text-faint">
-                    {kindMeta(
-                      (["rule", "process", "term", "skill", "fact"].includes(
-                        selectedNode.kind,
-                      )
-                        ? selectedNode.kind
-                        : "fact") as ObjectKind,
-                    ).label}
-                  </div>
-                  <h2 className="mt-1 text-[15px] font-semibold text-ink">
-                    {selectedNode.title}
-                  </h2>
-                  <p className="mt-1.5 text-[12.5px] text-muted">
-                    {kindMeta(
-                      (["rule", "process", "term", "skill", "fact"].includes(
-                        selectedNode.kind,
-                      )
-                        ? selectedNode.kind
-                        : "fact") as ObjectKind,
-                    ).meaning}
-                  </p>
-                  {related.length > 0 ? (
-                    <ul className="mt-3 grid gap-1.5">
-                      {related.map((e) => {
-                        const otherId = e.from === selectedNode.id ? e.to : e.from
-                        const other = data?.nodes.find((n) => n.id === otherId)
-                        return (
-                          <li key={`${e.from}-${e.to}-${e.type}`}>
-                            <button
-                              type="button"
-                              className="w-full rounded-md px-2 py-1.5 text-left text-[12px] text-muted hover:bg-surface-3 hover:text-ink"
-                              onClick={() => selectNode(otherId, true)}
-                            >
-                              <span className="text-faint">{edgeLabel(e.type)}</span>{" "}
-                              {other?.title ?? otherId}
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  ) : (
-                    <p className="mt-3 text-[12px] text-faint">No links yet.</p>
-                  )}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() =>
-                        navigate(
-                          selectedNode.kind === "skill"
-                            ? `/skills/${encodeURIComponent(selectedNode.id)}`
-                            : `/workspace/${encodeURIComponent(selectedNode.id)}`,
-                        )
-                      }
-                    >
-                      <ExternalLink className="size-3.5" />
-                      Open
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      onClick={() => askAboutNode(selectedNode)}
-                    >
-                      <Terminal className="size-3.5" />
-                      Ask AI…
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-
-              {selectedEdge && data ? (
-                <EdgeDetail
-                  edge={selectedEdge}
-                  nodes={data.nodes}
-                  onOpen={(id) => selectNode(id, true)}
-                />
-              ) : null}
-
-              {session ? (
-                <div className="border-t border-line px-3 py-3 text-[12.5px]">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-medium text-ink">{session.label} opened</div>
-                      <p className="mt-1 text-muted">{session.message}</p>
-                      <p className="mt-2 text-[12px] text-faint">
-                        {session.surface === "terminal"
-                          ? "A real Terminal window is running that command — this panel is only a record."
-                          : "The desktop app opened outside Knowlith with the question ready."}
-                      </p>
-                    </div>
+        {data ? (
+          <div className="shrink-0 border-b border-line px-3 py-2">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-faint">Index</div>
+            <ul className="mt-1.5 flex flex-wrap gap-1">
+              {(
+                [
+                  ["all", "All", "#94a3b8"],
+                  ["rule", "Rules", "#3b82f6"],
+                  ["process", "Processes", "#10b981"],
+                  ["skill", "Skills", "#f59e0b"],
+                  ["fact", "Terms", "#8b5cf6"],
+                ] as const
+              ).map(([id, label, color]) => {
+                const active = kindFilter === id
+                return (
+                  <li key={id}>
                     <button
                       type="button"
-                      className="text-faint hover:text-ink"
-                      onClick={() => setSession(null)}
-                      aria-label="Dismiss"
+                      onClick={() => setKindFilter(id)}
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11.5px]",
+                        active
+                          ? "border-accent bg-accent-soft text-ink"
+                          : "border-line text-muted hover:bg-surface-2",
+                      )}
                     >
-                      <X className="size-3.5" />
+                      <span
+                        className="size-1.5 rounded-full"
+                        style={{ background: color }}
+                        aria-hidden
+                      />
+                      {label}
                     </button>
-                  </div>
-                  <p className="mt-3 text-[11px] uppercase tracking-wide text-faint">
-                    Question
-                  </p>
-                  <p className="mt-1 italic text-muted">“{session.prompt}”</p>
-                </div>
-              ) : selection ? (
-                <p className="px-3 py-3 text-[12.5px] text-faint">
-                  Choose an AI above to open a live session.
-                </p>
-              ) : null}
-            </div>
+                  </li>
+                )
+              })}
+            </ul>
+            {litIds.length > 0 ? (
+              <p className="mt-2 text-[11.5px] text-pending">
+                {litIds.length} {litIds.length === 1 ? "spot" : "spots"} lit from the live answer
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
-            {data && data.assistants.length > 0 ? (
-              <div className="border-t border-line px-3 py-2 text-[11.5px] text-faint">
-                Connected: {data.assistants.map((a) => a.label).join(", ")}
-              </div>
-            ) : (
-              <div className="border-t border-line px-3 py-2 text-[11.5px] text-pending">
-                No AI assistant connected — connect one to ask from the map.
-              </div>
-            )}
-          </>
-        )}
+        <div className="min-h-0 flex-1">
+          <CompanyChat
+            companyName={companyName}
+            focusNode={selectedNode}
+            onLit={onChatLit}
+            onNeedsConnect={() => navigate("/connect")}
+          />
+        </div>
       </aside>
-
-      <AskAiPicker
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        prompt={pendingAsk?.prompt ?? ""}
-        about={pendingAsk?.about}
-        embedded
-        onNeedsConnect={() => navigate("/connect")}
-        onLaunched={(result) => {
-          if (!pendingAsk) return
-          setHint(result.message)
-          setSession({
-            ...result,
-            prompt: pendingAsk.prompt,
-            about: pendingAsk.about,
-          })
-        }}
-      />
-    </div>
-  )
-}
-
-function EdgeDetail({
-  edge,
-  nodes,
-  onOpen,
-}: {
-  edge: BrainEdge
-  nodes: BrainNode[]
-  onOpen: (id: string) => void
-}) {
-  const from = nodes.find((n) => n.id === edge.from)
-  const to = nodes.find((n) => n.id === edge.to)
-  return (
-    <div className="border-b border-line px-3 py-3">
-      <div className="text-[11px] uppercase tracking-wide text-faint">Connection</div>
-      <h2 className="mt-1 text-[15px] font-semibold text-ink">{edgeLabel(edge.type)}</h2>
-      <p className="mt-1.5 text-[12.5px] text-muted">{edgeMeaning(edge.type)}</p>
-      <div className="mt-3 grid gap-2">
-        <button
-          type="button"
-          className="rounded-md border border-line bg-surface px-3 py-2 text-left text-[12.5px] hover:bg-surface-2"
-          onClick={() => onOpen(edge.from)}
-        >
-          <span className="text-faint">From</span>
-          <div className="font-medium text-ink">{from?.title ?? edge.from}</div>
-        </button>
-        <button
-          type="button"
-          className="rounded-md border border-line bg-surface px-3 py-2 text-left text-[12.5px] hover:bg-surface-2"
-          onClick={() => onOpen(edge.to)}
-        >
-          <span className="text-faint">To</span>
-          <div className="font-medium text-ink">{to?.title ?? edge.to}</div>
-        </button>
-      </div>
     </div>
   )
 }
@@ -865,36 +625,6 @@ function kindFill(kind: string): string {
       return "#8b5cf6"
     default:
       return "#94a3b8"
-  }
-}
-
-function edgeLabel(type: string): string {
-  switch (type) {
-    case "depends_on":
-      return "Depends on"
-    case "used_by":
-      return "Used by"
-    case "derived_from":
-      return "Derived from"
-    case "conflicts_with":
-      return "Conflicts with"
-    default:
-      return type
-  }
-}
-
-function edgeMeaning(type: string): string {
-  switch (type) {
-    case "depends_on":
-      return "This claim needs the other to stay true."
-    case "used_by":
-      return "If you change this, the other is affected."
-    case "derived_from":
-      return "This was computed from the other claim."
-    case "conflicts_with":
-      return "Two documents disagree — you decide which is current."
-    default:
-      return "A link between two confirmed claims."
   }
 }
 
