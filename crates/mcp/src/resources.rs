@@ -9,8 +9,18 @@
 //! Documents are here as well, but as links rather than as an inventory:
 //! the tools return `resource_link`s pointing at them, so the agent can
 //! open the source of an answer without every reply carrying a contract.
+//!
+//! Only documents that approved knowledge rests on are listed, and reading
+//! one returns the approved passages, not the file. For a while this module
+//! handed back `document.text` for any id — every contract and the payroll
+//! sheet the compiler had been told to hold back, to any client, before the
+//! owner had approved a single thing, and recorded as no read at all. The
+//! README's "serves only what you have approved" was false for as long as
+//! that lasted.
 
-use knowlith_core::{ObjectKind, ObjectStatus};
+use std::collections::BTreeMap;
+
+use knowlith_core::{ContextObject, ObjectKind, ObjectStatus};
 use knowlith_lake::Lake;
 use serde_json::{Value, json};
 
@@ -18,6 +28,26 @@ use crate::gate;
 
 pub const COMPANY_URI: &str = "knowlith://company";
 const DOCUMENT_PREFIX: &str = "knowlith://document/";
+
+/// How much of the document around an approved quote is served with it.
+/// The same margin the `get_source_evidence` tool uses, so a passage reads
+/// the same whichever way the agent reached it.
+const PASSAGE_MARGIN: usize = 240;
+
+/// Document id → the approved objects resting on it. Documents that back
+/// nothing approved are not in the map, and so not in the list.
+fn backing(objects: &[ContextObject]) -> BTreeMap<&str, Vec<&ContextObject>> {
+    let mut map: BTreeMap<&str, Vec<&ContextObject>> = BTreeMap::new();
+    for object in objects.iter().filter(|o| gate::is_servable(o)) {
+        for span in &object.evidence {
+            let entry = map.entry(span.document_id.as_str()).or_default();
+            if !entry.iter().any(|o| o.id == object.id) {
+                entry.push(object);
+            }
+        }
+    }
+    map
+}
 
 /// How much of the company card is worth always having loaded.
 ///
@@ -38,12 +68,19 @@ pub fn list(lake: &Lake, company: &str, icon: &Value) -> Vec<Value> {
         "annotations": { "audience": ["assistant"], "priority": 0.9 },
     })];
 
-    for document in lake.documents().unwrap_or_default().into_iter().take(200) {
+    let objects = lake.objects().unwrap_or_default();
+    let names = lake.document_names().unwrap_or_default();
+    for (document_id, rests) in backing(&objects).into_iter().take(200) {
+        let Some(name) = names.get(document_id) else { continue };
         out.push(json!({
-            "uri": format!("{DOCUMENT_PREFIX}{}", document.id),
-            "name": document.name,
-            "title": document.name,
-            "description": format!("The text Knowlith read out of {}.", document.name),
+            "uri": format!("{DOCUMENT_PREFIX}{document_id}"),
+            "name": name,
+            "title": name,
+            "description": format!(
+                "The passages of {name} that {} approved {} on.",
+                rests.len(),
+                if rests.len() == 1 { "entry rests" } else { "entries rest" }
+            ),
             "mimeType": "text/plain",
             "annotations": { "audience": ["assistant"], "priority": 0.2 },
         }));
@@ -58,12 +95,14 @@ pub fn templates() -> Vec<Value> {
         "uriTemplate": "knowlith://document/{documentId}",
         "name": "source-document",
         "title": "A document this company gave Knowlith",
-        "description": "The deterministic text every quote and offset refers to.",
+        "description": "The passages of a document that the owner's approved knowledge rests on.",
         "mimeType": "text/plain",
     })]
 }
 
-/// `resources/read`. `None` when the URI is not one of ours.
+/// `resources/read`. `None` when the URI is not one of ours, or names a
+/// document nothing approved rests on — which, to a client, is the same as
+/// there being no such document.
 pub fn read(lake: &Lake, company: &str, uri: &str) -> Option<Vec<Value>> {
     if uri == COMPANY_URI {
         return Some(vec![json!({
@@ -76,11 +115,35 @@ pub fn read(lake: &Lake, company: &str, uri: &str) -> Option<Vec<Value>> {
     let id = uri.strip_prefix(DOCUMENT_PREFIX)?;
     // The id is used as a key, never as a path. A URI cannot reach a file
     // outside the lake here because nothing here ever opens a file.
-    let document = lake.document(id).ok()?;
+    let objects = lake.objects().ok()?;
+    let rests = backing(&objects).remove(id)?;
+
+    let mut text = String::new();
+    let mut name = None;
+    for object in rests {
+        for span in object.evidence.iter().filter(|s| s.document_id == id) {
+            let Ok(Some((document, passage))) =
+                lake.passage(id, span.start_byte, span.end_byte, PASSAGE_MARGIN)
+            else {
+                continue;
+            };
+            name.get_or_insert(document.name);
+            text.push_str(&format!(
+                "## {} — {}\n\n{}\n\n",
+                object.title,
+                span.locator,
+                passage.trim()
+            ));
+        }
+    }
+    let name = name?;
     Some(vec![json!({
         "uri": uri,
         "mimeType": "text/plain",
-        "text": document.text,
+        "text": format!(
+            "# {name}\n\nThe passages of this document that approved knowledge rests on. \
+             The rest of the file is not served.\n\n{text}"
+        ),
     })])
 }
 

@@ -516,6 +516,110 @@ fn the_company_card_can_be_read_as_a_resource() {
     assert!(card.contains("Rok plaćanja"), "the open question is named: {card}");
 }
 
+#[test]
+fn a_document_nothing_approved_rests_on_is_not_served_to_a_client() {
+    // Every file the owner pointed Knowlith at used to be readable in full
+    // through `resources/read`, approved or not, payroll included, while the
+    // README said the gateway serves only what was approved.
+    let db = temp_db("unapproved-document");
+    let mut lake = lake_with_a_company(&db);
+
+    let text = "Plaća direktora iznosi 9.400 EUR bruto mjesečno.\n";
+    let sha = sha256_hex(text.as_bytes());
+    let payroll = Document {
+        id: document_id(&sha),
+        path: "/tmp/place.md".into(),
+        name: "Plaće 2026.md".into(),
+        kind: DocumentKind::Markdown,
+        byte_len: text.len() as u64,
+        sha256: sha.clone(),
+        text: text.to_string(),
+        text_sha256: sha,
+        verbatim: true,
+        modified: "2026-01-01T00:00:00Z".into(),
+        columns: None,
+        blocks: vec![Block {
+            locator: "§1".into(),
+            kind: BlockKind::Paragraph,
+            text: text.trim().to_string(),
+            start_byte: 0,
+            end_byte: text.trim().len(),
+            page: None,
+            sheet: None,
+            row: None,
+            cells: None,
+        }],
+    };
+    lake.put_document("s1", &payroll).unwrap();
+    lake.put_object(&ContextObject {
+        id: "fact:salary".into(),
+        kind: ObjectKind::Fact,
+        subtype: None,
+        title: "Plaća direktora".into(),
+        body: "9.400 EUR bruto.".into(),
+        status: ObjectStatus::Proposed,
+        confidence: Confidence(0.9),
+        version: 1,
+        valid_from: "2026-01-01T00:00:00Z".into(),
+        valid_to: None,
+        supersedes: None,
+        decided_by: None,
+        edited_on_approval: false,
+        evidence: vec![Evidence {
+            document_id: payroll.id.clone(),
+            locator: "§1".into(),
+            start_byte: 0,
+            end_byte: text.trim().len(),
+            quote: text.trim().into(),
+        }],
+        relations: Vec::new(),
+        path: "facts/salary.md".into(),
+        updated_at: "2026-01-01T00:00:00Z".into(),
+    })
+    .unwrap();
+    drop(lake);
+
+    let uri = format!("knowlith://document/{}", payroll.id);
+    let out = converse(
+        &db,
+        &[
+            json!({"jsonrpc":"2.0","id":1,"method":"resources/list"}),
+            json!({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":uri}}),
+        ],
+    );
+
+    let listed = out[0]["result"]["resources"].as_array().unwrap();
+    assert!(
+        listed.iter().any(|r| r["name"] == "Uvjeti prodaje.md"),
+        "the document approved rules rest on is offered: {listed:#?}"
+    );
+    assert!(
+        !listed.iter().any(|r| r["name"] == "Plaće 2026.md"),
+        "a document backing only a proposal was offered: {listed:#?}"
+    );
+
+    let reply = out[1].to_string();
+    assert!(out[1].get("error").is_some(), "the unapproved document was read: {reply}");
+    assert!(!reply.contains("9.400"), "the payroll figure leaked: {reply}");
+}
+
+#[test]
+fn reading_a_document_serves_the_approved_passages_and_says_so() {
+    let db = temp_db("document-passages");
+    let lake = lake_with_a_company(&db);
+    let (id, _) = lake.document_names().unwrap().into_iter().next().unwrap();
+    drop(lake);
+
+    let out = converse(
+        &db,
+        &[json!({"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":format!("knowlith://document/{id}")}})],
+    );
+    let text = out[0]["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Uvjeti prodaje.md"), "{text}");
+    assert!(text.contains("Popust za stalne kupce iznosi 5%."), "{text}");
+    assert!(text.contains("The rest of the file is not served."), "{text}");
+}
+
 /// Collects the lines the server writes, the way a client would read them.
 #[derive(Clone, Default)]
 struct Recorder(Arc<Mutex<Vec<u8>>>);
