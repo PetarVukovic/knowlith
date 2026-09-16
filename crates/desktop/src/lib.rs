@@ -18,6 +18,7 @@ pub mod guidance;
 pub mod icon;
 pub mod launch;
 pub mod paths;
+pub mod pick;
 pub mod power;
 
 pub use apps::{App, Format, program_on_path};
@@ -27,4 +28,5 @@ pub use guidance::Guide;
 pub use connect::{ConnectError, SERVER_NAME, Status, connect, disconnect, status, status_all};
 pub use icon::{Icon, company_icon};
 pub use launch::{Outcome, open_or_restart};
+pub use pick::PickError;
 pub use power::{Power, power};

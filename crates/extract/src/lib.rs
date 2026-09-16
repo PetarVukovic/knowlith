@@ -11,6 +11,7 @@ pub mod builder;
 pub mod delimited;
 pub mod docx;
 pub mod error;
+pub mod inventory;
 pub mod pdf;
 pub mod prose;
 pub mod sheet;

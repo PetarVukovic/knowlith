@@ -1,6 +1,6 @@
 import { Command } from "cmdk"
 import { useNavigate } from "react-router-dom"
-import { FolderOpen, GitPullRequestArrow, LayoutGrid, Moon, Plug, RefreshCw, Sparkles, Sun, Wrench } from "lucide-react"
+import { Eye, FolderOpen, GitPullRequestArrow, LayoutGrid, Moon, Plug, RefreshCw, Sparkles, Sun, Wrench } from "lucide-react"
 import { KindIcon, kindMeta } from "@/components/Domain"
 import { useApp } from "@/state/AppState"
 
@@ -46,6 +46,7 @@ export function CommandPalette() {
             />
             <PaletteItem onSelect={() => go("/sources")} icon={<FolderOpen />} label="Sources" />
             <PaletteItem onSelect={() => go("/connect")} icon={<Plug />} label="AI tools" />
+            <PaletteItem onSelect={() => go("/activity")} icon={<Eye />} label="Activity" />
             <PaletteItem onSelect={() => go("/discovery")} icon={<RefreshCw />} label="Last discovery report" />
             <PaletteItem
               onSelect={() => {

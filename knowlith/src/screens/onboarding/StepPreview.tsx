@@ -1,6 +1,6 @@
 import { CopyMinus, FileQuestion, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { Inventory } from "@/lib/inventory"
+import type { Inventory } from "@/lib/types"
 import { formatBytes, formatCount, formatRelative } from "@/lib/utils"
 
 /**
@@ -19,6 +19,8 @@ export function StepPreview({
   path: string
   onBuild: () => void
 }) {
+  const unsupported = inventory.skipped.reduce((sum, s) => sum + s.count, 0)
+
   const notable = [
     inventory.duplicates > 0
       ? { Icon: CopyMinus, label: `${formatCount(inventory.duplicates)} duplicates`, detail: "Read once, not twice." }
@@ -30,39 +32,39 @@ export function StepPreview({
           detail: "Kept, but the newer file wins where they disagree.",
         }
       : null,
-    inventory.unsupported > 0
+    unsupported > 0
       ? {
           Icon: FileQuestion,
-          label: `${formatCount(inventory.unsupported)} file types not read`,
-          detail: "Images, drawings, archives and the like.",
+          label: `${formatCount(unsupported)} files not read`,
+          // The types themselves, so the owner can tell at a glance whether
+          // anything they care about was left out.
+          detail: inventory.skipped.map((s) => `${s.label} ${s.count}`).join(" · "),
         }
       : null,
   ].filter((x) => x !== null)
 
-  const readable = inventory.fileTypes.reduce((sum, t) => sum + t.count, 0)
-
   return (
     <div>
       <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.022em] text-ink">
-        Here is what's in {path || inventory.folderName}
+        Here is what's in {path}
       </h1>
       <p className="mt-2.5 text-[14px] leading-relaxed text-muted">
         Counted from the file list only. Nothing has been opened yet.
       </p>
 
       <div className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3">
-        <Tile value={formatCount(inventory.fileCount)} label="files" />
+        <Tile value={formatCount(inventory.files)} label="files" />
         <Tile value={formatBytes(inventory.bytes)} label="on disk" />
-        <Tile value={formatCount(readable)} label="Knowlith can read" />
+        <Tile value={formatCount(inventory.readable)} label="Knowlith can read" />
       </div>
 
-      {inventory.fileTypes.length > 0 ? (
+      {inventory.types.length > 0 ? (
         <ul className="mt-5 grid gap-2">
-          {inventory.fileTypes.map((type) => {
-            const share = readable > 0 ? Math.round((type.count / readable) * 100) : 0
+          {inventory.types.map((type) => {
+            const share = inventory.readable > 0 ? Math.round((type.count / inventory.readable) * 100) : 0
             return (
-              <li key={type.ext} className="flex items-center gap-3">
-                <span className="w-12 shrink-0 text-[12.5px] font-medium text-ink">{type.ext}</span>
+              <li key={type.label} className="flex items-center gap-3">
+                <span className="w-12 shrink-0 text-[12.5px] font-medium text-ink">{type.label}</span>
                 <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-3">
                   <span className="block h-full rounded-full bg-accent/60" style={{ width: `${share}%` }} />
                 </span>
@@ -96,7 +98,7 @@ export function StepPreview({
       ) : null}
 
       <div className="mt-9">
-        <Button size="lg" variant="primary" onClick={onBuild}>
+        <Button size="lg" variant="primary" onClick={onBuild} disabled={inventory.readable === 0}>
           Build company context
         </Button>
         <p className="mt-2.5 text-[12px] text-faint">

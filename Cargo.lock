@@ -878,6 +878,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "walkdir",
  "zip 4.6.1",
 ]
 
@@ -927,6 +928,7 @@ dependencies = [
  "axum",
  "knowlith-core",
  "knowlith-desktop",
+ "knowlith-extract",
  "knowlith-lake",
  "knowlith-mcp",
  "knowlith-worker",

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
-import { api, usingDaemon } from "@/lib/api"
+import { api, failed as apiFailed, folders, usingDaemon } from "@/lib/api"
 import type {
   CompilerRun,
   ContextObject,
@@ -64,6 +64,10 @@ interface AppState {
   keepBoth: (keepId: string, dropId: string) => void
   setSourceStatus: (id: string, status: Source["status"]) => void
   removeSource: (id: string) => void
+  /** Adds a folder and queues the walk. Resolves to a reason when it failed. */
+  addSource: (path: string, name?: string) => Promise<Source[] | string>
+  /** Pulls everything from the daemon again. */
+  refresh: () => Promise<void>
 
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
@@ -121,6 +125,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [work, setWork] = useState({ queued: 0, working: 0 })
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [live, setLive] = useState(false)
+  /** The last counts the daemon reported, so a change can be noticed. */
+  const [, setSeen] = useState({ documents: -1, objects: -1 })
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)")
@@ -189,17 +195,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const poll = async () => {
       const next = await api.getWork()
       if (cancelled) return
-      setWork((current) => {
-        // The queue emptying is the moment new knowledge exists, so that is
-        // when the screens refetch rather than on a timer.
-        if (current.queued + current.working > 0 && next.queued + next.working === 0) {
+      setWork({ queued: next.queued, working: next.working })
+      setSeen((current) => {
+        // Watching the queue drain is not enough. With recorded replies the
+        // whole of a small company compiles between two polls, and then the
+        // queue is empty at both ends and the screens stay at zero forever.
+        // What is watched instead is what came out: when the number of
+        // documents or objects has moved, there is something new to show.
+        if (current.documents === next.documents && current.objects === next.objects) {
+          return current
+        }
+        {
           void (async () => {
-            const [r, o, d, hints, sk] = await Promise.all([
+            const [r, o, d, hints, sk, s, docs] = await Promise.all([
               api.getReviewQueue(),
               api.getObjects(),
               api.getDiscovery(),
               api.getMergeHints(),
               api.getSkills(),
+              api.getSources(),
+              api.getSourceDocuments(),
             ])
             if (cancelled) return
             setReview(r)
@@ -207,9 +222,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             setDiscovery(d)
             setMergeHints(hints)
             setSkills(sk)
+            setSources(s)
+            setDocuments(docs)
           })()
         }
-        return next
+        return { documents: next.documents, objects: next.objects }
       })
     }
     void poll()
@@ -317,6 +334,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSources((current) => current.filter((s) => s.id !== id))
   }, [])
 
+  /**
+   * Points Knowlith at a folder.
+   *
+   * The walk is queued rather than performed, so the list is refetched
+   * immediately — the source appears with nothing in it yet, and fills in as
+   * the worker gets through it. Showing it straight away is the point: the
+   * owner just chose it, and a screen that stays empty until the first
+   * document lands reads as a button that did nothing.
+   */
+  /**
+   * Everything the daemon knows, again.
+   *
+   * The background poll notices a change within a few seconds, which is soon
+   * enough while somebody is reading a screen and not soon enough when they
+   * are being moved to a new one. A screen that knows it has just caused a
+   * change asks for the new state rather than showing zeros until the next
+   * tick catches up.
+   */
+  const refresh = useCallback(async () => {
+    const [o, t, r, s, sk, d, ru, docs, hints] = await Promise.all([
+      api.getObjects(),
+      api.getTree(),
+      api.getReviewQueue(),
+      api.getSources(),
+      api.getSkills(),
+      api.getDiscovery(),
+      api.getCompilerRuns(),
+      api.getSourceDocuments(),
+      api.getMergeHints(),
+    ])
+    setObjects(o)
+    setTree(t)
+    setReview(r)
+    setSources(s)
+    setSkills(sk)
+    setDiscovery(d)
+    setRuns(ru)
+    setDocuments(docs)
+    setMergeHints(hints)
+  }, [])
+
+  const addSource = useCallback(async (path: string, name?: string) => {
+    const result = await folders.add(path, name)
+    if (apiFailed(result)) return result.error
+    const next = await api.getSources()
+    setSources(next)
+    return next
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
@@ -361,6 +427,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       mergeObjects,
       keepBoth,
       setSourceStatus,
+      addSource,
+      refresh,
       removeSource,
       paletteOpen,
       setPaletteOpen,
@@ -398,6 +466,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       mergeObjects,
       keepBoth,
       setSourceStatus,
+      addSource,
+      refresh,
       removeSource,
       paletteOpen,
       live,

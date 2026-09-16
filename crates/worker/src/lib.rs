@@ -68,9 +68,9 @@ pub enum WorkerError {
 type Result<T> = std::result::Result<T, WorkerError>;
 
 #[derive(Debug, Serialize, Deserialize)]
-struct SourcePayload {
-    source_id: String,
-    root: String,
+pub struct SourcePayload {
+    pub source_id: String,
+    pub root: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -683,6 +683,30 @@ pub fn enqueue_first_run(lake: &Lake, source_id: &str, root: &str) -> Result<()>
         priority: PRIORITY_NORMAL,
     })?;
     Ok(())
+}
+
+/// Asks for a source folder to be walked.
+///
+/// This is how a folder the owner just added becomes documents: the interface
+/// does not scan, it queues, and the worker that is already running picks the
+/// job up. That is the difference between a scan that survives the window
+/// being closed and one that does not.
+///
+/// Keyed on the source and the minute, so an impatient double-click is one
+/// walk while a deliberate "scan again" a minute later is a second one. A key
+/// without the clock in it would be worse than it sounds: the finished job
+/// keeps its key, so the same folder could never be walked on request again.
+pub fn enqueue_rescan(lake: &Lake, source_id: &str, root: &str) -> Result<bool> {
+    let minute = chrono::Utc::now().timestamp() / 60;
+    Ok(lake.enqueue(&NewJob {
+        kind: KIND_RESCAN.into(),
+        payload: serde_json::to_string(&SourcePayload {
+            source_id: source_id.to_string(),
+            root: root.to_string(),
+        })?,
+        idempotency_key: format!("{KIND_RESCAN}:{source_id}:{minute}"),
+        priority: PRIORITY_NORMAL,
+    })?)
 }
 
 /// Queues the reading of one document.

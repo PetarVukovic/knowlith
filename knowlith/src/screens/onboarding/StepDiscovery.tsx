@@ -1,4 +1,4 @@
-import { ArrowRight, GitMerge, Percent, Workflow } from "lucide-react"
+import { ArrowRight, BookOpen, GitMerge, Percent, Workflow } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useApp } from "@/state/AppState"
 
@@ -10,16 +10,16 @@ import { useApp } from "@/state/AppState"
  * names three things about this company that nobody typed in.
  */
 export function StepDiscovery({ company, onReview }: { company: string; onReview: () => void }) {
-  const { discovery, review } = useApp()
+  const { discovery, review, objects, mergeHints } = useApp()
 
   // "Termoval d.o.o." already ends in a full stop, and "d.o.o.." reads as a
   // typo in the one sentence the owner is most likely to screenshot.
   const sentence = company.endsWith(".") ? company : `${company}.`
 
   const counts: { value: number; label: string }[] = [
-    { value: discovery?.rules ?? 12, label: "Rules" },
-    { value: discovery?.processes ?? 4, label: "Processes" },
-    { value: discovery?.terms ?? 37, label: "Company terms" },
+    { value: discovery?.rules ?? 0, label: "Rules" },
+    { value: discovery?.processes ?? 0, label: "Processes" },
+    { value: discovery?.terms ?? 0, label: "Company terms" },
   ]
 
   // Skills are built from processes the owner approves, so at this moment
@@ -29,24 +29,40 @@ export function StepDiscovery({ company, onReview }: { company: string; onReview
     counts.push({ value: discovery.skills, label: "Skills" })
   }
 
+  // Named out of what was actually read. The point of this screen is that
+  // Knowlith can say three things about this company that nobody typed in,
+  // and a card describing somebody else's company makes the opposite point.
+  const first = (kind: string) => objects.find((o) => o.kind === kind)
+  const rule = first("rule")
+  const process = first("process")
+  const term = first("term")
+  // Only a real disagreement earns this card. A duplicate is two documents
+  // saying the same thing, and calling that a conflict is the one claim this
+  // screen must never make.
+  const conflict = mergeHints.find((h) => h.kind === "disagreement")
+
   const findings = [
-    {
-      Icon: Percent,
-      title: "We found how discounts are approved",
-      detail: "Two limits, and who can go past them.",
-    },
-    {
-      Icon: Workflow,
-      title: "We found your customer quotation process",
-      detail: "Six steps, reconstructed from how your offers are actually written.",
-    },
-    {
-      Icon: GitMerge,
-      title: "Two documents disagree about service response time",
-      detail: "You decide which one is current.",
-      conflict: true,
-    },
-  ]
+    rule
+      ? { Icon: Percent, title: rule.title, detail: `From ${rule.evidence[0]?.documentName ?? "your documents"}.` }
+      : null,
+    process
+      ? {
+          Icon: Workflow,
+          title: process.title,
+          detail: "Reconstructed from how your own documents describe it.",
+        }
+      : null,
+    conflict
+      ? {
+          Icon: GitMerge,
+          title: `Two documents disagree about ${conflict.keepTitle.toLowerCase()}`,
+          detail: "You decide which one is current.",
+          conflict: true,
+        }
+      : term
+        ? { Icon: BookOpen, title: term.title, detail: "A word your company uses in its own way." }
+        : null,
+  ].filter((x) => x !== null)
 
   return (
     <div>
@@ -102,7 +118,8 @@ export function StepDiscovery({ company, onReview }: { company: string; onReview
           <ArrowRight />
         </Button>
         <p className="mt-2.5 text-[12px] text-faint">
-          {review.length || 7} items are waiting. It takes about a minute each.
+          {review.length} {review.length === 1 ? "item is" : "items are"} waiting. It takes about a
+          minute each.
         </p>
       </div>
     </div>

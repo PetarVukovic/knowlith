@@ -64,6 +64,35 @@ impl App {
         App::ALL.into_iter().find(|app| app.slug() == slug)
     }
 
+    /// Which application a client says it is, from the `clientInfo.name` it
+    /// sends in `initialize`.
+    ///
+    /// The field is free text chosen by whoever wrote the client, so this is
+    /// a guess by construction. It is kept here, in one function with its
+    /// own tests, rather than spread through the gateway: when a client
+    /// renames itself the fix is one line and the screens that count reads
+    /// keep working.
+    ///
+    /// `None` means a client we do not recognise. That is reported as
+    /// "another tool" rather than folded into one of these three, because
+    /// telling an owner that Codex read their rules when it was something
+    /// else is worse than telling them nothing.
+    pub fn from_client_name(name: &str) -> Option<App> {
+        let name = name.to_lowercase();
+        // Order matters: "claude-code" contains "claude", so the more
+        // specific names are tested first.
+        if name.contains("codex") {
+            return Some(App::Codex);
+        }
+        if name.contains("claude-code") || name.contains("claude code") || name == "claude_code" {
+            return Some(App::ClaudeCode);
+        }
+        if name.contains("claude") {
+            return Some(App::ClaudeDesktop);
+        }
+        None
+    }
+
     pub fn format(self) -> Format {
         match self {
             App::ClaudeDesktop | App::ClaudeCode => Format::JsonServers,
@@ -282,5 +311,30 @@ mod tests {
     #[test]
     fn path_lookup_does_not_invent_programs() {
         assert!(program_on_path("knowlith-definitely-not-installed").is_none());
+    }
+}
+
+#[cfg(test)]
+mod client_name_tests {
+    use super::App;
+
+    #[test]
+    fn the_names_these_three_clients_actually_send() {
+        // Taken from what each client puts in `clientInfo.name`.
+        assert_eq!(App::from_client_name("claude-ai"), Some(App::ClaudeDesktop));
+        assert_eq!(App::from_client_name("Claude"), Some(App::ClaudeDesktop));
+        assert_eq!(App::from_client_name("claude-code"), Some(App::ClaudeCode));
+        assert_eq!(App::from_client_name("Claude Code"), Some(App::ClaudeCode));
+        assert_eq!(App::from_client_name("codex"), Some(App::Codex));
+        assert_eq!(App::from_client_name("codex-cli"), Some(App::Codex));
+    }
+
+    #[test]
+    fn a_client_we_do_not_know_is_not_guessed_into_one_of_ours() {
+        // Saying "Codex read your rules" when it was Cursor is worse than
+        // saying nothing at all.
+        assert_eq!(App::from_client_name("cursor-vscode"), None);
+        assert_eq!(App::from_client_name("mcp-inspector"), None);
+        assert_eq!(App::from_client_name(""), None);
     }
 }

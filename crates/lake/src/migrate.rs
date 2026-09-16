@@ -17,7 +17,7 @@ use crate::Result;
 /// The shape this build expects. Bumped whenever a step is added, and stored
 /// so a lake written by a newer Knowlith can be recognised rather than
 /// quietly half-read by an older one.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 pub fn run(conn: &Connection) -> Result<()> {
     // A read of what is actually there beats a version number: a lake that
@@ -28,6 +28,36 @@ pub fn run(conn: &Connection) -> Result<()> {
         // never opens a case still gets answers — coverage is a service the
         // gateway offers, not a toll it charges.
         conn.execute("ALTER TABLE tool_reads ADD COLUMN case_id TEXT", [])?;
+    }
+
+    if !has_column(conn, "tool_reads", "app")? {
+        // Which application asked. The tool name says what was wanted;
+        // this says who wanted it, which is the difference between "8
+        // things were served" and "Claude read 8 things and Codex has
+        // never read anything".
+        //
+        // Nullable on purpose: every read taken before this column existed
+        // genuinely has no answer, and writing a guess into them would make
+        // the first screen built on this column wrong from the first day.
+        conn.execute("ALTER TABLE tool_reads ADD COLUMN app TEXT", [])?;
+    }
+
+    // Guarded on the table, not only on the column: a lake from before the
+    // gateway existed has no `cases` at all, and `ALTER TABLE` on a table
+    // that is not there fails the open rather than the step.
+    if has_table(conn, "cases")? && !has_column(conn, "cases", "app")? {
+        // Which application asked the question. Kept on the case as well as
+        // on each read, because a case where the agent was given ten titles
+        // and opened none of them has no reads to take it from — and that
+        // case is the interesting one.
+        conn.execute("ALTER TABLE cases ADD COLUMN app TEXT", [])?;
+    }
+
+    if !has_index(conn, "idx_tool_reads_app")? {
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tool_reads_app ON tool_reads(app, read_at DESC)",
+            [],
+        )?;
     }
 
     if !has_index(conn, "idx_tool_reads_case")? {
@@ -71,6 +101,15 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(false)
 }
 
+fn has_table(conn: &Connection, name: &str) -> Result<bool> {
+    let found: i64 = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        params![name],
+        |r| r.get(0),
+    )?;
+    Ok(found > 0)
+}
+
 fn has_index(conn: &Connection, name: &str) -> Result<bool> {
     let found: i64 = conn.query_row(
         "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
@@ -104,6 +143,7 @@ mod tests {
         run(&conn).unwrap();
 
         assert!(has_column(&conn, "tool_reads", "case_id").unwrap());
+        assert!(has_column(&conn, "tool_reads", "app").unwrap());
         let indexed: i64 = conn
             .query_row("SELECT count(*) FROM objects_fts", [], |r| r.get(0))
             .unwrap();
@@ -112,6 +152,26 @@ mod tests {
             .query_row("SELECT count(*) FROM tool_reads", [], |r| r.get(0))
             .unwrap();
         assert_eq!(kept, 1, "history survived the migration");
+    }
+
+    /// A lake old enough to have no `cases` table opens without failing.
+    ///
+    /// The step that adds `cases.app` ran unguarded once, and every lake
+    /// created before the gateway would have failed to open with "no such
+    /// table" — at startup, before any screen could say why.
+    #[test]
+    fn a_lake_without_a_cases_table_still_opens() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE tool_reads (id INTEGER PRIMARY KEY, object_id TEXT NOT NULL,
+                                      tool TEXT NOT NULL, read_at TEXT NOT NULL);
+             CREATE TABLE objects (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL);
+             CREATE VIRTUAL TABLE objects_fts USING fts5(title, body, object_id UNINDEXED);
+             CREATE TABLE schema_version (version INTEGER NOT NULL);",
+        )
+        .unwrap();
+
+        run(&conn).expect("a lake with no cases table must still open");
     }
 
     #[test]

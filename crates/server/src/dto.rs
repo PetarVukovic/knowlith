@@ -12,7 +12,7 @@
 
 use knowlith_core::object::{RelationOrigin, RelationType};
 use knowlith_core::{Block, ContextObject, Document, DocumentKind, Evidence, ObjectKind, ObjectStatus, Subtype};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -445,4 +445,82 @@ mod tests {
     fn the_steps_are_not_mistaken_for_inputs() {
         assert!(skill_fields(SKILL, "**Before you start**").iter().all(|f| f.name != "Otvori cjenik."));
     }
+}
+
+/// A folder the owner picked or typed, and what is in it.
+///
+/// `chosen` is `None` only when the system chooser was closed without a
+/// choice, which the interface treats as "nothing happened".
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseDto {
+    pub chosen: Option<String>,
+    pub name: Option<String>,
+    pub inventory: Option<knowlith_extract::inventory::Inventory>,
+}
+
+/// What the interface sends to add a folder.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewSource {
+    pub path: String,
+    /// What to call it. The folder's own name when left out.
+    pub name: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PathQuery {
+    pub path: String,
+}
+
+/// The answer to adding a folder.
+///
+/// `alreadyKnown` is not an error: pointing at a folder that is already being
+/// watched is a reasonable thing to do, and the honest answer is to say so
+/// and show the owner the source they already have.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceAddedDto {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    /// False when a walk of this folder was already waiting.
+    pub queued: bool,
+    pub already_known: bool,
+}
+
+/// One thing an AI tool did with this company's knowledge.
+///
+/// Built from cases and reads rather than from a log: a log would be a
+/// second thing to keep in agreement with the lake, and the lake already
+/// knows everything this shows.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageDto {
+    pub id: String,
+    /// The application's slug, or null for a client we do not recognise.
+    pub app: Option<String>,
+    /// What to call it on screen. "Another tool" when we cannot tell.
+    pub app_label: String,
+    /// The question the agent declared, when it opened a case.
+    pub question: Option<String>,
+    pub at: String,
+    /// What it actually read, by title.
+    pub read: Vec<UsedObjectDto>,
+    /// What the gateway named as relevant and the agent never opened. The
+    /// part no other retrieval system can report, and the reason a case
+    /// exists at all.
+    pub skipped: Vec<UsedObjectDto>,
+    /// True once the agent called `check_coverage`. An open case is an
+    /// answer given without checking what was missed.
+    pub closed: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsedObjectDto {
+    pub id: String,
+    pub title: String,
+    /// `rule` | `process` | `term` | `skill` | `fact`.
+    pub kind: String,
 }

@@ -6,6 +6,28 @@ and the quote attached to every answer.
 
 ## Done this round
 
+- Reads are attributed to the application that asked. `clientInfo` is read
+  in `initialize`, normalised in one function with its own tests, and
+  carried on every `tool_reads` row and every case.
+- **AI tools** separates connection from use: "Connected" and "Read 3
+  things · last 8 min ago" are two claims, on two lines.
+- **Activity** — one row per question, what was read, and what the agent was
+  offered and never opened.
+- "Try your company context" builds its questions from this company's own
+  approved objects and then watches the gateway until something is served.
+
+- Adding a folder from the interface. `POST /api/sources` records it and
+  queues a walk the running worker picks up; `POST /api/sources/browse`
+  opens the machine's own chooser, because a browser is never told where a
+  folder is; `GET /api/sources/preview` counts one without opening anything.
+- `knowlith-extract::inventory` — files, size, readable types, duplicates,
+  names that look like last year's copy, and the types that cannot be read.
+  The same two rules the real scan uses, so the count shown is the count
+  that will be read.
+- `scripts/dev.sh` — daemon and interface in one command.
+- Onboarding reads from the daemon end to end. The browser-side inventory
+  and the demo folder behind it are gone.
+
 - `crates/mcp` — JSON-RPC over stdio, 11 tools, skills as prompts, the
   company card as a resource, `listChanged` when the owner approves
   something mid-conversation, a panic in one tool refused rather than fatal.

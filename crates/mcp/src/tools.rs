@@ -397,12 +397,18 @@ pub fn names() -> Vec<&'static str> {
 
 // ------------------------------------------------------------------ calls --
 
-pub fn call(lake: &mut Lake, company: &str, name: &str, arguments: &Value) -> Outcome {
+pub fn call(
+    lake: &mut Lake,
+    company: &str,
+    name: &str,
+    arguments: &Value,
+    app: Option<&str>,
+) -> Outcome {
     let case = arguments.get("caseId").and_then(Value::as_str);
 
     match name {
         "get_relevant_context" => match text_argument(arguments, "question") {
-            Ok(question) => relevant(lake, &question),
+            Ok(question) => relevant(lake, &question, app),
             Err(outcome) => outcome,
         },
         "search_context" => match text_argument(arguments, "question") {
@@ -412,24 +418,24 @@ pub fn call(lake: &mut Lake, company: &str, name: &str, arguments: &Value) -> Ou
                     .and_then(Value::as_u64)
                     .unwrap_or(5)
                     .clamp(1, MAX_RESULTS as u64) as usize;
-                search(lake, &question, limit, case)
+                search(lake, &question, limit, case, app)
             }
             Err(outcome) => outcome,
         },
         "get_context" => match text_argument(arguments, "id") {
-            Ok(id) => one(lake, &id, case),
+            Ok(id) => one(lake, &id, case, app),
             Err(outcome) => outcome,
         },
         "lookup_value" => match text_argument(arguments, "what") {
-            Ok(what) => lookup(lake, &what, case),
+            Ok(what) => lookup(lake, &what, case, app),
             Err(outcome) => outcome,
         },
         "get_source_evidence" => match text_argument(arguments, "id") {
-            Ok(id) => evidence(lake, &id, case),
+            Ok(id) => evidence(lake, &id, case, app),
             Err(outcome) => outcome,
         },
-        "get_process" => processes(lake, arguments.get("topic").and_then(Value::as_str), case),
-        "get_skill" => skill(lake, arguments.get("name").and_then(Value::as_str), case),
+        "get_process" => processes(lake, arguments.get("topic").and_then(Value::as_str), case, app),
+        "get_skill" => skill(lake, arguments.get("name").and_then(Value::as_str), case, app),
         "what_breaks_if" => match text_argument(arguments, "id") {
             Ok(id) => breaks(lake, &id),
             Err(outcome) => outcome,
@@ -453,7 +459,7 @@ fn text_argument(arguments: &Value, name: &str) -> Result<String, Outcome> {
 
 // ------------------------------------------------------- get_relevant_context --
 
-fn relevant(lake: &mut Lake, question: &str) -> Outcome {
+fn relevant(lake: &mut Lake, question: &str, app: Option<&str>) -> Outcome {
     let objects = match lake.objects() {
         Ok(objects) => objects,
         Err(e) => return Outcome::refused(format!("The lake could not be read: {e}")),
@@ -526,7 +532,7 @@ fn relevant(lake: &mut Lake, question: &str) -> Outcome {
         .collect();
 
     let ids: Vec<String> = areas.iter().map(|(id, ..)| id.clone()).collect();
-    let case_id = match lake.open_case(question, &ids) {
+    let case_id = match lake.open_case(question, &ids, app) {
         Ok(id) => id,
         Err(e) => return Outcome::refused(format!("The case could not be opened: {e}")),
     };
@@ -612,7 +618,13 @@ fn fold(word: &str) -> String {
 
 // ------------------------------------------------------------ search / read --
 
-fn search(lake: &mut Lake, question: &str, limit: usize, case: Option<&str>) -> Outcome {
+fn search(
+    lake: &mut Lake,
+    question: &str,
+    limit: usize,
+    case: Option<&str>,
+    app: Option<&str>,
+) -> Outcome {
     let ids = lake.search_objects(question, limit * 3).unwrap_or_default();
     let objects = match lake.objects() {
         Ok(objects) => objects,
@@ -646,10 +658,10 @@ fn search(lake: &mut Lake, question: &str, limit: usize, case: Option<&str>) -> 
         return Outcome::new(text, json!({ "results": [], "found": 0 }));
     }
 
-    answer(lake, found, case, "search_context")
+    answer(lake, found, case, "search_context", app)
 }
 
-fn one(lake: &mut Lake, id: &str, case: Option<&str>) -> Outcome {
+fn one(lake: &mut Lake, id: &str, case: Option<&str>, app: Option<&str>) -> Outcome {
     let object = match lake.object(id) {
         Ok(Some(object)) => object,
         Ok(None) => return Outcome::refused(format!("There is nothing here with the id {id}.")),
@@ -657,7 +669,7 @@ fn one(lake: &mut Lake, id: &str, case: Option<&str>) -> Outcome {
     };
 
     match gate::access(&object) {
-        gate::Access::Full => answer(lake, vec![object], case, "get_context"),
+        gate::Access::Full => answer(lake, vec![object], case, "get_context", app),
         gate::Access::NameOnly(why) => Outcome::new(
             format!(
                 "\"{}\" is not settled: {why}. Tell whoever asked that this is an open question at this company, and do not answer it yourself.",
@@ -672,7 +684,12 @@ fn one(lake: &mut Lake, id: &str, case: Option<&str>) -> Outcome {
     }
 }
 
-fn processes(lake: &mut Lake, topic: Option<&str>, case: Option<&str>) -> Outcome {
+fn processes(
+    lake: &mut Lake,
+    topic: Option<&str>,
+    case: Option<&str>,
+    app: Option<&str>,
+) -> Outcome {
     let objects = match lake.objects() {
         Ok(objects) => objects,
         Err(e) => return Outcome::refused(format!("The lake could not be read: {e}")),
@@ -694,11 +711,17 @@ fn processes(lake: &mut Lake, topic: Option<&str>, case: Option<&str>) -> Outcom
             json!({ "results": [], "found": 0 }),
         );
     }
-    answer(lake, found, case, "get_process")
+    answer(lake, found, case, "get_process", app)
 }
 
 /// Turns objects into the shape every reading tool returns.
-fn answer(lake: &mut Lake, objects: Vec<ContextObject>, case: Option<&str>, tool: &str) -> Outcome {
+fn answer(
+    lake: &mut Lake,
+    objects: Vec<ContextObject>,
+    case: Option<&str>,
+    tool: &str,
+    app: Option<&str>,
+) -> Outcome {
     let edges = lake.edges().unwrap_or_default();
     let graph = Graph::build(&edges);
 
@@ -767,7 +790,7 @@ fn answer(lake: &mut Lake, objects: Vec<ContextObject>, case: Option<&str>, tool
             }));
         }
 
-        let _ = lake.record_case_read(&object.id, tool, case);
+        let _ = lake.record_case_read(&object.id, tool, case, app);
     }
 
     let found = results.len();
@@ -777,7 +800,7 @@ fn answer(lake: &mut Lake, objects: Vec<ContextObject>, case: Option<&str>, tool
 
 // -------------------------------------------------------------- lookup_value --
 
-fn lookup(lake: &mut Lake, what: &str, case: Option<&str>) -> Outcome {
+fn lookup(lake: &mut Lake, what: &str, case: Option<&str>, app: Option<&str>) -> Outcome {
     let rows = match lake.rows_matching(what, 6) {
         Ok(rows) => rows,
         Err(e) => return Outcome::refused(format!("The tables could not be read: {e}")),
@@ -849,7 +872,7 @@ fn lookup(lake: &mut Lake, what: &str, case: Option<&str>) -> Outcome {
             files.len()
         ));
     }
-    let _ = lake.record_case_read("table", "lookup_value", case);
+    let _ = lake.record_case_read("table", "lookup_value", case, app);
 
     let found = values.len();
     Outcome::new(text, json!({ "rows": values, "found": found })).with_links(links)
@@ -857,7 +880,7 @@ fn lookup(lake: &mut Lake, what: &str, case: Option<&str>) -> Outcome {
 
 // -------------------------------------------------------------- the source --
 
-fn evidence(lake: &mut Lake, id: &str, case: Option<&str>) -> Outcome {
+fn evidence(lake: &mut Lake, id: &str, case: Option<&str>, app: Option<&str>) -> Outcome {
     let object = match lake.object(id) {
         Ok(Some(object)) => object,
         Ok(None) => return Outcome::refused(format!("There is nothing here with the id {id}.")),
@@ -899,13 +922,18 @@ fn evidence(lake: &mut Lake, id: &str, case: Option<&str>) -> Outcome {
         }
     }
 
-    let _ = lake.record_case_read(&object.id, "get_source_evidence", case);
+    let _ = lake.record_case_read(&object.id, "get_source_evidence", case, app);
     Outcome::new(text.trim_end().to_string(), json!({ "passages": passages }))
 }
 
 // ------------------------------------------------------------------ skills --
 
-fn skill(lake: &mut Lake, name: Option<&str>, case: Option<&str>) -> Outcome {
+fn skill(
+    lake: &mut Lake,
+    name: Option<&str>,
+    case: Option<&str>,
+    app: Option<&str>,
+) -> Outcome {
     let objects = match lake.objects() {
         Ok(objects) => objects,
         Err(e) => return Outcome::refused(format!("The lake could not be read: {e}")),
@@ -946,7 +974,7 @@ fn skill(lake: &mut Lake, name: Option<&str>, case: Option<&str>) -> Outcome {
 
             match found {
                 Some(found) => {
-                    let _ = lake.record_case_read(&found.id, "get_skill", case);
+                    let _ = lake.record_case_read(&found.id, "get_skill", case, app);
                     Outcome::new(
                         found.body.clone(),
                         json!({ "name": found.title, "id": found.id, "markdown": found.body }),

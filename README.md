@@ -11,6 +11,16 @@ can see what the product does before installing anything.
 ## Testing it from nothing
 
 ```sh
+sh scripts/dev.sh                                # daemon and interface together, hot reload
+```
+
+Then open `http://localhost:5173`, name the company, and point it at a
+folder. The chooser is the machine's own — the daemon opens it, because a
+browser is never told where a folder is.
+
+Or drive the whole thing from the command line:
+
+```sh
 sh scripts/reset.sh --yes                        # back to before it was installed
 sh scripts/full-test.sh                          # the test company, no provider, no cost
 sh scripts/full-test.sh ~/Documents/YourCompany  # your folder, your own AI command line
@@ -190,16 +200,29 @@ the whole thing in microseconds.
 ## The interface
 
 ```sh
-cd knowlith && npm install && npm run dev
+sh scripts/dev.sh                 # both halves
+cd knowlith && npm run dev        # the interface alone, against a daemon you started
 ```
 
 React 19, Vite, Tailwind v4, Radix primitives. Two modes throughout: **Simple**
 hides paths, object ids, byte offsets, raw JSON and numeric confidence;
 **Engineer** shows them.
 
-Onboarding runs at `/onboarding` and picks a real folder through the browser's
-directory picker — the file counts, duplicates and old versions on the preview
-screen are counted from the owner's own folder, from names and sizes only.
+### Adding a folder
+
+A browser cannot tell a page where a folder is — `webkitdirectory` gives
+relative names and `showDirectoryPicker` gives a handle with no path — so the
+page asks the daemon to open the system chooser, and the daemon answers with
+a real path. There is a text field beside it for a network share the chooser
+will not show.
+
+Either way the folder is counted before anything is opened: files, size,
+types, duplicates, names that look like last year's copy, and the types that
+cannot be read, named rather than summed. Then `POST /api/sources` records it
+and queues a walk — the interface never scans, so closing the window does not
+stop the reading.
+
+Onboarding runs at `/onboarding` and goes through the same two calls.
 
 Every other screen reads from the daemon at `http://127.0.0.1:7717`
 (`VITE_KNOWLITH_API` overrides it). The connection is checked once per load, so
@@ -305,6 +328,48 @@ The gate is the other half. An `approved` object is served in full; a
 withheld; a `superseded` or `rejected` one is not mentioned. Hiding an
 undecided question does not stop an agent answering it — it removes the one
 signal that would have stopped it.
+
+## Seeing that a tool actually used it
+
+Being in a configuration file proves somebody pressed a button. It does not
+prove the company's knowledge reached a conversation, and those are the two
+different things the **AI tools** screen now reports separately:
+
+```text
+Claude Desktop   Connected
+                 Read 3 things · last 8 min ago
+
+Codex            Connected
+                 Has not read anything yet
+```
+
+Every serve is recorded against the application that asked, taken from the
+`clientInfo` the client sends in `initialize`. A client we do not recognise
+is reported as "another tool" rather than filed under one of these three.
+
+**Activity** is the trail, one row per question rather than one per protocol
+call:
+
+```text
+Claude Desktop                                       3 min ago
+Working on: ponuda za stalnog kupca
+  Read · 1
+    Avans za radove iznad 5.000,00 EUR        rule
+  Offered and not opened · 22
+    Prag prometa kupca                        rule
+    ...
+  ⚠ Answered without checking what it had missed.
+```
+
+The second list is the part no retrieval system can produce. The approved
+set is finite and the gateway said out loud what touched the question before
+the agent chose, so what it skipped can be named.
+
+Two things this deliberately does not claim. It reports what was **read**,
+never why an answer came out the way it did — a model can answer from its
+own context without calling a tool. And approving something does not report
+"Claude updated": MCP has no acknowledgement, so the honest statement is
+that it is effective for every conversation started from now.
 
 ## Working in the background
 

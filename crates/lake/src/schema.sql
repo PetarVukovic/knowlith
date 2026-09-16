@@ -166,10 +166,17 @@ CREATE TABLE IF NOT EXISTS tool_reads (
     id         INTEGER PRIMARY KEY,
     object_id  TEXT NOT NULL,
     tool       TEXT NOT NULL,
-    read_at    TEXT NOT NULL
+    read_at    TEXT NOT NULL,
+    -- Which case this serve belonged to, when the agent opened one.
+    case_id    TEXT,
+    -- Which application asked. Null for a read taken before the gateway
+    -- recorded it, and for a client that sends no clientInfo.
+    app        TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_tool_reads ON tool_reads(object_id, read_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_reads_app ON tool_reads(app, read_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_reads_case ON tool_reads(case_id);
 
 -- ----------------------------------------------------------------- work ----
 
@@ -296,7 +303,9 @@ CREATE TABLE IF NOT EXISTS cases (
     closed_at    TEXT,
     -- What the agent said it concluded. Kept for the owner to read, never
     -- served back as knowledge.
-    summary      TEXT
+    summary      TEXT,
+    -- Which application asked. Null for a client we do not recognise.
+    app          TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_cases_open ON cases(closed_at, opened_at DESC);

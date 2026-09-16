@@ -13,6 +13,7 @@ import {
   Terminal,
   Trash2,
 } from "lucide-react"
+import { AddSource } from "@/components/AddSource"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -52,10 +53,13 @@ const STATUS_TONE = {
 export function Sources() {
   const { sources, setSourceStatus, removeSource, runs, mode } = useApp()
   const [pendingRemoval, setPendingRemoval] = useState<Source | null>(null)
+  const [adding, setAdding] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
   return (
     <div className="mx-auto w-full max-w-[880px] px-4 py-8">
+      <AddSource open={adding} onClose={() => setAdding(false)} />
+
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-semibold tracking-[-0.015em] text-ink">Sources</h1>
@@ -63,7 +67,7 @@ export function Sources() {
             The folders Knowlith reads. It opens files here and never writes into them.
           </p>
         </div>
-        <Button variant="primary">
+        <Button variant="primary" onClick={() => setAdding(true)}>
           <Plus />
           Add source
         </Button>

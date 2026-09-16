@@ -22,6 +22,7 @@ import { sleep } from "./utils"
 import type {
   AiTool,
   AutostartState,
+  Browsed,
   CompilerRun,
   ConnectPreview,
   Policy,
@@ -30,11 +31,14 @@ import type {
   ToolRead,
   ContextObject,
   DiscoverySummary,
+  Health,
   MergeHint,
   ReviewItem,
   SkillDoc,
   Source,
+  SourceAdded,
   TreeNode,
+  Usage,
 } from "./types"
 
 const LATENCY = 120
@@ -247,9 +251,14 @@ export const api = {
    * This is the number that makes that sentence something the owner can
    * check rather than something they are asked to believe.
    */
-  async getWork(): Promise<{ queued: number; working: number }> {
-    const health = await get<{ queued?: number; working?: number }>("/api/health", {}, {})
-    return { queued: health.queued ?? 0, working: health.working ?? 0 }
+  async getWork(): Promise<Health> {
+    const health = await get<Partial<Health>>("/api/health", {}, {})
+    return {
+      queued: health.queued ?? 0,
+      working: health.working ?? 0,
+      documents: health.documents ?? 0,
+      objects: health.objects ?? 0,
+    }
   },
 
   /** Scan a folder before anything is read by a model. */
@@ -283,9 +292,75 @@ export type ScanResult = Awaited<ReturnType<typeof api.scanFolder>>
  * about connecting an application that is not there, and a fixture that
  * said "connected" would be a lie the owner acts on.
  */
+/**
+ * Choosing a folder, which only the daemon can do.
+ *
+ * A browser is never told where a folder is — `webkitdirectory` gives
+ * relative names and `showDirectoryPicker` gives a handle with no path — so
+ * the page asks the daemon to open the machine's own chooser.
+ *
+ * Every call here returns the daemon's own sentence on failure rather than
+ * `null`. A folder that cannot be added is always the owner's to fix, and
+ * "there is nothing at /Uesrs/petar/Docs" fixes it while "could not add
+ * folder" does not.
+ */
+export const folders = {
+  /** Opens the system chooser. Resolves when it closes, however it closes. */
+  async browse(): Promise<Browsed | { error: string }> {
+    return send<Browsed>("/api/sources/browse", { method: "POST" })
+  },
+
+  /** Counts a folder the owner typed the path of. */
+  async preview(path: string): Promise<Browsed | { error: string }> {
+    return send<Browsed>(`/api/sources/preview?path=${encodeURIComponent(path)}`)
+  },
+
+  /** Records the folder and queues the walk. The worker does the reading. */
+  async add(path: string, name?: string): Promise<SourceAdded | { error: string }> {
+    return send<SourceAdded>("/api/sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, name }),
+    })
+  },
+}
+
+/** True when a folder call came back with a reason instead of an answer. */
+export function failed<T>(result: T | { error: string }): result is { error: string } {
+  return typeof result === "object" && result !== null && "error" in result
+}
+
+/**
+ * One request that reports why it failed.
+ *
+ * The daemon answers a bad folder with 400 and a sentence. Throwing that
+ * sentence away and showing a generic message would turn a fixable mistake
+ * into a mystery.
+ */
+async function send<T>(path: string, init?: RequestInit): Promise<T | { error: string }> {
+  if (!(await connected())) {
+    return { error: "Knowlith is not running on this machine." }
+  }
+  try {
+    const response = await fetch(`${DAEMON}${path}`, init)
+    if (!response.ok) {
+      const text = (await response.text()).trim()
+      return { error: text || `the daemon answered ${response.status}` }
+    }
+    return (await response.json()) as T
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "the daemon could not be reached" }
+  }
+}
+
 export const tools = {
   async list(): Promise<AiTool[]> {
     return get<AiTool[]>("/api/tools", [], [])
+  },
+
+  /** What the AI tools have actually read, newest first. */
+  async usage(): Promise<Usage[]> {
+    return get<Usage[]>("/api/usage", [], [])
   },
 
   /** What would be written, so the owner agrees to something specific. */

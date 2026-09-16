@@ -606,3 +606,109 @@ fn an_older_price_list_answers_last_and_says_how_old_it_is() {
         "the agent was left to pick between two price lists: {text}"
     );
 }
+
+/// Which application asked has to survive the whole session.
+///
+/// `clientInfo` arrives once, in the handshake, and every read after it is
+/// attributed to whatever that said. Getting this wrong is not a crash —
+/// it is a screen that quietly reports every read against the wrong
+/// application, or against none.
+#[test]
+fn a_read_is_recorded_against_the_application_that_asked() {
+    let db = temp_db("attribution");
+    drop(lake_with_a_company(&db));
+
+    converse(
+        &db,
+        &[
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "clientInfo": { "name": "claude-ai", "version": "1.0" },
+                },
+            }),
+            call("search_context", 2, json!({ "question": "popust" })),
+        ],
+    );
+
+    let lake = Lake::open(&db).unwrap();
+    let reads = reads_in(&lake);
+    assert!(!reads.is_empty(), "the search served something and recorded nothing");
+    assert!(
+        reads.iter().all(|(_, app)| app.as_deref() == Some("claude-desktop")),
+        "every read should belong to Claude Desktop, got {reads:?}",
+    );
+}
+
+/// A client we do not recognise is recorded as itself, not as one of ours.
+#[test]
+fn an_unknown_client_is_left_unattributed_rather_than_guessed() {
+    let db = temp_db("unknown-client");
+    drop(lake_with_a_company(&db));
+
+    converse(
+        &db,
+        &[
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "clientInfo": { "name": "some-other-editor", "version": "1.0" },
+                },
+            }),
+            call("search_context", 2, json!({ "question": "popust" })),
+        ],
+    );
+
+    let lake = Lake::open(&db).unwrap();
+    let reads = reads_in(&lake);
+    assert!(!reads.is_empty());
+    assert!(
+        reads.iter().all(|(_, app)| app.is_none()),
+        "an unrecognised client must not be filed under one of the three we know: {reads:?}",
+    );
+}
+
+/// Listing what is relevant is not reading it.
+///
+/// `get_relevant_context` returns titles so the agent can choose. Counting
+/// those as reads would make "Claude read 8 things" mean nothing, and would
+/// also defeat coverage, which exists precisely to say what was listed and
+/// never opened.
+#[test]
+fn being_told_a_title_is_not_a_read() {
+    let db = temp_db("titles-are-not-reads");
+    drop(lake_with_a_company(&db));
+
+    converse(
+        &db,
+        &[
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "clientInfo": { "name": "codex" },
+                },
+            }),
+            call("get_relevant_context", 2, json!({ "question": "ponuda za stalnog kupca" })),
+        ],
+    );
+
+    let lake = Lake::open(&db).unwrap();
+    assert!(
+        reads_in(&lake).is_empty(),
+        "listing titles must not count as having read them",
+    );
+}
+
+/// Every recorded read, as (object id, application).
+fn reads_in(lake: &Lake) -> Vec<(String, Option<String>)> {
+    lake.connection()
+        .prepare("SELECT object_id, app FROM tool_reads ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}

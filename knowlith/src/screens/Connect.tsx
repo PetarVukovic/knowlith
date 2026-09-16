@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import {
   AlertTriangle,
@@ -14,7 +14,8 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { tools as toolsApi } from "@/lib/api"
-import type { AiTool, ConnectPreview } from "@/lib/types"
+import type { AiTool, ConnectPreview, Usage } from "@/lib/types"
+import { formatRelative } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
 
 /**
@@ -51,6 +52,29 @@ function describe(tool: AiTool): { label: string; tone: string } {
     default:
       return { label: "Not installed", tone: "text-faint" }
   }
+}
+
+/**
+ * Whether this application has actually used the company's knowledge.
+ *
+ * Being in a configuration file proves somebody pressed a button. This
+ * proves a conversation reached the company — which is the thing the owner
+ * is really asking about, and the thing a green badge never answers.
+ */
+function Use({ tool }: { tool: AiTool }) {
+  if (tool.reads === 0) {
+    return (
+      <span className="block text-[12.5px] text-muted">
+        Has not read anything yet
+      </span>
+    )
+  }
+  return (
+    <span className="block text-[12.5px] text-confirmed">
+      Read {tool.reads} {tool.reads === 1 ? "thing" : "things"}
+      {tool.lastRead ? ` · last ${formatRelative(tool.lastRead)}` : ""}
+    </span>
+  )
 }
 
 /** The verb on the button, which is never just "Connect". */
@@ -158,10 +182,16 @@ export function Connect() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[14px] font-medium text-ink">{tool.label}</span>
-                    <span className={`block text-[12.5px] ${state.tone}`}>
-                      {state.label}
-                      {tool.connected && tool.reads > 0 ? ` · ${tool.reads} context reads` : ""}
-                    </span>
+                    <span className={`block text-[12.5px] ${state.tone}`}>{state.label}</span>
+                    {/* Connection and use are two different claims, and only
+                        the second one means the product is working. They get
+                        their own line each rather than being joined by a
+                        dot, because "Connected · 0 reads" reads as success.
+                        Use is shown even when the entry has gone missing:
+                        an application that read this company last week and
+                        is no longer connected is exactly the case the owner
+                        most needs to see. */}
+                    {tool.connected || tool.reads > 0 ? <Use tool={tool} /> : null}
                   </span>
 
                   {tool.installed ? (
@@ -289,23 +319,76 @@ export function Connect() {
 }
 
 /**
- * The first question.
+ * The first question, and the proof that it landed.
  *
- * Connecting something and being told it worked proves nothing. Asking one
- * question and getting the company's own answer back, with the document
- * named, is the moment the product becomes real — so it is on the screen
- * rather than left to the owner to think of.
+ * Connecting something and being told it worked proves nothing. This copies
+ * a question about the company's own approved knowledge, then watches the
+ * gateway until that knowledge is actually served — so the loop closes on
+ * evidence rather than on the owner deciding the answer looked right.
+ *
+ * The questions are built from what this company has approved. A fixed list
+ * would ask about a discount rule that a plumber's office does not have,
+ * and the first thing the owner would learn is that the product is
+ * describing somebody else.
  */
 function TryIt({ company }: { company: string }) {
+  const { objects } = useApp()
   const [copied, setCopied] = useState<string | null>(null)
+  const [watching, setWatching] = useState(false)
+  const [landed, setLanded] = useState<Usage | null>(null)
+  const since = useRef<string | null>(null)
 
-  const questions = [
-    "What discount can we approve for a regular customer?",
-    "How do we put a quotation together?",
-    `What does "bez PDV-a" mean at ${company}?`,
-  ]
+  const questions = useMemo(() => {
+    const approved = objects.filter((o) => o.status === "approved")
+    const first = (kind: string) => approved.find((o) => o.kind === kind)
+    const rule = first("rule")
+    const process = first("process")
+    const term = first("term")
+
+    return [
+      rule ? `What does ${company} say about ${rule.title.toLowerCase()}?` : null,
+      process ? `Walk me through ${process.title.toLowerCase()}, the way we actually do it.` : null,
+      term ? `What does "${term.title}" mean at ${company}?` : null,
+    ].filter((q) => q !== null)
+  }, [objects, company])
+
+  /**
+   * Waits for the gateway to serve something it has not served before.
+   *
+   * Anchored to the newest read at the moment the question was copied, so
+   * an old read from yesterday cannot be mistaken for this one.
+   */
+  useEffect(() => {
+    if (!watching) return
+    let cancelled = false
+
+    const poll = async () => {
+      const usage = await toolsApi.usage()
+      if (cancelled) return
+      const newest = usage[0]
+      if (!newest) return
+      if (since.current === null || newest.at > since.current) {
+        setLanded(newest)
+        setWatching(false)
+      }
+    }
+
+    void poll()
+    const timer = window.setInterval(poll, 2000)
+    // Given up on after two minutes rather than spinning forever: somebody
+    // who copied a question and went to lunch should come back to a screen
+    // that is not still claiming to be waiting.
+    const giveUp = window.setTimeout(() => setWatching(false), 120_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      window.clearTimeout(giveUp)
+    }
+  }, [watching])
 
   const copy = async (question: string) => {
+    const usage = await toolsApi.usage()
+    since.current = usage[0]?.at ?? null
     try {
       await navigator.clipboard.writeText(question)
       setCopied(question)
@@ -313,14 +396,28 @@ function TryIt({ company }: { company: string }) {
     } catch {
       /* clipboard blocked — the question is on screen to retype */
     }
+    setLanded(null)
+    setWatching(true)
+  }
+
+  if (questions.length === 0) {
+    return (
+      <div className="mt-7 rounded-xl border border-line bg-surface-2 p-4">
+        <h2 className="text-[13px] font-medium text-ink">Try your company context</h2>
+        <p className="mt-1 text-[12.5px] text-muted">
+          Nothing is approved yet, so there is nothing for an AI tool to read. Approve something in
+          Changes and a question to try will appear here.
+        </p>
+      </div>
+    )
   }
 
   return (
     <div className="mt-7 rounded-xl border border-line bg-surface-2 p-4">
       <h2 className="text-[13px] font-medium text-ink">Try your company context</h2>
       <p className="mt-1 text-[12.5px] text-muted">
-        Ask one of these. The answer should name the document it came from — if it does not, the
-        tool is not reading {company} yet.
+        Copy one into Claude or Codex. This panel is watching, and will say so when the answer came
+        from {company}.
       </p>
       <div className="mt-3 space-y-1.5">
         {questions.map((question) => (
@@ -339,6 +436,29 @@ function TryIt({ company }: { company: string }) {
           </button>
         ))}
       </div>
+
+      {watching ? (
+        <p className="mt-3 flex items-center gap-2 text-[12.5px] text-muted">
+          <Loader2 className="size-3.5 animate-spin text-accent" />
+          Waiting for a tool to read something…
+        </p>
+      ) : null}
+
+      {landed ? (
+        <div className="mt-3 rounded-lg border border-confirmed/40 bg-confirmed-soft p-3">
+          <p className="flex items-center gap-2 text-[12.5px] font-medium text-confirmed">
+            <Check className="size-3.5 shrink-0" />
+            {landed.appLabel} read your company context
+          </p>
+          <ul className="mt-1.5 space-y-0.5">
+            {landed.read.map((object) => (
+              <li key={object.id} className="text-[12.5px] text-muted">
+                {object.title}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   )
 }

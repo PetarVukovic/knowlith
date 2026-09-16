@@ -2,8 +2,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { ArrowLeft, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { demoInventory, type Inventory } from "@/lib/inventory"
-import type { Processor, SourceKind } from "@/lib/types"
+import type { Inventory, Processor, SourceKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
 import { StepAccess } from "./StepAccess"
@@ -27,7 +26,7 @@ const DECISIONS = 4
 
 export function Onboarding() {
   const navigate = useNavigate()
-  const { completeOnboarding, setFirstRun, setCompany } = useApp()
+  const { completeOnboarding, setFirstRun, setCompany, addSource } = useApp()
 
   const [step, setStep] = useState(0)
   const [name, setName] = useState("")
@@ -38,6 +37,7 @@ export function Onboarding() {
   const [processor, setProcessor] = useState<Processor>("codex")
   const [allowStart, setAllowStart] = useState(false)
   const [granted, setGranted] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
 
   const canContinue =
     (step === 0 && name.trim().length > 1) ||
@@ -48,6 +48,24 @@ export function Onboarding() {
   const finishWizard = () => {
     setCompany(name.trim(), logo)
     completeOnboarding()
+  }
+
+  /**
+   * The moment the folder stops being a preview and becomes a source.
+   *
+   * Deliberately here and not on the screen before it: everything up to this
+   * point has only counted file names, and the owner is entitled to reach
+   * this button and still walk away having had nothing opened.
+   */
+  const build = async () => {
+    setAddError(null)
+    // The company is named now rather than at the end, so the daemon has it
+    // before the first document is read and the status bar stops saying
+    // "Your company" while the work is already running.
+    setCompany(name.trim(), logo)
+    const result = await addSource(path)
+    if (typeof result === "string") return setAddError(result)
+    setStep(5)
   }
 
   const wide = step >= 4
@@ -86,6 +104,7 @@ export function Onboarding() {
               setInventory(picked)
             }}
             inventory={inventory}
+            path={path}
           />
         ) : null}
 
@@ -102,12 +121,11 @@ export function Onboarding() {
           />
         ) : null}
 
-        {step === 4 ? (
-          <StepPreview
-            inventory={inventory ?? demoInventory}
-            path={path}
-            onBuild={() => setStep(5)}
-          />
+        {step === 4 && inventory ? (
+          <>
+            <StepPreview inventory={inventory} path={path} onBuild={() => void build()} />
+            {addError ? <p className="mt-4 text-[13px] text-conflict">{addError}</p> : null}
+          </>
         ) : null}
 
         {step === 5 ? (

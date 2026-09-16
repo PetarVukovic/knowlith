@@ -1,6 +1,7 @@
 import { Navigate, Route, BrowserRouter as Router, Routes } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Activity } from "@/screens/Activity"
 import { Connect } from "@/screens/Connect"
 import { Discovery } from "@/screens/Discovery"
 import { Home } from "@/screens/Home"
@@ -32,6 +33,7 @@ export function App() {
               <Route path="/review" element={<Review />} />
               <Route path="/sources" element={<Sources />} />
               <Route path="/connect" element={<Connect />} />
+              <Route path="/activity" element={<Activity />} />
               <Route path="/skills/:skillId" element={<SkillDetail />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

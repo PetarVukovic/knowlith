@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useParams } from "react-router-dom"
 import {
   Building2,
   ChevronRight,
+  Eye,
   FolderOpen,
   GitPullRequestArrow,
   Plug,
@@ -217,6 +218,18 @@ export function Sidebar() {
         >
           <Plug className="size-3.5 shrink-0 text-faint" />
           AI tools
+        </NavLink>
+        <NavLink
+          to="/activity"
+          className={({ isActive }) =>
+            cn(
+              "flex items-center gap-2 rounded-sm px-1.5 py-1.5 text-[12.5px]",
+              isActive ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-surface-3 hover:text-ink",
+            )
+          }
+        >
+          <Eye className="size-3.5 shrink-0 text-faint" />
+          Activity
         </NavLink>
         <NavLink
           to="/sources"

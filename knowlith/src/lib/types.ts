@@ -300,7 +300,16 @@ export interface AiTool {
   refreshHint: string
   /** Set when something is wrong that the owner can repair. */
   problem: string | null
+  /**
+   * Distinct things this application has read.
+   *
+   * Proof of use, which is a different claim from proof of connection: a
+   * configuration file with our entry in it says somebody pressed a
+   * button, this says the company's own knowledge reached a conversation.
+   */
   reads: number
+  /** When it last read something, or null if it never has. */
+  lastRead: string | null
 }
 
 /** What connecting would write, shown before it is written. */
@@ -334,4 +343,85 @@ export interface AutostartState {
   enabled: boolean
   location: string | null
   running: boolean
+}
+
+/**
+ * What is in a folder, counted without reading any of it.
+ *
+ * Shown before the owner commits, because "412 files, 38 MB, 210 of them
+ * PDFs" is the answer to a question they are entitled to ask first.
+ */
+export type Inventory = {
+  files: number
+  readable: number
+  bytes: number
+  types: { label: string; count: number; bytes: number }[]
+  /** Types that were found and cannot be read, named rather than summed. */
+  skipped: { label: string; count: number }[]
+  duplicates: number
+  oldVersions: number
+  /** When the most recently changed file was last written. */
+  newest: string | null
+  truncated: boolean
+}
+
+/** A folder the owner picked, or `chosen: null` when they closed the chooser. */
+export type Browsed = {
+  chosen: string | null
+  name: string | null
+  inventory: Inventory | null
+}
+
+export type SourceAdded = {
+  id: string
+  name: string
+  path: string
+  queued: boolean
+  alreadyKnown: boolean
+}
+
+/**
+ * The daemon in four numbers.
+ *
+ * The two counts matter as much as the two queue figures: work can start and
+ * finish between two polls, and then the queue never looks busy. What
+ * changed is what the screens watch.
+ */
+export type Health = {
+  queued: number
+  working: number
+  documents: number
+  objects: number
+}
+
+/**
+ * One thing an AI tool did with this company's knowledge.
+ *
+ * A row is a question, not a protocol call. An agent putting a quotation
+ * together makes five or six calls; the owner should see one thing that
+ * happened, with what it read underneath.
+ */
+export type Usage = {
+  id: string
+  app: "claude-desktop" | "claude-code" | "codex" | null
+  /** "Another tool" when the client did not identify itself as one we know. */
+  appLabel: string
+  /** What the agent said it was doing, when it declared a case. */
+  question: string | null
+  at: string
+  read: UsedObject[]
+  /**
+   * Named as relevant and never opened. Nothing else can report this: it
+   * only exists because the approved set is finite and the gateway said
+   * out loud what touched the question before the agent chose.
+   */
+  skipped: UsedObject[]
+  /** False when the agent answered without checking what it had missed. */
+  closed: boolean
+}
+
+export type UsedObject = {
+  id: string
+  title: string
+  kind: "rule" | "process" | "term" | "skill" | "fact"
 }

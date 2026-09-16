@@ -52,6 +52,23 @@ pub struct Options {
     pub company: String,
 }
 
+/// What this conversation is, for as long as it lasts.
+///
+/// One process serves one client, so this is the whole of the per-session
+/// state. It exists because `clientInfo` arrives once, in `initialize`, and
+/// every read after that has to be attributed to it — without this the
+/// owner's screen can say that eight things were served but never which
+/// application asked.
+#[derive(Default)]
+struct Session {
+    /// The slug of a recognised application, or `None` for a client that
+    /// sent no name or one we do not know.
+    app: Option<String>,
+    /// Exactly what the client called itself, kept for the log so an
+    /// unrecognised client can be added by name rather than guessed at.
+    client: Option<String>,
+}
+
 /// Runs until the client closes stdin.
 pub fn serve(options: Options) -> anyhow::Result<()> {
     let writer = Writer::stdout();
@@ -79,6 +96,7 @@ pub fn run<R: std::io::Read>(
     })?;
 
     let icon = serde_json::to_value(company_icon(&options.company))?;
+    let mut session = Session::default();
     let stop = Arc::new(AtomicBool::new(false));
     let watcher = spawn_watcher(&options.db, writer.clone(), Arc::clone(&stop));
 
@@ -107,7 +125,7 @@ pub fn run<R: std::io::Read>(
             }
         };
 
-        if handle(&mut lake, &options, &icon, &writer, message).is_err() {
+        if handle(&mut lake, &options, &icon, &writer, &mut session, message).is_err() {
             // A write failure means the pipe is closed.
             break Ok(());
         }
@@ -125,6 +143,7 @@ fn handle(
     options: &Options,
     icon: &Value,
     writer: &Writer,
+    session: &mut Session,
     message: Incoming,
 ) -> std::io::Result<()> {
     // A notification is never answered, whatever it says. Answering one is
@@ -139,7 +158,7 @@ fn handle(
     // their documents caused it, so it comes back as a refusal naming the
     // tool instead.
     let answered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        dispatch(lake, options, icon, &message)
+        dispatch(lake, options, icon, session, &message)
     }));
 
     match answered {
@@ -163,21 +182,22 @@ fn dispatch(
     lake: &mut Lake,
     options: &Options,
     icon: &Value,
+    session: &mut Session,
     message: &Incoming,
 ) -> Result<Value, (i64, String)> {
     match message.method.as_str() {
-        "initialize" => Ok(initialize(lake, options, message)),
+        "initialize" => Ok(initialize(lake, options, session, message)),
         "ping" => Ok(json!({})),
         "logging/setLevel" => Ok(json!({})),
 
         "tools/list" => Ok(json!({ "tools": tools::catalogue(icon) })),
-        "tools/call" => call_tool(lake, options, message),
+        "tools/call" => call_tool(lake, options, session, message),
 
         "prompts/list" => Ok(json!({ "prompts": prompts::list(lake, icon) })),
         "prompts/get" => {
             let name = message.required("name").map_err(invalid)?;
             let arguments = message.param("arguments").cloned().unwrap_or_else(|| json!({}));
-            match prompts::get(lake, &name, &arguments) {
+            match prompts::get(lake, &name, &arguments, session.app.as_deref()) {
                 Some((description, messages)) => {
                     Ok(json!({ "description": description, "messages": messages }))
                 }
@@ -215,6 +235,7 @@ fn invalid(reason: String) -> (i64, String) {
 fn call_tool(
     lake: &mut Lake,
     options: &Options,
+    session: &Session,
     message: &Incoming,
 ) -> Result<Value, (i64, String)> {
     let name = message.required("name").map_err(invalid)?;
@@ -230,7 +251,7 @@ fn call_tool(
         ));
     }
 
-    let outcome = tools::call(lake, &options.company, &name, &arguments);
+    let outcome = tools::call(lake, &options.company, &name, &arguments, session.app.as_deref());
 
     let mut content = vec![json!({ "type": "text", "text": outcome.text })];
     content.extend(outcome.links);
@@ -245,7 +266,27 @@ fn call_tool(
     }))
 }
 
-fn initialize(lake: &Lake, options: &Options, message: &Incoming) -> Value {
+fn initialize(lake: &Lake, options: &Options, session: &mut Session, message: &Incoming) -> Value {
+    // Who is asking, for every read this session records from here on.
+    // Unrecognised clients are logged by the name they gave rather than
+    // folded into one of ours, so adding one later is a one-line change
+    // made from evidence instead of a guess.
+    session.client = message
+        .param("clientInfo")
+        .and_then(|info| info.get("name"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    session.app = session
+        .client
+        .as_deref()
+        .and_then(knowlith_desktop::App::from_client_name)
+        .map(|app| app.slug().to_string());
+    match (&session.app, &session.client) {
+        (Some(app), _) => log(&format!("client is {app}")),
+        (None, Some(name)) => log(&format!("client calls itself \"{name}\", which is not one we know")),
+        (None, None) => log("client sent no name"),
+    }
+
     let asked = message
         .param("protocolVersion")
         .and_then(Value::as_str)
@@ -389,7 +430,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
         )
         .unwrap();
-        let result = initialize(&lake, &options, &message);
+        let result = initialize(&lake, &options, &mut Session::default(), &message);
         assert_eq!(result["protocolVersion"], "2025-06-18");
     }
 
@@ -404,7 +445,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#,
         )
         .unwrap();
-        assert_eq!(initialize(&lake, &options, &message)["protocolVersion"], SUPPORTED[0]);
+        assert_eq!(initialize(&lake, &options, &mut Session::default(), &message)["protocolVersion"], SUPPORTED[0]);
     }
 
     #[test]
@@ -436,7 +477,7 @@ mod tests {
             };
             let message =
                 rpc::parse(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#).unwrap();
-            initialize(&lake, &options, &message)["capabilities"].clone()
+            initialize(&lake, &options, &mut Session::default(), &message)["capabilities"].clone()
         };
         for surface in ["tools", "prompts", "resources"] {
             assert_eq!(capabilities[surface]["listChanged"], json!(true), "{surface}");

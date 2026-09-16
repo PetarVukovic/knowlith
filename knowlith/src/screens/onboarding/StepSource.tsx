@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { Check, CloudCog, FolderOpen, HardDrive, Loader2, Server } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { demoInventory, inventoryOf, type Inventory } from "@/lib/inventory"
-import type { SourceKind } from "@/lib/types"
+import { failed, folders } from "@/lib/api"
+import type { Inventory, SourceKind } from "@/lib/types"
 import { cn, formatBytes, formatCount } from "@/lib/utils"
 
 /**
@@ -38,37 +38,52 @@ const OPTIONS: {
   { kind: "onedrive", label: "OneDrive", detail: "Coming soon.", Icon: CloudCog, available: false },
 ]
 
+/**
+ * The folder itself comes from the machine, not from the browser.
+ *
+ * A page is never told where a folder is, so "Folder on this Mac" asks the
+ * daemon to open the system chooser and answer with a real path. The network
+ * drive is typed, because a chooser will not show a share that is not
+ * mounted, and then checked against the same walk — so both routes arrive at
+ * the same counted folder.
+ */
 export function StepSource({
   kind,
   onKind,
   onPick,
   inventory,
+  path,
 }: {
   kind: SourceKind | null
   onKind: (kind: SourceKind) => void
   onPick: (kind: SourceKind, path: string, inventory: Inventory) => void
   inventory: Inventory | null
+  path: string
 }) {
-  const picker = useRef<HTMLInputElement>(null)
   const [nasPath, setNasPath] = useState("")
-  const [reading, setReading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // `webkitdirectory` is not in the React attribute types, and setting it on
-  // the element is the only way to get a real folder from the picker.
-  useEffect(() => {
-    const el = picker.current
-    if (!el) return
-    el.setAttribute("webkitdirectory", "")
-    el.setAttribute("directory", "")
-  }, [])
+  const choose = async () => {
+    onKind("folder")
+    setBusy(true)
+    setError(null)
+    const result = await folders.browse()
+    setBusy(false)
+    if (failed(result)) return setError(result.error)
+    // Closing the chooser without picking leaves the screen where it was.
+    if (!result.chosen || !result.inventory) return
+    onPick("folder", result.chosen, result.inventory)
+  }
 
-  const readFolder = (list: FileList | null) => {
-    if (!list || list.length === 0) return
-    setReading(true)
-    const files = Array.from(list)
-    const counted = inventoryOf(files)
-    onPick("folder", counted.folderName, counted)
-    setReading(false)
+  const look = async (where: string) => {
+    setBusy(true)
+    setError(null)
+    const result = await folders.preview(where)
+    setBusy(false)
+    if (failed(result)) return setError(result.error)
+    if (!result.chosen || !result.inventory) return
+    onPick("nas", result.chosen, result.inventory)
   }
 
   return (
@@ -85,11 +100,10 @@ export function StepSource({
             <button
               key={option.kind}
               type="button"
-              disabled={!option.available}
+              disabled={!option.available || busy}
               onClick={() => {
                 if (option.kind === "folder") {
-                  onKind("folder")
-                  picker.current?.click()
+                  void choose()
                 } else if (option.kind === "nas") {
                   onKind("nas")
                 }
@@ -115,14 +129,6 @@ export function StepSource({
         })}
       </div>
 
-      <input
-        ref={picker}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => readFolder(e.target.files)}
-      />
-
       {kind === "nas" ? (
         <div className="mt-5">
           <label htmlFor="nas-path" className="mb-1.5 block text-[12.5px] font-medium text-ink">
@@ -133,56 +139,51 @@ export function StepSource({
               id="nas-path"
               value={nasPath}
               onChange={(e) => setNasPath(e.target.value)}
-              placeholder="\\\\termoval-nas\\Zajednicko"
+              placeholder="/Volumes/Zajednicko"
+              spellCheck={false}
               className="font-mono text-[12.5px]"
+              onKeyDown={(e) => e.key === "Enter" && nasPath.trim() && void look(nasPath.trim())}
             />
             <Button
               className="shrink-0"
-              disabled={nasPath.trim().length < 3 || reading}
-              onClick={() => {
-                // A browser cannot walk a network share; the count comes back
-                // from the machine Knowlith runs on.
-                setReading(true)
-                window.setTimeout(() => {
-                  onPick("nas", nasPath.trim(), { ...demoInventory, folderName: nasPath.trim() })
-                  setReading(false)
-                }, 900)
-              }}
+              disabled={nasPath.trim().length < 3 || busy}
+              onClick={() => void look(nasPath.trim())}
             >
               Look inside
             </Button>
           </div>
+          <p className="mt-1.5 text-[12px] text-faint">
+            The share has to be mounted on this Mac first — Knowlith reads it as a folder.
+          </p>
         </div>
       ) : null}
 
-      {reading ? (
+      {busy ? (
         <p className="mt-6 flex items-center gap-2 text-[13px] text-muted">
           <Loader2 className="size-4 animate-spin text-accent" />
-          Counting the folder…
+          {kind === "nas" ? "Counting the folder…" : "Waiting for the chooser…"}
         </p>
       ) : null}
 
-      {inventory ? (
+      {error ? <p className="mt-6 text-[13px] text-conflict">{error}</p> : null}
+
+      {inventory && !busy ? (
         <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-line bg-surface-2 px-4 py-3">
           <HardDrive className="size-4 shrink-0 text-faint" />
-          <span className="text-[13px] font-medium text-ink">{inventory.folderName}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{path}</span>
           <span className="tabular text-[12.5px] text-muted">
-            {formatCount(inventory.fileCount)} files · {formatBytes(inventory.bytes)}
+            {formatCount(inventory.readable)} readable · {formatBytes(inventory.bytes)}
           </span>
-          <Button variant="ghost" size="sm" className="ml-auto" onClick={() => picker.current?.click()}>
+          <Button variant="ghost" size="sm" onClick={() => void choose()}>
             Choose another
           </Button>
         </div>
       ) : null}
 
-      {!inventory ? (
-        <button
-          type="button"
-          onClick={() => onPick("folder", demoInventory.folderName, demoInventory)}
-          className="mt-6 text-[12px] text-faint underline-offset-4 transition-colors hover:text-muted hover:underline"
-        >
-          I don't have files handy — use the example company
-        </button>
+      {inventory && inventory.readable === 0 && !busy ? (
+        <p className="mt-3 text-[13px] text-pending">
+          Nothing in this folder can be read. Knowlith reads documents and spreadsheets.
+        </p>
       ) : null}
     </div>
   )

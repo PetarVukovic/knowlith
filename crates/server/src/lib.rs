@@ -99,7 +99,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/review", get(review))
         .route("/api/review/{id}/approve", post(approve))
         .route("/api/review/{id}/reject", post(reject))
-        .route("/api/sources", get(sources))
+        .route("/api/sources", get(sources).post(add_source))
+        .route("/api/sources/browse", post(browse))
+        .route("/api/sources/preview", get(preview_source))
         .route("/api/skills", get(skills))
         .route("/api/merge-hints", get(merge_hints))
         .route("/api/merge-hints/{keep}/{drop}/merge", post(merge))
@@ -109,6 +111,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/documents", get(documents))
         .route("/api/tool-reads", get(tool_reads))
         .route("/api/activity", get(activity))
+        .route("/api/usage", get(usage))
         .route("/api/tree", get(tree))
         .route("/api/tools", get(tools))
         .route("/api/tools/{app}/connect", post(connect_app))
@@ -443,6 +446,180 @@ async fn reject(State(state): State<AppState>, Path(id): Path<String>) -> ApiRes
     Ok(Json(Approved { affected: Vec::new() }))
 }
 
+/// Opens the machine's own folder chooser and reports what was picked.
+///
+/// The browser cannot answer this question — it is never told where a folder
+/// is — so the daemon answers it instead, with the same dialog every other
+/// application on this machine uses. `chosen: null` means the owner closed
+/// it, which is an ordinary thing to do and not an error.
+///
+/// The walk is done here too: by the time the dialog closes, the owner is
+/// already looking at the folder they picked and wants to know what is in it.
+async fn browse(State(state): State<AppState>) -> ApiResult<BrowseDto> {
+    let company = state.company.clone();
+    // The dialog blocks until somebody clicks, which would otherwise hold an
+    // async worker thread for as long as the chooser is open.
+    let picked = tokio::task::spawn_blocking(move || {
+        knowlith_desktop::pick::folder(&format!("Choose a folder for {company}"))
+    })
+    .await
+    .map_err(failed)?
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let Some(path) = picked else {
+        return Ok(Json(BrowseDto { chosen: None, name: None, inventory: None }));
+    };
+
+    let found = tokio::task::spawn_blocking({
+        let path = path.clone();
+        move || knowlith_extract::inventory::inventory(&path)
+    })
+    .await
+    .map_err(failed)?;
+
+    Ok(Json(BrowseDto {
+        name: Some(folder_name(&path)),
+        chosen: Some(knowlith_desktop::paths::display(&path)),
+        inventory: Some(found),
+    }))
+}
+
+/// Counts what is in a folder without reading any of it.
+///
+/// Used for a path the owner typed, and again when the interface comes back
+/// to a folder it already knows about.
+async fn preview_source(
+    State(_state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<PathQuery>,
+) -> ApiResult<BrowseDto> {
+    let path = resolve(&query.path)?;
+    let found = tokio::task::spawn_blocking({
+        let path = path.clone();
+        move || knowlith_extract::inventory::inventory(&path)
+    })
+    .await
+    .map_err(failed)?;
+
+    Ok(Json(BrowseDto {
+        name: Some(folder_name(&path)),
+        chosen: Some(knowlith_desktop::paths::display(&path)),
+        inventory: Some(found),
+    }))
+}
+
+/// Adds a folder and asks for it to be walked.
+///
+/// Nothing is scanned on this thread. The source is recorded and a job is
+/// queued, and the worker that is already running does the walking — so the
+/// reading carries on after the window is closed, which is the whole claim
+/// the background daemon makes.
+async fn add_source(
+    State(state): State<AppState>,
+    Json(body): Json<NewSource>,
+) -> ApiResult<SourceAddedDto> {
+    let path = resolve(&body.path)?;
+    let root = knowlith_desktop::paths::display(&path);
+    let name = body
+        .name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| folder_name(&path));
+
+    let lake = state.lake.lock().map_err(failed)?;
+
+    // A folder already being watched is told so rather than added twice
+    // under a second id, which would double every document in the lake.
+    for (id, existing_name, existing_root, _, _, _) in lake.sources().map_err(failed)? {
+        let same = knowlith_desktop::paths::real(std::path::Path::new(&existing_root))
+            .is_ok_and(|real| real == path);
+        if same {
+            return Ok(Json(SourceAddedDto {
+                id,
+                name: existing_name,
+                path: root,
+                queued: false,
+                already_known: true,
+            }));
+        }
+    }
+
+    let id = source_id(&name, &root);
+    lake.put_source(&id, &name, &root, "folder", "codex")
+        .map_err(failed)?;
+    let queued = knowlith_worker::enqueue_rescan(&lake, &id, &root).map_err(failed)?;
+
+    Ok(Json(SourceAddedDto {
+        id,
+        name,
+        path: root,
+        queued,
+        already_known: false,
+    }))
+}
+
+/// A path the owner gave us, turned into one we can walk — or a reason why not.
+///
+/// Every failure here is the owner's to fix, so each one says which of the
+/// three things went wrong rather than "invalid path".
+fn resolve(given: &str) -> std::result::Result<std::path::PathBuf, (StatusCode, String)> {
+    let trimmed = given.trim();
+    if trimmed.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "no folder was given".into()));
+    }
+    // `~/Documents/…` is what somebody types, and it is not a path until the
+    // home directory is put back in front of it.
+    let expanded = match trimmed.strip_prefix("~/") {
+        Some(rest) => knowlith_desktop::paths::home().join(rest),
+        None => std::path::PathBuf::from(trimmed),
+    };
+    let real = knowlith_desktop::paths::real(&expanded).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("there is nothing at {}", expanded.display()),
+        )
+    })?;
+    if !real.is_dir() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("{} is a file, not a folder", real.display()),
+        ));
+    }
+    // Readable is checked now rather than discovered by a job that fails
+    // twenty minutes later in a log nobody opens.
+    std::fs::read_dir(&real).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("{} cannot be read: {e}", real.display()),
+        )
+    })?;
+    Ok(real)
+}
+
+fn folder_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("folder")
+        .to_string()
+}
+
+/// A stable id for a folder.
+///
+/// Derived from the path so the same folder added again is recognised as the
+/// same source even if the lake was rebuilt in between.
+fn source_id(name: &str, root: &str) -> String {
+    let slug: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    // " - " becomes three dashes, so one pass of replace leaves two.
+    let mut slug = slug.trim_matches('-').to_string();
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let digest = knowlith_core::sha256_hex(root.as_bytes());
+    format!("{}-{}", if slug.is_empty() { "folder" } else { &slug }, &digest[..8])
+}
+
 async fn sources(State(state): State<AppState>) -> ApiResult<Vec<SourceDto>> {
     let lake = state.lake.lock().map_err(failed)?;
     let documents = lake.documents().map_err(failed)?;
@@ -671,6 +848,7 @@ async fn tool_reads(
 /// separately.
 async fn activity(State(state): State<AppState>) -> ApiResult<Vec<ActivityDto>> {
     let lake = state.lake.lock().map_err(failed)?;
+    let documents = lake.documents().map_err(failed)?;
     let mut objects = lake.objects().map_err(failed)?;
     objects.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
@@ -684,10 +862,20 @@ async fn activity(State(state): State<AppState>) -> ApiResult<Vec<ActivityDto>> 
                 ObjectStatus::Conflicted => format!("{} — documents disagree", object.title),
                 _ => format!("{} found", object.title),
             },
+            // The file's name, never its id. "From doc:9982ba86ea32837c"
+            // describes the owner's own document in a vocabulary they have
+            // no way to read.
             detail: object
                 .evidence
                 .first()
-                .map(|e| format!("From {}, {}.", e.document_id, e.locator))
+                .map(|e| {
+                    let name = documents
+                        .iter()
+                        .find(|d| d.id == e.document_id)
+                        .map(|d| d.name.as_str())
+                        .unwrap_or("a document that is no longer there");
+                    format!("From {}, {}.", name, e.locator)
+                })
                 .unwrap_or_default(),
             source: "default".into(),
             at: object.updated_at.clone(),
@@ -726,16 +914,15 @@ mod tests {
 /// Every application, what it can see, and whether it has used it.
 async fn tools(State(state): State<AppState>) -> ApiResult<Vec<ToolDto>> {
     let lake = state.lake.lock().map_err(failed)?;
-    let reads = lake.read_summary().unwrap_or_default();
+    // Per application now, from `clientInfo`. A read taken before the
+    // gateway recorded who was asking has no application and is counted
+    // against none of them rather than divided between them.
+    let used = lake.use_by_app().unwrap_or_default();
 
     let out = knowlith_desktop::status_all()
         .into_iter()
         .map(|status| {
-            // A tool's reads are recorded under the tool name the gateway
-            // used, which is per call rather than per application. Until
-            // the protocol carries the client's identity, the honest thing
-            // to report is how much has been served at all.
-            let total: i64 = reads.iter().map(|(_, n)| n).sum();
+            let mine = used.iter().find(|u| u.app.as_deref() == Some(status.slug));
             ToolDto {
                 state: match (&status.installed, &status.connected, &status.stale_command) {
                     (false, ..) => "missing",
@@ -754,12 +941,113 @@ async fn tools(State(state): State<AppState>) -> ApiResult<Vec<ToolDto>> {
                 problem: status.stale_command.map(|command| {
                     format!("It is pointing at {command}, which is not this Knowlith.")
                 }),
-                last_read: None,
-                reads: total,
+                last_read: mine.and_then(|u| u.last_read_at.clone()),
+                reads: mine.map(|u| u.objects).unwrap_or(0),
             }
         })
         .collect();
     Ok(Json(out))
+}
+
+/// What the AI tools on this machine have actually done, newest first.
+///
+/// One row per question, not one per protocol call. An agent asking about a
+/// quotation makes five or six calls; the owner wants to see one thing that
+/// happened, with what it read underneath.
+///
+/// Reads that belong to no case are folded into rows of their own. Most
+/// agents never open a case, and leaving those out would make this screen
+/// claim nothing is happening while the gateway is busy.
+async fn usage(State(state): State<AppState>) -> ApiResult<Vec<UsageDto>> {
+    const LIMIT: usize = 40;
+
+    let lake = state.lake.lock().map_err(failed)?;
+    let objects = lake.objects().map_err(failed)?;
+    let named = |id: &str| -> Option<UsedObjectDto> {
+        objects.iter().find(|o| o.id == id).map(|o| UsedObjectDto {
+            id: o.id.clone(),
+            title: o.title.clone(),
+            kind: kind_str(o.kind).to_string(),
+        })
+    };
+
+    let mut out = Vec::new();
+
+    for case in lake.recent_cases(LIMIT).map_err(failed)? {
+        let read_ids = lake.case_reads(&case.id).unwrap_or_default();
+        let read: Vec<UsedObjectDto> = read_ids.iter().filter_map(|id| named(id)).collect();
+        // Named as relevant when the case opened, never opened since. The
+        // comparison is against what the agent was told then, not against
+        // the lake now, or approving something mid-conversation would make
+        // a finished case look incomplete.
+        let skipped: Vec<UsedObjectDto> = case
+            .areas
+            .iter()
+            .filter(|id| !read_ids.contains(id))
+            .filter_map(|id| named(id))
+            .collect();
+
+        out.push(UsageDto {
+            id: case.id.clone(),
+            app_label: app_label(case.app.as_deref()),
+            app: case.app,
+            question: Some(case.question),
+            at: case.opened_at,
+            read,
+            skipped,
+            closed: case.closed_at.is_some(),
+        });
+    }
+
+    for (object_id, tool, app, at) in lake.loose_reads(LIMIT).map_err(failed)? {
+        let Some(object) = named(&object_id) else {
+            // `lookup_value` records against "table" rather than an object,
+            // because a row in a spreadsheet is not a context object. It is
+            // a real read and it belongs on the trail, named for what it is.
+            if object_id == "table" {
+                out.push(UsageDto {
+                    id: format!("read:{tool}:{at}"),
+                    app_label: app_label(app.as_deref()),
+                    app,
+                    question: None,
+                    at,
+                    read: vec![UsedObjectDto {
+                        id: "table".into(),
+                        title: "A figure, read from the row it is written in".into(),
+                        kind: "fact".into(),
+                    }],
+                    skipped: Vec::new(),
+                    closed: true,
+                });
+            }
+            continue;
+        };
+        out.push(UsageDto {
+            id: format!("read:{object_id}:{at}"),
+            app_label: app_label(app.as_deref()),
+            app,
+            question: None,
+            at,
+            read: vec![object],
+            skipped: Vec::new(),
+            closed: true,
+        });
+    }
+
+    out.sort_by(|a, b| b.at.cmp(&a.at));
+    out.truncate(LIMIT);
+    Ok(Json(out))
+}
+
+/// What to call the application on screen.
+///
+/// An unrecognised client is "another tool" and never one of the three we
+/// know: telling an owner that Codex read their rules when it was something
+/// else is worse than telling them nothing.
+fn app_label(slug: Option<&str>) -> String {
+    slug.and_then(knowlith_desktop::App::parse)
+        .map(|app| app.label().to_string())
+        .unwrap_or_else(|| "Another tool".to_string())
 }
 
 fn app_named(slug: &str) -> std::result::Result<knowlith_desktop::App, (StatusCode, String)> {

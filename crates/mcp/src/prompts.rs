@@ -75,7 +75,12 @@ pub fn list(lake: &Lake, icon: &Value) -> Vec<Value> {
 }
 
 /// `prompts/get`. Returns the messages, or `None` when the name is unknown.
-pub fn get(lake: &mut Lake, name: &str, arguments: &Value) -> Option<(String, Vec<Value>)> {
+pub fn get(
+    lake: &mut Lake,
+    name: &str,
+    arguments: &Value,
+    app: Option<&str>,
+) -> Option<(String, Vec<Value>)> {
     let situation = arguments
         .get("situation")
         .and_then(Value::as_str)
@@ -86,7 +91,7 @@ pub fn get(lake: &mut Lake, name: &str, arguments: &Value) -> Option<(String, Ve
     }
 
     let skill = skills(lake).into_iter().find(|s| slug(&s.title) == name)?;
-    let _ = lake.record_case_read(&skill.id, "prompt", None);
+    let _ = lake.record_case_read(&skill.id, "prompt", None, app);
 
     let mut text = format!(
         "Follow this company's own procedure, which its owner approved. It is not a suggestion and it is not to be improved on — where it states a figure, that figure is the company's.\n\n{}\n",

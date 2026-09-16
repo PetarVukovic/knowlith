@@ -27,6 +27,24 @@ pub struct Case {
     pub opened_at: String,
     pub closed_at: Option<String>,
     pub summary: Option<String>,
+    /// Which application asked, when it was one we recognise.
+    pub app: Option<String>,
+}
+
+/// What one application has actually done with this company's knowledge.
+///
+/// Separate from whether it is connected. A configuration file with our
+/// entry in it proves that somebody pressed a button; this proves that the
+/// company's own knowledge reached a conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppUse {
+    /// The application's slug, or `None` for clients we do not recognise.
+    pub app: Option<String>,
+    pub reads: i64,
+    /// Distinct objects, which is the number worth showing: one rule read
+    /// nine times in one conversation is one thing the agent knew.
+    pub objects: i64,
+    pub last_read_at: Option<String>,
 }
 
 /// One row of a spreadsheet, addressed well enough to quote.
@@ -169,7 +187,7 @@ impl Lake {
     // -------------------------------------------------------------- cases --
 
     /// Opens a case and returns its id.
-    pub fn open_case(&self, question: &str, areas: &[String]) -> Result<String> {
+    pub fn open_case(&self, question: &str, areas: &[String], app: Option<&str>) -> Result<String> {
         let opened = Utc::now();
         // Readable in a log and unique enough for a machine that is not
         // serving a thousand agents a second. A random id would be harder to
@@ -180,8 +198,9 @@ impl Lake {
             (areas.len() as u32).wrapping_mul(2654435761) ^ (opened.timestamp_subsec_nanos() & 0xffff)
         );
         self.conn.execute(
-            "INSERT INTO cases (id, question, areas_json, opened_at) VALUES (?1, ?2, ?3, ?4)",
-            params![id, question, serde_json::to_string(areas)?, now()],
+            "INSERT INTO cases (id, question, areas_json, opened_at, app)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, question, serde_json::to_string(areas)?, now(), app],
         )?;
         Ok(id)
     }
@@ -190,7 +209,7 @@ impl Lake {
         let found = self
             .conn
             .query_row(
-                "SELECT id, question, areas_json, opened_at, closed_at, summary
+                "SELECT id, question, areas_json, opened_at, closed_at, summary, app
                  FROM cases WHERE id = ?1",
                 params![id],
                 |r| {
@@ -202,6 +221,7 @@ impl Lake {
                         opened_at: r.get(3)?,
                         closed_at: r.get(4)?,
                         summary: r.get(5)?,
+                        app: r.get(6)?,
                     })
                 },
             )
@@ -209,11 +229,24 @@ impl Lake {
         Ok(found)
     }
 
-    /// Records a serve, against a case when the caller declared one.
-    pub fn record_case_read(&self, object_id: &str, tool: &str, case_id: Option<&str>) -> Result<()> {
+    /// Records a serve: what was read, by which tool, for which case, on
+    /// behalf of which application.
+    ///
+    /// `app` is the slug of a recognised application, or `None` for a
+    /// client that did not say or that we do not know. Only what was
+    /// actually served is recorded — a list of titles is not a read, or the
+    /// count on the owner's screen stops meaning anything.
+    pub fn record_case_read(
+        &self,
+        object_id: &str,
+        tool: &str,
+        case_id: Option<&str>,
+        app: Option<&str>,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO tool_reads (object_id, tool, read_at, case_id) VALUES (?1, ?2, ?3, ?4)",
-            params![object_id, tool, now(), case_id],
+            "INSERT INTO tool_reads (object_id, tool, read_at, case_id, app)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![object_id, tool, now(), case_id, app],
         )?;
         Ok(())
     }
@@ -245,7 +278,7 @@ impl Lake {
     /// finished" is information, not clutter.
     pub fn open_cases(&self, limit: usize) -> Result<Vec<Case>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, question, areas_json, opened_at, closed_at, summary
+            "SELECT id, question, areas_json, opened_at, closed_at, summary, app
              FROM cases WHERE closed_at IS NULL ORDER BY opened_at DESC LIMIT ?1",
         )?;
         let rows = stmt
@@ -258,7 +291,78 @@ impl Lake {
                     opened_at: r.get(3)?,
                     closed_at: r.get(4)?,
                     summary: r.get(5)?,
+                    app: r.get(6)?,
                 })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// What each application has read, newest activity first.
+    ///
+    /// Grouped by application rather than by tool: the owner wants to know
+    /// whether Claude is using this, not whether `search_context` is more
+    /// popular than `get_context`.
+    pub fn use_by_app(&self) -> Result<Vec<AppUse>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT app, count(*), count(DISTINCT object_id), max(read_at)
+             FROM tool_reads GROUP BY app ORDER BY max(read_at) DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(AppUse {
+                    app: r.get(0)?,
+                    reads: r.get(1)?,
+                    objects: r.get(2)?,
+                    last_read_at: r.get(3)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// The most recent cases, whether or not they were closed.
+    ///
+    /// This is the trail the owner reads: one row per question an agent
+    /// asked, not one per protocol call. What each one read is fetched
+    /// separately with [`Lake::case_reads`].
+    pub fn recent_cases(&self, limit: usize) -> Result<Vec<Case>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, question, areas_json, opened_at, closed_at, summary, app
+             FROM cases ORDER BY opened_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |r| {
+                let areas: String = r.get(2)?;
+                Ok(Case {
+                    id: r.get(0)?,
+                    question: r.get(1)?,
+                    areas: serde_json::from_str(&areas).unwrap_or_default(),
+                    opened_at: r.get(3)?,
+                    closed_at: r.get(4)?,
+                    summary: r.get(5)?,
+                    app: r.get(6)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Reads that belong to no case, newest first.
+    ///
+    /// An agent is free to call `search_context` without ever opening a
+    /// case, and most will. Those reads are real and belong on the trail;
+    /// leaving them out would make the screen look emptier than the truth.
+    pub fn loose_reads(&self, limit: usize) -> Result<Vec<(String, String, Option<String>, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT object_id, tool, app, max(read_at) FROM tool_reads
+             WHERE case_id IS NULL
+             GROUP BY object_id, tool, app
+             ORDER BY max(read_at) DESC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
