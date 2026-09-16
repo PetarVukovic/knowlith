@@ -792,7 +792,18 @@ fn lookup(lake: &mut Lake, what: &str, case: Option<&str>) -> Outcome {
         );
     }
 
-    let mut text = String::from("Read from the company's own table, cell by cell:\n\n");
+    // Where the rows come from more than one file, the agent has to be told
+    // which file is newer — otherwise it quotes last year's price with the
+    // same confidence as this year's, and both are equally "in the company's
+    // own table".
+    let files: BTreeSet<&str> = rows.iter().map(|row| row.document_name.as_str()).collect();
+    let mut text = if files.len() > 1 {
+        String::from(
+            "Read from the company's own tables, cell by cell. More than one file has a row for this, newest file first — check with the owner which one is current before quoting an older one:\n\n",
+        )
+    } else {
+        String::from("Read from the company's own table, cell by cell:\n\n")
+    };
     let mut values = Vec::new();
     let mut links = Vec::new();
 
@@ -801,7 +812,8 @@ fn lookup(lake: &mut Lake, what: &str, case: Option<&str>) -> Outcome {
             (Some(sheet), Some(number)) => format!("{sheet}, row {number}"),
             _ => row.locator.clone(),
         };
-        text.push_str(&format!("{} — {}\n", row.document_name, where_at));
+        let day = row.modified.split('T').next().unwrap_or(&row.modified);
+        text.push_str(&format!("{} ({day}) — {}\n", row.document_name, where_at));
 
         if row.columns.len() == row.cells.len() && !row.columns.is_empty() {
             for (column, cell) in row.columns.iter().zip(&row.cells) {
@@ -815,6 +827,7 @@ fn lookup(lake: &mut Lake, what: &str, case: Option<&str>) -> Outcome {
         values.push(json!({
             "document": row.document_name,
             "documentId": row.document_id,
+            "modified": row.modified,
             "locator": row.locator,
             "sheet": row.sheet,
             "row": row.row,
@@ -830,6 +843,12 @@ fn lookup(lake: &mut Lake, what: &str, case: Option<&str>) -> Outcome {
     }
 
     text.push_str("These are the figures as written. Use them exactly; do not round them and do not add anything between two of them.");
+    if files.len() > 1 {
+        text.push_str(&format!(
+            "\n\nThey came from {} different files. If two of them disagree, say so rather than choosing.",
+            files.len()
+        ));
+    }
     let _ = lake.record_case_read("table", "lookup_value", case);
 
     let found = values.len();

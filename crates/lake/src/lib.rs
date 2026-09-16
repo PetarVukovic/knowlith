@@ -63,6 +63,8 @@ pub enum LakeError {
     },
     #[error("an approved object must carry at least one verified source span")]
     NoEvidence,
+    #[error("an approved object must say something — the text was empty")]
+    NoBody,
 }
 
 type Result<T> = std::result::Result<T, LakeError>;
@@ -680,6 +682,14 @@ impl Lake {
         )?;
         if spans == 0 {
             return Err(LakeError::NoEvidence);
+        }
+
+        // An approved object with no text is not a decision, it is a heading.
+        // The gateway would serve it as a title with nothing underneath, and
+        // an agent reading that has been told a rule exists and not what it
+        // says — which is worse than not being told at all.
+        if body.trim().is_empty() {
+            return Err(LakeError::NoBody);
         }
 
         let at = now();

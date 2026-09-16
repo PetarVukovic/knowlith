@@ -542,3 +542,67 @@ impl Write for Recorder {
         Ok(())
     }
 }
+
+/// Two price lists in one folder answered the same question with equal
+/// confidence, and nothing said which was current. A superseded price list
+/// is still a real row, so it still answers — it answers last, dated, and
+/// with a sentence telling the agent not to choose between them itself.
+#[test]
+fn an_older_price_list_answers_last_and_says_how_old_it_is() {
+    let db = temp_db("two-price-lists");
+    let mut lake = Lake::open(&db).unwrap();
+    lake.put_source("s1", "Cjenici", "/tmp", "folder", "codex").unwrap();
+
+    for (name, price, modified) in [
+        ("Cjenik-2025.csv", "195", "2025-01-10T09:00:00Z"),
+        ("Cjenik-2026.csv", "210", "2026-01-10T09:00:00Z"),
+    ] {
+        let text = format!("Stavka,Cijena\nMontaža split sustava,{price}\n");
+        let sha = sha256_hex(text.as_bytes());
+        let header = "Stavka,Cijena";
+        let row = format!("Montaža split sustava,{price}");
+        let start = text.find(&row).unwrap();
+        lake.put_document(
+            "s1",
+            &Document {
+                id: document_id(&sha),
+                path: format!("/tmp/{name}"),
+                name: name.into(),
+                kind: DocumentKind::Csv,
+                byte_len: text.len() as u64,
+                sha256: sha.clone(),
+                text: text.clone(),
+                text_sha256: sha,
+                verbatim: true,
+                modified: modified.into(),
+                columns: Some(header.split(',').map(str::to_string).collect()),
+                blocks: vec![Block {
+                    locator: "row 2".into(),
+                    kind: BlockKind::TableRow,
+                    text: row.clone(),
+                    start_byte: start,
+                    end_byte: start + row.len(),
+                    page: None,
+                    sheet: None,
+                    row: Some(2),
+                    cells: Some(row.split(',').map(str::to_string).collect()),
+                }],
+            },
+        )
+        .unwrap();
+    }
+    drop(lake);
+
+    let out = converse(&db, &[call("lookup_value", 1, json!({ "what": "montaža split" }))]);
+    let rows = out[0]["result"]["structuredContent"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["document"], "Cjenik-2026.csv", "the older list came first");
+
+    let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("2026-01-10"), "the date is not shown: {text}");
+    assert!(text.contains("newest file first"), "{text}");
+    assert!(
+        text.contains("say so rather than choosing"),
+        "the agent was left to pick between two price lists: {text}"
+    );
+}

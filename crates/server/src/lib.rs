@@ -94,7 +94,7 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/api/health", get(health))
-        .route("/api/company", get(company))
+        .route("/api/company", get(company).put(rename_company))
         .route("/api/objects", get(objects))
         .route("/api/review", get(review))
         .route("/api/review/{id}/approve", post(approve))
@@ -170,9 +170,29 @@ struct Company {
 }
 
 async fn company(State(state): State<AppState>) -> ApiResult<Company> {
-    Ok(Json(Company {
-        name: state.company.to_string(),
-    }))
+    let lake = state.lake.lock().map_err(failed)?;
+    Ok(Json(Company { name: lake.company() }))
+}
+
+#[derive(serde::Deserialize)]
+struct Rename {
+    name: String,
+}
+
+/// Names the company, from onboarding or from settings.
+///
+/// Stored in the lake, so the gateway and the extension say the same thing
+/// without the daemon being restarted.
+async fn rename_company(
+    State(state): State<AppState>,
+    Json(rename): Json<Rename>,
+) -> ApiResult<Company> {
+    if rename.name.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "a company needs a name".into()));
+    }
+    let lake = state.lake.lock().map_err(failed)?;
+    lake.set_company(&rename.name).map_err(failed)?;
+    Ok(Json(Company { name: lake.company() }))
 }
 
 async fn objects(State(state): State<AppState>) -> ApiResult<Vec<ObjectDto>> {

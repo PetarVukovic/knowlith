@@ -102,7 +102,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches,
   )
 
-  const [companyName, setCompanyName] = useState("Termoval d.o.o.")
+  // Empty until the daemon says who this is. A default here was a demo
+  // company's name appearing on a real install for as long as the first
+  // request took, and staying there whenever that request failed.
+  const [companyName, setCompanyName] = useState("")
   const [companyLogo, setCompanyLogo] = useState<string | null>(null)
   const [objects, setObjects] = useState<ContextObject[]>([])
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -151,7 +154,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         api.getMergeHints(),
       ])
       if (cancelled) return
-      setCompanyName((current) => (current === "Termoval d.o.o." ? c.name : current))
+      // Whatever the daemon says, including a stand-in it worked out from
+      // the folder name. Never overwritten with a literal from this file.
+      if (c.name.trim()) setCompanyName(c.name)
       setObjects(o)
       setTree(t)
       setReview(r)
@@ -233,6 +238,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setCompany = useCallback((name: string, logo: string | null) => {
     setCompanyName(name)
     setCompanyLogo(logo)
+    // Named in the lake as well as on screen, so the gateway, the Claude
+    // Desktop extension and the standing instructions all say the same
+    // thing without the daemon being restarted.
+    void api.setCompanyName(name)
   }, [])
 
   const completeOnboarding = useCallback(() => {
@@ -332,7 +341,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       resetOnboarding,
       firstRun,
       setFirstRun,
-      companyName,
+      companyName: companyName || "Your company",
       setCompany,
       companyLogo,
       objects,

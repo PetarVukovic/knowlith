@@ -185,3 +185,82 @@ mod tests {
         assert_eq!(lake.policy(), Policy::default());
     }
 }
+
+/// Whose company this is.
+///
+/// Kept in the lake rather than passed on the command line, because four
+/// different entry points — the daemon, the gateway, the extension and the
+/// connect command — all have to agree on it, and a default baked into each
+/// of them is how three of them end up saying "Termoval d.o.o." on somebody
+/// else's machine.
+const COMPANY_KEY: &str = "company";
+
+impl Lake {
+    /// The company's name, or a reasonable stand-in.
+    ///
+    /// Falls back to the first source folder's own name: someone who dropped
+    /// in `~/Documents/Termoval` has already told us what to call them, and
+    /// asking again is a question with an answer already on screen.
+    pub fn company(&self) -> String {
+        if let Ok(Some(name)) = self.setting(COMPANY_KEY) {
+            if !name.trim().is_empty() {
+                return name;
+            }
+        }
+        if let Ok(sources) = self.sources() {
+            if let Some((_, name, ..)) = sources.first() {
+                if !name.trim().is_empty() {
+                    return name.clone();
+                }
+            }
+        }
+        "Your company".to_string()
+    }
+
+    pub fn set_company(&self, name: &str) -> Result<()> {
+        self.set_setting(COMPANY_KEY, name.trim())
+    }
+
+    /// Whether the owner has ever said who they are.
+    pub fn company_is_known(&self) -> bool {
+        self.setting(COMPANY_KEY)
+            .ok()
+            .flatten()
+            .map(|name| !name.trim().is_empty())
+            .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod company_tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_lake_has_a_neutral_name_not_a_demo_one() {
+        let lake = Lake::in_memory().unwrap();
+        assert_eq!(lake.company(), "Your company");
+        assert!(!lake.company_is_known());
+    }
+
+    #[test]
+    fn the_first_folder_names_the_company_until_the_owner_says_otherwise() {
+        let lake = Lake::in_memory().unwrap();
+        lake.put_source("s1", "Termoval", "/tmp/termoval", "folder", "codex")
+            .unwrap();
+        assert_eq!(lake.company(), "Termoval");
+        // Still not "known": a folder name is a guess, and onboarding should
+        // still ask.
+        assert!(!lake.company_is_known());
+
+        lake.set_company("Termoval d.o.o.").unwrap();
+        assert_eq!(lake.company(), "Termoval d.o.o.");
+        assert!(lake.company_is_known());
+    }
+
+    #[test]
+    fn a_blank_name_does_not_overwrite_the_fallback() {
+        let lake = Lake::in_memory().unwrap();
+        lake.set_company("   ").unwrap();
+        assert_eq!(lake.company(), "Your company");
+    }
+}

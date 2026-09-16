@@ -39,6 +39,15 @@ pub struct Case {
 pub struct Row {
     pub document_id: String,
     pub document_name: String,
+    /// When the file this row came from was last changed.
+    ///
+    /// Carried because a folder holds last year's price list next to this
+    /// year's, and nothing else here can tell them apart: the compiler
+    /// supersedes *objects*, not documents, so a table row from
+    /// `Cjenik-2025.xlsx` is as retrievable as one from `Cjenik-2026.xlsx`.
+    /// Ordering by this and saying so is honest; picking one would be a
+    /// guess about which file the company considers current.
+    pub modified: String,
     pub locator: String,
     pub sheet: Option<String>,
     pub row: Option<u32>,
@@ -99,12 +108,14 @@ impl Lake {
 
         let mut stmt = self.conn.prepare(
             "SELECT b.document_id, d.name, b.locator, b.sheet, b.row, b.text,
-                    b.cells_json, d.columns_json
+                    b.cells_json, d.columns_json, d.modified
              FROM blocks_fts f
              JOIN blocks b ON b.document_id = f.document_id AND b.locator = f.locator
              JOIN documents d ON d.id = b.document_id
              WHERE blocks_fts MATCH ?1 AND b.kind = 'table_row'
-             ORDER BY rank
+             -- Newest file first, then by how well the row matched. A
+             -- superseded price list still answers, and it answers last.
+             ORDER BY d.modified DESC, rank
              LIMIT ?2",
         )?;
 
@@ -115,6 +126,7 @@ impl Lake {
                 Ok(Row {
                     document_id: r.get(0)?,
                     document_name: r.get(1)?,
+                    modified: r.get(8)?,
                     locator: r.get(2)?,
                     sheet: r.get(3)?,
                     row: r.get::<_, Option<i64>>(4)?.map(|n| n as u32),

@@ -64,7 +64,7 @@ enum Command {
     Engines,
     /// Turn the documents in the lake into rules, processes and terms.
     Compile {
-        #[arg(long, default_value = "claude")]
+        #[arg(long, default_value = "auto")]
         engine: String,
         /// Write every engine reply into this folder, so the run can be
         /// replayed later without a provider.
@@ -81,10 +81,11 @@ enum Command {
     Serve {
         #[arg(long, default_value_t = 7717)]
         port: u16,
-        #[arg(long, default_value = "Termoval d.o.o.")]
-        company: String,
+        /// Overrides the name stored in the lake, and stores the override.
+        #[arg(long)]
+        company: Option<String>,
         /// Which engine the background worker uses.
-        #[arg(long, default_value = "claude")]
+        #[arg(long, default_value = "auto")]
         engine: String,
         /// Replay recorded replies instead of calling an engine. The whole
         /// loop then runs with no provider and no cost.
@@ -101,7 +102,7 @@ enum Command {
     /// Stopping it is safe at any moment: an unfinished job's lease expires
     /// and the next start picks it up.
     Work {
-        #[arg(long, default_value = "claude")]
+        #[arg(long, default_value = "auto")]
         engine: String,
         #[arg(long)]
         replay: Option<PathBuf>,
@@ -115,7 +116,7 @@ enum Command {
     /// they are built only from knowledge the owner has already approved,
     /// and a draft that states a figure no approved rule states is refused.
     Skills {
-        #[arg(long, default_value = "claude")]
+        #[arg(long, default_value = "auto")]
         engine: String,
         #[arg(long)]
         record: Option<PathBuf>,
@@ -131,7 +132,7 @@ enum Command {
     /// asks the engine, once, about the whole set. Every edge it proposes is
     /// marked as the engine's rather than as structure, and can be removed.
     Relate {
-        #[arg(long, default_value = "claude")]
+        #[arg(long, default_value = "auto")]
         engine: String,
         #[arg(long)]
         record: Option<PathBuf>,
@@ -168,8 +169,9 @@ enum Command {
     /// would want to read goes to stderr, because a single stray line on
     /// stdout ends the session.
     Mcp {
-        #[arg(long, default_value = "Termoval d.o.o.")]
-        company: String,
+        /// Overrides the name stored in the lake, and stores the override.
+        #[arg(long)]
+        company: Option<String>,
     },
     /// Hand Knowlith to the AI applications on this machine.
     Connect {
@@ -185,8 +187,9 @@ enum Command {
         /// reach for the company.
         #[arg(long, default_value_t = true)]
         guidance: bool,
-        #[arg(long, default_value = "Termoval d.o.o.")]
-        company: String,
+        /// Overrides the name stored in the lake, and stores the override.
+        #[arg(long)]
+        company: Option<String>,
     },
     /// Take Knowlith back out of an application's settings.
     Disconnect {
@@ -197,8 +200,9 @@ enum Command {
     /// Build the Claude Desktop extension, so it can be installed with a
     /// double-click instead of by editing a configuration file.
     Bundle {
-        #[arg(long, default_value = "Termoval d.o.o.")]
-        company: String,
+        /// Overrides the name stored in the lake, and stores the override.
+        #[arg(long)]
+        company: Option<String>,
         /// Open it, which is what shows Claude Desktop's install screen.
         #[arg(long)]
         install: bool,
@@ -259,7 +263,10 @@ fn main() -> Result<()> {
             engine,
             replay,
             no_worker,
-        } => serve(lake, db, port, &company, &engine, replay.as_deref(), no_worker),
+        } => {
+            let name = company_of(&lake, company.as_deref());
+            serve(lake, db, port, &name, &engine, replay.as_deref(), no_worker)
+        }
         Command::Work { engine, replay, once } => work(db, &engine, replay.as_deref(), once),
         Command::Skills {
             engine,
@@ -285,8 +292,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Mcp { company } => {
+            let name = company_of(&lake, company.as_deref());
             drop(lake);
-            knowlith_mcp::serve(knowlith_mcp::Options { db, company })
+            knowlith_mcp::serve(knowlith_mcp::Options { db, company: name })
         }
         Command::Connect {
             app,
@@ -294,20 +302,67 @@ fn main() -> Result<()> {
             open,
             guidance,
             company,
-        } => connect(app.as_deref(), dry_run, open, guidance, &company),
+        } => {
+            let name = company_of(&lake, company.as_deref());
+            connect(app.as_deref(), dry_run, open, guidance, &name)
+        }
         Command::Disconnect { app } => disconnect(app.as_deref()),
         Command::Tools => tools_status(),
-        Command::Bundle { company, install } => bundle(&lake, &company, install),
+        Command::Bundle { company, install } => {
+            let name = company_of(&lake, company.as_deref());
+            bundle(&lake, &name, install)
+        }
         Command::Autostart { what } => autostart(what),
     }
 }
 
+/// The company's name, resolving an override and remembering it.
+///
+/// Stored rather than passed around, so the daemon, the gateway, the
+/// extension and the connect command cannot disagree — and so nothing has a
+/// default of its own to fall back to.
+fn company_of(lake: &Lake, override_name: Option<&str>) -> String {
+    if let Some(name) = override_name.map(str::trim).filter(|n| !n.is_empty()) {
+        let _ = lake.set_company(name);
+        return name.to_string();
+    }
+    lake.company()
+}
+
+/// The engine to use, with `auto` meaning "whatever this machine has".
+///
+/// A default of `claude` was a guess about someone else's laptop. A company
+/// that runs Codex got a daemon that failed every compile job with "claude
+/// is not installed", and the queue looked broken rather than misconfigured.
+fn resolve_engine(name: &str) -> Result<String> {
+    if name != "auto" {
+        return Ok(name.to_string());
+    }
+    let installed = detect();
+    // Order is not a preference between the two products. Whichever is
+    // actually on the machine wins, and when both are, the first one the
+    // owner is more likely to have signed in is as good a rule as any.
+    for flavour in [Flavour::ClaudeCode, Flavour::Codex] {
+        if installed
+            .iter()
+            .any(|found| found.flavour == flavour && found.path.is_some())
+        {
+            return Ok(flavour.program().to_string());
+        }
+    }
+    anyhow::bail!(
+        "no AI command line found on this machine. Install Codex or Claude Code, \
+         or pass --engine managed. `knowlith engines` shows what was looked for."
+    )
+}
+
 fn pick_engine(name: &str) -> Result<Box<dyn Engine>> {
-    Ok(match name {
+    let name = resolve_engine(name)?;
+    Ok(match name.as_str() {
         "codex" => Box::new(Breaker::new(CliEngine::new(Flavour::Codex))),
         "claude" | "claude-code" => Box::new(Breaker::new(CliEngine::new(Flavour::ClaudeCode))),
         "managed" => Box::new(ManagedEngine),
-        other => anyhow::bail!("unknown engine \"{other}\". Try codex, claude or managed."),
+        other => anyhow::bail!("unknown engine \"{other}\". Try codex, claude, managed or auto."),
     })
 }
 
@@ -536,7 +591,10 @@ fn worker_engine(name: &str, replay: Option<&Path>) -> Result<Arc<dyn Engine>> {
 fn worker_label(name: &str, replay: Option<&Path>) -> String {
     match replay {
         Some(dir) => format!("recorded replies from {}", dir.display()),
-        None => name.to_string(),
+        // Resolved rather than echoed, so the line says "claude" and not
+        // "auto" — which is the difference between telling the owner what
+        // is running and telling them what they typed.
+        None => resolve_engine(name).unwrap_or_else(|_| "nothing installed".to_string()),
     }
 }
 

@@ -1,11 +1,21 @@
 /**
  * The only module that knows where data comes from.
  *
- * It asks the daemon on `127.0.0.1` first, and falls back to the demo
- * fixtures when nothing answers. That fallback is not a convenience for
- * development — it is what lets somebody open the interface, see what the
- * product does, and only then install anything. Once `knowlith serve` is
- * running, the same screens show their own company instead.
+ * There are exactly two sources and they never mix.
+ *
+ * **The daemon.** Whenever `knowlith serve` answers on `127.0.0.1`, every
+ * screen shows that lake and nothing else. An endpoint that fails returns
+ * empty, never a fixture: showing another company's discount policy because
+ * one request 500'd is the worst thing this layer can do, and it is
+ * indistinguishable from the product working.
+ *
+ * **The demo.** A guided tour of a company that does not exist, for someone
+ * who has not installed anything yet. It has to be asked for — `?demo` in
+ * the address, or `VITE_KNOWLITH_DEMO=1` — because a demo that appears on
+ * its own is a demo somebody will mistake for their own data.
+ *
+ * With no daemon and no demo the screens are empty and say why, which is
+ * the truth: nothing is running.
  */
 import * as fixtures from "./mock"
 import { sleep } from "./utils"
@@ -29,9 +39,26 @@ import type {
 
 const LATENCY = 120
 
-/** Where the daemon listens. Overridable for a non-default port. */
-const DAEMON =
-  (import.meta.env.VITE_KNOWLITH_API as string | undefined)?.replace(/\/$/, "") ?? "http://127.0.0.1:7717"
+/**
+ * Where the daemon is.
+ *
+ * Whoever served this page is the daemon. That sounds obvious and was the
+ * bug: a hardcoded `127.0.0.1:7717` meant a daemon started on any other
+ * port served an interface that then looked for a *different* daemon,
+ * found nothing, and told the owner Knowlith was not running — while
+ * running.
+ *
+ * Under `npm run dev` the page comes from Vite on another port, so there
+ * the default is the daemon's usual one.
+ */
+const DAEMON: string = (() => {
+  const explicit = (import.meta.env.VITE_KNOWLITH_API as string | undefined)?.replace(/\/$/, "")
+  if (explicit) return explicit
+  if (!import.meta.env.DEV && typeof window !== "undefined" && window.location.protocol.startsWith("http")) {
+    return window.location.origin
+  }
+  return "http://127.0.0.1:7717"
+})()
 
 /**
  * Whether the daemon answered, decided once per page load.
@@ -63,24 +90,53 @@ export async function usingDaemon(): Promise<boolean> {
 }
 
 /**
- * One request, with the fixtures as the answer when there is no daemon.
+ * Whether the demo company was asked for.
  *
- * A daemon that is reachable but fails a particular endpoint falls back too:
- * an empty screen tells the owner nothing, and a thrown error in a data
- * layer takes the whole page with it.
+ * Read once. A flag that could change between two requests would put half a
+ * screen on real data and half on a fixture, which is the one failure mode
+ * worse than either on its own.
  */
-async function get<T>(path: string, fallback: T): Promise<T> {
-  if (!(await connected())) {
-    await sleep(LATENCY)
-    return fallback
-  }
+const DEMO: boolean = (() => {
   try {
-    const response = await fetch(`${DAEMON}${path}`)
-    if (!response.ok) return fallback
-    return (await response.json()) as T
+    if (new URLSearchParams(window.location.search).has("demo")) return true
   } catch {
-    return fallback
+    /* no window during a build or a test */
   }
+  return import.meta.env.VITE_KNOWLITH_DEMO === "1"
+})()
+
+/** True when the screens are showing a company that does not exist. */
+export function showingDemo(): boolean {
+  return DEMO
+}
+
+/**
+ * One request.
+ *
+ * `empty` is what a screen gets when there is nothing to show — an empty
+ * list, a zeroed summary. `demo` is the fixture, and it is only ever
+ * returned when the demo was explicitly asked for and no daemon is running.
+ */
+async function get<T>(path: string, demo: T, empty: T): Promise<T> {
+  if (await connected()) {
+    try {
+      const response = await fetch(`${DAEMON}${path}`)
+      if (response.ok) return (await response.json()) as T
+    } catch {
+      /* fall through to empty, never to the demo */
+    }
+    // The daemon is there and this request did not work. The owner gets an
+    // empty screen and the status bar says the daemon is up — between them
+    // that reads as "nothing here yet", which is recoverable. A fixture
+    // would read as "here is your company", which is not.
+    return empty
+  }
+
+  if (DEMO) {
+    await sleep(LATENCY)
+    return demo
+  }
+  return empty
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T | null> {
@@ -99,39 +155,51 @@ async function post<T>(path: string, body?: unknown): Promise<T | null> {
 }
 
 export const api = {
+  /** Names the company in the lake. */
+  setCompanyName: (name: string) => putCompanyName(name),
+
   async getCompany() {
-    return get<{ name: string }>("/api/company", fixtures.company)
+    return get<{ name: string }>("/api/company", fixtures.company, { name: "" })
   },
   async getTree(): Promise<TreeNode[]> {
-    return get<TreeNode[]>("/api/tree", fixtures.contextTree)
+    return get<TreeNode[]>("/api/tree", fixtures.contextTree, [])
   },
   async getObjects(): Promise<ContextObject[]> {
-    return get<ContextObject[]>("/api/objects", fixtures.contextObjects)
+    return get<ContextObject[]>("/api/objects", fixtures.contextObjects, [])
   },
   async getReviewQueue(): Promise<ReviewItem[]> {
-    return get<ReviewItem[]>("/api/review", fixtures.reviewQueue)
+    return get<ReviewItem[]>("/api/review", fixtures.reviewQueue, [])
   },
   async getSources(): Promise<Source[]> {
-    return get<Source[]>("/api/sources", fixtures.sources)
+    return get<Source[]>("/api/sources", fixtures.sources, [])
   },
   async getSkills(): Promise<SkillDoc[]> {
-    return get<SkillDoc[]>("/api/skills", fixtures.skills)
+    return get<SkillDoc[]>("/api/skills", fixtures.skills, [])
   },
   async getDiscovery(): Promise<DiscoverySummary> {
-    return get<DiscoverySummary>("/api/discovery", fixtures.discovery)
+    return get<DiscoverySummary>("/api/discovery", fixtures.discovery, {
+      rules: 0,
+      processes: 0,
+      terms: 0,
+      skills: 0,
+      conflicts: 0,
+      filesRead: 0,
+      spansExtracted: 0,
+      durationSeconds: 0,
+    })
   },
   async getCompilerRuns(): Promise<CompilerRun[]> {
-    return get<CompilerRun[]>("/api/runs", fixtures.compilerRuns)
+    return get<CompilerRun[]>("/api/runs", fixtures.compilerRuns, [])
   },
   async getSourceDocuments(): Promise<SourceDocument[]> {
-    return get<SourceDocument[]>("/api/documents", fixtures.sourceDocuments)
+    return get<SourceDocument[]>("/api/documents", fixtures.sourceDocuments, [])
   },
   /** Reads the MCP gateway actually recorded, keyed by object id. */
   async getToolReads(): Promise<Record<string, ToolRead[]>> {
-    return get<Record<string, ToolRead[]>>("/api/tool-reads", fixtures.toolReads)
+    return get<Record<string, ToolRead[]>>("/api/tool-reads", fixtures.toolReads, {})
   },
   async getRecentActivity() {
-    return get<typeof fixtures.recentActivity>("/api/activity", fixtures.recentActivity)
+    return get<typeof fixtures.recentActivity>("/api/activity", fixtures.recentActivity, [])
   },
 
   /**
@@ -161,7 +229,7 @@ export const api = {
    * may never ask about their own folder.
    */
   async getMergeHints(): Promise<MergeHint[]> {
-    return get<MergeHint[]>("/api/merge-hints", [])
+    return get<MergeHint[]>("/api/merge-hints", [], [])
   },
 
   async merge(keepId: string, dropId: string): Promise<void> {
@@ -180,7 +248,7 @@ export const api = {
    * check rather than something they are asked to believe.
    */
   async getWork(): Promise<{ queued: number; working: number }> {
-    const health = await get<{ queued?: number; working?: number }>("/api/health", {})
+    const health = await get<{ queued?: number; working?: number }>("/api/health", {}, {})
     return { queued: health.queued ?? 0, working: health.working ?? 0 }
   },
 
@@ -217,7 +285,7 @@ export type ScanResult = Awaited<ReturnType<typeof api.scanFolder>>
  */
 export const tools = {
   async list(): Promise<AiTool[]> {
-    return get<AiTool[]>("/api/tools", [])
+    return get<AiTool[]>("/api/tools", [], [])
   },
 
   /** What would be written, so the owner agrees to something specific. */
@@ -298,4 +366,24 @@ export const background = {
   async setAutostart(on: boolean) {
     return post<AutostartState>(`/api/autostart/${on ? "on" : "off"}`)
   },
+}
+
+/**
+ * Names the company, in the lake rather than only on screen.
+ *
+ * Without this the name lives in one browser's memory: the gateway keeps
+ * calling them "Your company" in front of an AI tool, and the Claude
+ * Desktop extension is built under the wrong name.
+ */
+async function putCompanyName(name: string): Promise<void> {
+  if (!(await connected())) return
+  try {
+    await fetch(`${DAEMON}/api/company`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+  } catch {
+    /* the name is still correct on screen; the next save will carry it */
+  }
 }

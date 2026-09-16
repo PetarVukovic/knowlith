@@ -8,6 +8,23 @@ shows it. They talk over HTTP on `127.0.0.1`. With the daemon stopped the
 interface falls back to a demo company and says so in the status bar, so you
 can see what the product does before installing anything.
 
+## Testing it from nothing
+
+```sh
+sh scripts/reset.sh --yes                        # back to before it was installed
+sh scripts/full-test.sh                          # the test company, no provider, no cost
+sh scripts/full-test.sh ~/Documents/YourCompany  # your folder, your own AI command line
+sh scripts/verify-gateway.sh                     # what an AI tool actually sees
+```
+
+With no argument the compile replays recorded engine replies, so it costs
+nothing and gives the same numbers every time. With a folder it uses
+whichever AI command line is installed, on your own subscription, and says
+so before it starts.
+
+Neither approves anything. That is the product, so the run stops at the
+review queue and hands over.
+
 ## Install
 
 One command. Nothing is sent anywhere, nothing needs an administrator, and
@@ -308,6 +325,17 @@ Reading a folder, comparing documents and re-checking quotes are arithmetic
 and always run. The three jobs that call a model are the ones these govern —
 and a job that is held is **held**, not deferred, so a laptop left unplugged
 overnight does not age its own queue into failure.
+
+## The demo company
+
+There is one, and it has to be asked for: `?demo` in the address, or
+`VITE_KNOWLITH_DEMO=1`. Whenever the daemon answers, every screen shows
+that lake and nothing else — an endpoint that fails renders empty rather
+than falling back to a fixture, because another company's discount policy
+appearing on your screen is indistinguishable from the product working.
+
+With no daemon and no demo the screens are empty and the status bar says
+Knowlith is not running.
 
 ## Known limits
 

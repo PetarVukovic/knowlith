@@ -428,3 +428,36 @@ fn a_hint_whose_object_was_merged_away_stops_being_asked() {
     let counts = lake.merge_hint_counts().unwrap();
     assert!(counts.iter().any(|(state, n)| state == "merged" && *n == 1));
 }
+
+/// Approving with no text was accepted, and the gateway then served a
+/// heading with nothing under it — a rule an agent is told exists but not
+/// what it says. Found by approving through the API with the wrong field
+/// name, which is exactly how it would happen in the wild.
+#[test]
+fn an_approval_with_no_text_is_refused() {
+    let (mut lake, document) = lake_with_document();
+    let quote = "Popust od 5% odobrava se stalnim kupcima.";
+    lake.put_object(&object(
+        "rule:test",
+        ObjectKind::Rule,
+        vec![span(&document, quote)],
+        Vec::new(),
+    ))
+    .unwrap();
+
+    let empty = lake.approve("rule:test", "   \n\t ", "ana", false);
+    assert!(
+        matches!(empty, Err(LakeError::NoBody)),
+        "an empty body was accepted: {empty:?}"
+    );
+
+    // The object is untouched: still proposed, still the owner's to decide.
+    let stored = lake.object("rule:test").unwrap().unwrap();
+    assert_eq!(stored.status, ObjectStatus::Proposed);
+
+    // And a real body still goes through.
+    lake.approve("rule:test", "Popust je 5%.", "ana", false).unwrap();
+    let stored = lake.object("rule:test").unwrap().unwrap();
+    assert_eq!(stored.status, ObjectStatus::Approved);
+    assert_eq!(stored.body, "Popust je 5%.");
+}

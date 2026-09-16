@@ -75,7 +75,11 @@ export function Home() {
       : null,
   ].filter((x) => x !== null)
 
-  const healthy = attention.length === 0
+  // An empty lake has nothing waiting on the owner, which made it "healthy"
+  // — a green tick over a company that has not been read yet. Nothing and
+  // fine are different states and the page has to say which.
+  const empty = objects.length === 0 && sources.length === 0
+  const healthy = !empty && attention.length === 0
 
   return (
     <div className="mx-auto w-full max-w-[880px] px-4 py-8">
@@ -89,9 +93,11 @@ export function Home() {
             )}
           >
             {healthy ? <CheckCircle2 className="size-3.5" /> : null}
-            {healthy
-              ? "Company context is healthy"
-              : `Company context is in use, with ${attention.length} ${attention.length === 1 ? "thing" : "things"} waiting on you`}
+            {empty
+              ? "Nothing has been read yet. Point Knowlith at a folder to start."
+              : healthy
+                ? "Company context is healthy"
+                : `Company context is in use, with ${attention.length} ${attention.length === 1 ? "thing" : "things"} waiting on you`}
           </p>
         </div>
         <Button variant="default" onClick={() => navigate("/sources")}>

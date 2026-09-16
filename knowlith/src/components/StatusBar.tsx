@@ -1,5 +1,6 @@
 import { Check, CircleDot, Cpu, Loader2, Pause } from "lucide-react"
 import { Tooltip } from "@/components/ui/tooltip"
+import { showingDemo } from "@/lib/api"
 import { processorLabel } from "@/lib/processor"
 import { formatCount, formatRelative } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
@@ -23,13 +24,20 @@ export function StatusBar() {
           ? lastSync
             ? `Synced ${formatRelative(lastSync)}`
             : "Connected"
-          : "Example company — Knowlith is not running"}
+          : showingDemo()
+            ? "Example company — nothing here is real"
+            : "Knowlith is not running — start it with `knowlith serve`"}
       </span>
 
-      <span className="flex shrink-0 items-center gap-1.5">
-        <Cpu className="size-3 text-faint" />
-        {processorLabel(processor, mode)}
-      </span>
+      {/* With no folders there is nothing reading anything, and naming a
+          processor here told an owner with an empty lake that their
+          documents were being read in a cloud. */}
+      {active.length > 0 ? (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <Cpu className="size-3 text-faint" />
+          {processorLabel(processor, mode)}
+        </span>
+      ) : null}
 
       {/* The onboarding screen says "you can close this window — it keeps
           going". This is the line that makes that checkable rather than
