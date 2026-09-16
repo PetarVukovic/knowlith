@@ -132,10 +132,10 @@ pub struct SourceDto {
     pub access: &'static str,
     pub file_count: usize,
     pub bytes: u64,
-    pub last_sync: String,
-    pub processor: &'static str,
+    pub last_sync: Option<String>,
+    pub processor: String,
     pub status: String,
-    pub last_analyzed: String,
+    pub last_analyzed: Option<String>,
     pub changes_found: usize,
     pub conflicts_found: usize,
     pub file_types: Vec<FileTypeDto>,
@@ -485,6 +485,13 @@ pub struct BrowseDto {
     pub chosen: Option<String>,
     pub name: Option<String>,
     pub inventory: Option<knowlith_extract::inventory::Inventory>,
+}
+
+/// What the interface sends to pause or resume a folder.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceStatusChange {
+    pub paused: bool,
 }
 
 /// What the interface sends to add a folder.

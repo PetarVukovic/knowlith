@@ -190,11 +190,12 @@ export interface Source {
   access: "read-only" | "read-write"
   fileCount: number
   bytes: number
-  lastSync: string
+  /** Absent until the first walk has finished. */
+  lastSync: string | null
   processor: Processor
   status: "active" | "paused" | "scanning" | "error"
   /** When the compiler last ran over this source, which is later than lastSync. */
-  lastAnalyzed: string
+  lastAnalyzed: string | null
   /** Outcomes of that run — what an owner actually wants to know. */
   changesFound: number
   conflictsFound: number

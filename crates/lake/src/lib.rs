@@ -187,11 +187,53 @@ impl Lake {
     }
 
     pub fn mark_scanned(&self, source_id: &str) -> Result<()> {
+        // A walk that was already queued when the owner pressed Pause still
+        // finishes; finishing must not quietly un-pause the folder.
         self.conn.execute(
-            "UPDATE sources SET last_scan = ?2, status = 'active', last_error = NULL WHERE id = ?1",
+            "UPDATE sources SET last_scan = ?2, last_error = NULL,
+                    status = CASE WHEN status = 'paused' THEN 'paused' ELSE 'active' END
+             WHERE id = ?1",
             params![source_id, now()],
         )?;
         Ok(())
+    }
+
+    /// Pauses or resumes the reading of one folder. `false` when there is no
+    /// such source. A paused source is skipped by [`Lake::scan_targets`], so
+    /// this is the row the Sources screen's "Paused" badge rests on — for a
+    /// while the badge was set in the browser alone and the worker kept
+    /// reading.
+    pub fn set_source_paused(&self, source_id: &str, paused: bool) -> Result<bool> {
+        let status = if paused { "paused" } else { "active" };
+        let changed = self.conn.execute(
+            "UPDATE sources SET status = ?2 WHERE id = ?1",
+            params![source_id, status],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Stops reading a folder for good, without touching what was read.
+    ///
+    /// The row is kept rather than deleted: `documents` and `evidence`
+    /// cascade from `sources`, so a DELETE would pull the quotes out from
+    /// under every approved object — and an object with no quote is the one
+    /// thing this product refuses to show. A removed source is skipped by
+    /// [`Lake::scan_targets`] and hidden from the Sources screen; its name
+    /// still resolves in the Activity log. Adding the same folder again
+    /// revives it.
+    pub fn remove_source(&self, source_id: &str) -> Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE sources SET status = 'removed' WHERE id = ?1",
+            params![source_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Which engine each source was added with, by source id.
+    pub fn source_processors(&self) -> Result<std::collections::HashMap<String, String>> {
+        let mut stmt = self.conn.prepare_cached("SELECT id, processor FROM sources")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
     }
 
     // ---------------------------------------------------------- documents --
@@ -968,7 +1010,8 @@ impl Lake {
     /// was last read.
     pub fn scan_targets(&self) -> Result<Vec<ScanTarget>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, root, processor, last_scan FROM sources WHERE status <> 'paused' ORDER BY id",
+            "SELECT id, root, processor, last_scan FROM sources
+             WHERE status NOT IN ('paused', 'removed') ORDER BY id",
         )?;
         let rows = stmt
             .query_map([], |r| {

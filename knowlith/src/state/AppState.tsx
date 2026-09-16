@@ -353,12 +353,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setMergeHints((hints) => hints.filter((h) => h.keepId !== keepId || h.dropId !== dropId))
   }, [])
 
+  /**
+   * The badge follows the daemon, not the click. Flipping the row locally and
+   * telling the daemon nothing showed "Paused" over a folder the worker was
+   * still walking; now the row changes only once the daemon has recorded it,
+   * and "scanning" stays a local hint because the daemon has no such state.
+   */
   const setSourceStatus = useCallback((id: string, status: Source["status"]) => {
-    setSources((current) => current.map((s) => (s.id === id ? { ...s, status } : s)))
+    if (status === "scanning") {
+      setSources((current) => current.map((s) => (s.id === id ? { ...s, status } : s)))
+      return
+    }
+    void api.setSourcePaused(id, status === "paused").then((result) => {
+      if (!result) return
+      setSources((current) => current.map((s) => (s.id === id ? { ...s, status: result.status } : s)))
+    })
   }, [])
 
   const removeSource = useCallback((id: string) => {
-    setSources((current) => current.filter((s) => s.id !== id))
+    void api.removeSource(id).then((result) => {
+      if (!result) return
+      setSources((current) => current.filter((s) => s.id !== id))
+    })
   }, [])
 
   /**

@@ -26,7 +26,7 @@ use axum::extract::{Path, Request, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use knowlith_core::{ContextObject, Document, ObjectStatus};
 use knowlith_lake::Lake;
@@ -121,6 +121,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/objects/{id}/suggest", post(suggest_change))
         .route("/api/sources", get(sources).post(add_source))
         .route("/api/sources/{id}/rescan", post(rescan_source))
+        .route("/api/sources/{id}", delete(remove_source))
+        .route("/api/sources/{id}/status", put(set_source_status))
         .route("/api/sources/browse", post(browse))
         .route("/api/sources/preview", get(preview_source))
         .route("/api/skills", get(skills))
@@ -725,18 +727,33 @@ async fn add_source(
 
     // A folder already being watched is told so rather than added twice
     // under a second id, which would double every document in the lake.
-    for (id, existing_name, existing_root, _, _, _) in lake.sources().map_err(failed)? {
+    for (id, existing_name, existing_root, _, status, _) in lake.sources().map_err(failed)? {
         let same = knowlith_desktop::paths::real(std::path::Path::new(&existing_root))
             .is_ok_and(|real| real == path);
-        if same {
+        if !same {
+            continue;
+        }
+        // A folder the owner removed and now adds back: the old row keeps
+        // every quote its approved objects rest on, so revive it rather
+        // than reading everything a second time under a new id.
+        if status == "removed" {
+            lake.set_source_paused(&id, false).map_err(failed)?;
+            let queued = knowlith_worker::enqueue_rescan(&lake, &id, &existing_root).map_err(failed)?;
             return Ok(Json(SourceAddedDto {
                 id,
                 name: existing_name,
                 path: root,
-                queued: false,
-                already_known: true,
+                queued,
+                already_known: false,
             }));
         }
+        return Ok(Json(SourceAddedDto {
+            id,
+            name: existing_name,
+            path: root,
+            queued: false,
+            already_known: true,
+        }));
     }
 
     let id = source_id(&name, &root);
@@ -827,9 +844,13 @@ fn source_id(name: &str, root: &str) -> String {
 
 async fn sources(State(state): State<AppState>) -> ApiResult<Vec<SourceDto>> {
     let lake = state.lake.lock().map_err(failed)?;
+    let processors = lake.source_processors().map_err(failed)?;
 
     let mut out = Vec::new();
     for (id, name, root, kind, status, last_scan) in lake.sources().map_err(failed)? {
+        if status == "removed" {
+            continue;
+        }
         let mine = lake.documents_for_source(&id).map_err(failed)?;
         let mut types: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
         for document in &mine {
@@ -854,7 +875,10 @@ async fn sources(State(state): State<AppState>) -> ApiResult<Vec<SourceDto>> {
             .flatten()
             .and_then(|raw| serde_json::from_str::<SourceDigestDto>(&raw).ok());
 
-        let scanned = last_scan.unwrap_or_default();
+        // `None` when never read, not "" — the screen turned "" into
+        // "last read Invalid Date".
+        let scanned = last_scan.filter(|s| !s.is_empty());
+        let processor = processors.get(&id).cloned().unwrap_or_else(|| "codex".into());
         out.push(SourceDto {
             id,
             name,
@@ -866,7 +890,7 @@ async fn sources(State(state): State<AppState>) -> ApiResult<Vec<SourceDto>> {
             file_count: mine.len(),
             bytes: mine.iter().map(|d| d.byte_len).sum(),
             last_sync: scanned.clone(),
-            processor: "codex",
+            processor,
             status,
             last_analyzed: scanned,
             changes_found: waiting,
@@ -899,6 +923,44 @@ async fn rescan_source(
         } else {
             "A walk of this folder is already queued."
         },
+    })))
+}
+
+/// Pause or resume the reading of one folder.
+///
+/// Until this existed the Sources screen flipped its own badge and the worker
+/// kept walking — a "Paused" over a folder still being read.
+async fn set_source_status(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SourceStatusChange>,
+) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    if !lake.set_source_paused(&id, body.paused).map_err(failed)? {
+        return Err((StatusCode::NOT_FOUND, "that folder is not a source.".into()));
+    }
+    Ok(Json(serde_json::json!({
+        "status": if body.paused { "paused" } else { "active" },
+        "message": if body.paused {
+            "Knowlith will not read this folder until you resume it."
+        } else {
+            "Knowlith will read this folder again on its next pass."
+        },
+    })))
+}
+
+/// Stop reading a folder. Files on disk and approved context are untouched;
+/// see `Lake::remove_source` for why the row stays.
+async fn remove_source(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    if !lake.remove_source(&id).map_err(failed)? {
+        return Err((StatusCode::NOT_FOUND, "that folder is not a source.".into()));
+    }
+    Ok(Json(serde_json::json!({
+        "message": "Knowlith stopped reading this folder. What you approved from it stays in use.",
     })))
 }
 

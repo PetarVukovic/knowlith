@@ -29,7 +29,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Panel, PanelHeader } from "@/components/ui/surface"
@@ -129,13 +128,15 @@ export function Sources() {
                     <div className="mt-0.5 text-[12.5px] text-muted">
                       {source.kind === "nas" ? "Network folder" : "Folder on this Mac"}
                       {" · "}
-                      last read {formatRelative(source.lastAnalyzed)}
+                      {source.lastAnalyzed ? `last read ${formatRelative(source.lastAnalyzed)}` : "not read yet"}
                     </div>
                   )}
 
                   <div className="mt-3 grid gap-1 text-[12.5px]">
                     {mode === "engineer" ? (
-                      <span className="text-muted">Last analyzed {formatRelative(source.lastAnalyzed)}</span>
+                      <span className="text-muted">
+                        {source.lastAnalyzed ? `Last analyzed ${formatRelative(source.lastAnalyzed)}` : "Not analyzed yet"}
+                      </span>
                     ) : null}
                     {source.lastDigest && source.lastDigest.changed > 0 ? (
                       <span className="text-ink">
@@ -241,9 +242,6 @@ export function Sources() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent>
-                      <DropdownMenuItem>Change processor</DropdownMenuItem>
-                      <DropdownMenuItem>Exclude subfolders</DropdownMenuItem>
-                      <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className="text-conflict data-[highlighted]:bg-conflict-soft"
                         onSelect={() => setPendingRemoval(source)}

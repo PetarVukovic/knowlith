@@ -9,7 +9,7 @@ export function StatusBar() {
   const { sources, review, runs, mode, objects, live, work } = useApp()
   const active = sources.filter((s) => s.status === "active")
   const paused = sources.filter((s) => s.status === "paused")
-  const lastSync = active.map((s) => s.lastSync).sort().at(-1)
+  const lastSync = active.flatMap((s) => (s.lastSync ? [s.lastSync] : [])).sort().at(-1)
   const processor = active[0]?.processor ?? "managed"
   const lastRun = runs[0]
 
@@ -52,7 +52,7 @@ export function StatusBar() {
       {paused.length > 0 ? (
         <span className="flex shrink-0 items-center gap-1.5 text-pending">
           <Pause className="size-3" />
-          {paused.length} source paused
+          {paused.length} {paused.length === 1 ? "source" : "sources"} paused
         </span>
       ) : null}
 
