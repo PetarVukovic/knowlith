@@ -73,6 +73,8 @@ export function Brain() {
   } | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
+  const [kindFilter, setKindFilter] = useState<ObjectKind | "all">("all")
+
   const load = useCallback(async () => {
     const next = await brainApi.get()
     setData(next)
@@ -363,6 +365,10 @@ export function Brain() {
                 {(data.nodes ?? []).map((node) => {
                   const pos = positions.get(node.id)
                   if (!pos) return null
+                  const matches =
+                    kindFilter === "all" ||
+                    node.kind === kindFilter ||
+                    (kindFilter === "fact" && (node.kind === "term" || node.kind === "fact"))
                   const active = selection?.kind === "node" && selection.id === node.id
                   const hovered = hoverId === node.id
                   const showLabel = active || hovered
@@ -370,6 +376,7 @@ export function Brain() {
                     <g
                       key={node.id}
                       transform={`translate(${pos.x}, ${pos.y})`}
+                      opacity={matches ? 1 : 0.18}
                       className="cursor-grab active:cursor-grabbing"
                       onPointerEnter={() => setHoverId(node.id)}
                       onPointerLeave={() =>
@@ -479,6 +486,55 @@ export function Brain() {
                 Pick a node, then an assistant — live CLI opens here.
               </p>
             </div>
+
+            {data ? (
+              <div className="border-b border-line px-3 py-2.5">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-faint">
+                  Index
+                </div>
+                <ul className="mt-2 space-y-1">
+                  {(
+                    [
+                      ["all", "Everything", "#94a3b8"],
+                      ["rule", "Rules", "#3b82f6"],
+                      ["process", "Processes", "#10b981"],
+                      ["skill", "AI skills", "#f59e0b"],
+                      ["fact", "Terms & facts", "#8b5cf6"],
+                    ] as const
+                  ).map(([id, label, color]) => {
+                    const count =
+                      id === "all"
+                        ? data.nodes.length
+                        : data.nodes.filter((n) =>
+                            id === "fact"
+                              ? n.kind === "fact" || n.kind === "term"
+                              : n.kind === id,
+                          ).length
+                    const active = kindFilter === id
+                    return (
+                      <li key={id}>
+                        <button
+                          type="button"
+                          onClick={() => setKindFilter(id)}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px]",
+                            active ? "bg-accent-soft text-ink" : "text-muted hover:bg-surface-2",
+                          )}
+                        >
+                          <span
+                            className="size-2.5 shrink-0 rounded-full"
+                            style={{ background: color }}
+                            aria-hidden
+                          />
+                          <span className="min-w-0 flex-1 font-medium">{label}</span>
+                          <span className="tabular-nums text-faint">{count}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ) : null}
 
             <div className="min-h-0 flex-1 overflow-y-auto">
               {!selection ? (

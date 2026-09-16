@@ -13,9 +13,12 @@
 //! SQLite in WAL mode is built for exactly this: two connections to one
 //! file, one reading while the other writes.
 //!
-//! **One job at a time.** A second concurrent Codex process on one Mac
-//! doubles what the owner pays and finishes no sooner, because the bottleneck
-//! is somebody else's rate limit rather than this machine's cores.
+//! **Two tracks, a few CLI workers.** Folder walks must not wait behind a
+//! model, and a large company folder must not wait behind a single CLI
+//! cold-start. One I/O track walks and hashes; N AI tracks (default 2) each
+//! own one CLI child at a time and may pack several documents into that
+//! child. More workers mostly hit the provider's rate limit, not this Mac's
+//! cores — so the count is capped and owned by policy.
 //!
 //! **A lease is renewed, not assumed.** The engine call runs on its own
 //! thread so the loop can keep the lease alive while it waits. Without that,
@@ -29,12 +32,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use knowlith_core::Document;
 use knowlith_engine::{Engine, EngineError};
-use knowlith_extract::{ExtractError, extract_file, is_noise, is_secret};
+use knowlith_extract::{ExtractError, extract_file, is_noise};
 use knowlith_lake::{Lake, NewJob, PRIORITY_BACKGROUND, PRIORITY_NORMAL, ScanTarget};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
@@ -45,6 +49,20 @@ pub const KIND_SKILLS: &str = "draft_skills";
 pub const KIND_RECHECK: &str = "recheck";
 pub const KIND_RELATE: &str = "relate";
 pub const KIND_SETTLE: &str = "settle";
+
+const IO_KINDS: &[&str] = &[KIND_RESCAN, KIND_RECHECK];
+const AI_KINDS: &[&str] = &[KIND_COMPILE, KIND_SETTLE, KIND_RELATE, KIND_SKILLS];
+
+/// Which slice of the queue this worker drains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Track {
+    /// Everything — `work --once` and tests.
+    All,
+    /// Folder walks and quote rechecks. Never calls a model.
+    Io,
+    /// Compile / settle / relate / skills.
+    Ai,
+}
 
 /// How often the loop renews a lease it is still using.
 const HEARTBEAT: Duration = Duration::from_secs(5);
@@ -96,6 +114,7 @@ impl Tick {
 pub struct Worker {
     lake: Lake,
     engine: Arc<dyn Engine>,
+    track: Track,
     /// Kept so a rescan can tell whether a file it walked is the same one the
     /// lake already read.
     rescan_hours: i64,
@@ -116,9 +135,15 @@ impl Worker {
         Self {
             lake,
             engine,
+            track: Track::All,
             rescan_hours,
             power: None,
         }
+    }
+
+    pub fn track(mut self, track: Track) -> Self {
+        self.track = track;
+        self
     }
 
     /// Pins the power state, for tests.
@@ -138,10 +163,6 @@ impl Worker {
     }
 
     /// Runs until `stop` is set.
-    ///
-    /// Nothing here is async. The work is a child process and a SQLite file,
-    /// and wrapping either in a runtime would buy concurrency this
-    /// deliberately does not want.
     pub fn run(&mut self, stop: Arc<AtomicBool>) -> Result<()> {
         while !stop.load(Ordering::Relaxed) {
             let tick = self.tick(&stop)?;
@@ -152,51 +173,96 @@ impl Worker {
         Ok(())
     }
 
-    /// One turn: schedule what is due, then run at most one job.
+    /// One turn: schedule what is due, then run one job — or a compile batch.
     pub fn tick(&mut self, stop: &AtomicBool) -> Result<Tick> {
         let mut tick = Tick {
             scheduled: self.schedule_due()?,
             ..Tick::default()
         };
 
-        let Some(job) = self.lake.lease()? else {
+        let jobs = self.claim_work()?;
+        if jobs.is_empty() {
             return Ok(tick);
-        };
-        tick.ran = Some(job.kind.clone());
+        }
+        tick.ran = Some(jobs[0].kind.clone());
 
         // Expensive work is the owner's to allow. A job that needs a model
         // is put back down rather than deferred, because deferring ages it
         // towards `dead` and a laptop left unplugged overnight would wake
         // up having thrown its own queue away.
-        if needs_a_model(&job.kind) {
+        if needs_a_model(&jobs[0].kind) {
             if let Err(held) = self.lake.policy().may_run_ai(self.on_battery()) {
-                self.lake.hold(job.id, held.as_str())?;
+                for job in &jobs {
+                    self.lake.hold(job.id, held.as_str())?;
+                }
                 tick.outcome = Some(format!("held: {}", held.reason()));
                 return Ok(tick);
             }
         }
 
-        let outcome = self.dispatch(&job, stop);
+        let outcome = self.dispatch_jobs(&jobs, stop);
         match outcome {
-            Ok(note) => {
-                // Kept, not only printed. This sentence is the whole of
-                // what the owner is shown about work that went right.
-                self.lake.finish(job.id, &note)?;
-                tick.outcome = Some(note);
+            Ok(notes) => {
+                let mut summary = Vec::new();
+                for (job, note) in jobs.iter().zip(notes.into_iter()) {
+                    // Kept, not only printed. This sentence is the whole of
+                    // what the owner is shown about work that went right.
+                    self.lake.finish(job.id, &note)?;
+                    if !note.is_empty() {
+                        summary.push(note);
+                    }
+                }
+                tick.outcome = Some(if summary.len() <= 1 {
+                    summary.pop().unwrap_or_default()
+                } else {
+                    format!("{} docs · {}", summary.len(), summary.join(" · "))
+                });
             }
             // A network is not a failure. Wait longer, try again, say nothing
             // to the owner until it has stopped being temporary.
             Err(Failure::Transport(reason)) => {
-                let state = self.lake.defer(job.id, job.attempts, &reason)?;
-                tick.outcome = Some(format!("deferred ({state:?}): {reason}"));
+                let mut last = String::new();
+                for job in &jobs {
+                    let state = self.lake.defer(job.id, job.attempts, &reason)?;
+                    last = format!("deferred ({state:?}): {reason}");
+                }
+                tick.outcome = Some(last);
             }
             // Retrying changes nothing, so it stops here and is reported.
             Err(Failure::Refused(reason)) => {
-                self.lake.fail(job.id, &reason)?;
+                for job in &jobs {
+                    self.lake.fail(job.id, &reason)?;
+                }
                 tick.outcome = Some(format!("failed: {reason}"));
             }
         }
         Ok(tick)
+    }
+
+    /// Claims the next job for this track, packing compile jobs into a batch.
+    fn claim_work(&mut self) -> Result<Vec<knowlith_lake::Job>> {
+        let first = match self.track {
+            Track::All => self.lake.lease()?,
+            Track::Io => self.lake.lease_kinds(IO_KINDS)?,
+            Track::Ai => self.lake.lease_kinds(AI_KINDS)?,
+        };
+        let Some(first) = first else {
+            return Ok(Vec::new());
+        };
+
+        if first.kind != KIND_COMPILE {
+            return Ok(vec![first]);
+        }
+
+        let want = self.lake.policy().compile_batch_capped();
+        let mut jobs = vec![first];
+        while jobs.len() < want {
+            match self.lake.lease_kind(KIND_COMPILE)? {
+                Some(next) => jobs.push(next),
+                None => break,
+            }
+        }
+        Ok(jobs)
     }
 
     /// Enqueues a rescan for every source whose turn has come.
@@ -291,16 +357,31 @@ impl Worker {
             .unwrap_or_else(|| knowlith_desktop::power::power().on_battery())
     }
 
-    fn dispatch(&mut self, job: &knowlith_lake::Job, stop: &AtomicBool) -> std::result::Result<String, Failure> {
-        match job.kind.as_str() {
-            KIND_RESCAN => self.rescan(job),
-            KIND_COMPILE => self.compile_document(job, stop),
-            KIND_SKILLS => self.draft_skills(job, stop),
-            KIND_RECHECK => self.recheck(job),
-            KIND_RELATE => self.relate(job, stop),
-            KIND_SETTLE => self.settle(job),
-            other => Err(Failure::Refused(format!("no worker knows how to do \"{other}\""))),
+    fn dispatch_jobs(
+        &mut self,
+        jobs: &[knowlith_lake::Job],
+        stop: &AtomicBool,
+    ) -> std::result::Result<Vec<String>, Failure> {
+        if jobs.is_empty() {
+            return Ok(Vec::new());
         }
+        if jobs[0].kind == KIND_COMPILE {
+            return self.compile_documents(jobs, stop);
+        }
+        let job = &jobs[0];
+        let note = match job.kind.as_str() {
+            KIND_RESCAN => self.rescan(job)?,
+            KIND_SKILLS => self.draft_skills(job, stop)?,
+            KIND_RECHECK => self.recheck(job)?,
+            KIND_RELATE => self.relate(job, stop)?,
+            KIND_SETTLE => self.settle(job)?,
+            other => {
+                return Err(Failure::Refused(format!(
+                    "no worker knows how to do \"{other}\""
+                )));
+            }
+        };
+        Ok(vec![note])
     }
 
     // ------------------------------------------------------------- rescan --
@@ -374,6 +455,22 @@ impl Worker {
         }
 
         let _ = self.lake.mark_scanned(&payload.source_id);
+        // What changed this pass — so Sources can show "3 files changed"
+        // instead of a global inbox count stamped on every folder.
+        let digest = serde_json::json!({
+            "at": Utc::now().to_rfc3339(),
+            "walked": walked,
+            "changed": changed,
+            "unchanged": unchanged,
+            "unreadable": unreadable,
+            "settling": settling,
+            "secrets": secrets,
+        });
+        let _ = self.lake.set_setting(
+            &format!("source_digest:{}", payload.source_id),
+            &digest.to_string(),
+        );
+
         let mut note = format!(
             "{} · {changed} changed · {unchanged} unchanged · {unreadable} not readable",
             plural(walked, "file walked", "files walked")
@@ -401,46 +498,58 @@ impl Worker {
 
     // ------------------------------------------------------------ compile --
 
-    fn compile_document(
+    /// Stages 1 and 2 for one or more documents in a single CLI invoke.
+    ///
+    /// Each job stays individually leased and finished so the work panel and
+    /// idempotency keys keep talking about documents, not opaque batches.
+    fn compile_documents(
         &mut self,
-        job: &knowlith_lake::Job,
+        jobs: &[knowlith_lake::Job],
         stop: &AtomicBool,
-    ) -> std::result::Result<String, Failure> {
-        let payload: DocumentPayload = serde_json::from_str(&job.payload)
-            .map_err(|e| Failure::Refused(format!("this job has no document in it: {e}")))?;
-        let document = self
-            .lake
-            .document(&payload.document_id)
-            .map_err(|e| Failure::Refused(format!("{} is not in the lake: {e}", payload.document_id)))?;
-        let name = document.name.clone();
+    ) -> std::result::Result<Vec<String>, Failure> {
+        let mut loaded: Vec<(i64, Document)> = Vec::with_capacity(jobs.len());
+        for job in jobs {
+            let payload: DocumentPayload = serde_json::from_str(&job.payload)
+                .map_err(|e| Failure::Refused(format!("this job has no document in it: {e}")))?;
+            let document = self.lake.document(&payload.document_id).map_err(|e| {
+                Failure::Refused(format!("{} is not in the lake: {e}", payload.document_id))
+            })?;
+            loaded.push((job.id, document));
+        }
 
         let company = self.lake.setting("company_profile").ok().flatten();
         let engine = Arc::clone(&self.engine);
-        // Stages 1 and 2 only. What the engine says about this document is
+        let docs_for_engine: Vec<Document> = loaded.iter().map(|(_, d)| d.clone()).collect();
+        let job_ids: Vec<i64> = loaded.iter().map(|(id, _)| *id).collect();
+
+        // Stages 1 and 2 only. What the engine says about these documents is
         // stored as-is; deciding which claim is current happens once, over
         // everything, in `settle`.
-        let read = self.with_heartbeat(job.id, stop, move || {
-            let mut read = knowlith_compiler::Reading::default();
-            knowlith_compiler::read_one(&*engine, &document, &mut read, company.as_deref())
-                .map(|()| read)
+        let readings = self.with_heartbeat_many(&job_ids, stop, move || {
+            let refs: Vec<&Document> = docs_for_engine.iter().collect();
+            knowlith_compiler::read_many(&*engine, &refs, company.as_deref())
         })??;
 
-        let json: Vec<String> = read
-            .candidates
-            .iter()
-            .map(serde_json::to_string)
-            .collect::<std::result::Result<_, _>>()
-            .map_err(|e| Failure::Refused(e.to_string()))?;
-        let found = json.len();
-
-        self.lake
-            .put_candidates(&payload.document_id, &json)
-            .map_err(|e| Failure::Refused(e.to_string()))?;
-
-        Ok(format!(
-            "{name}: {found} claims · {} not read",
-            read.dropped.len()
-        ))
+        let mut notes = Vec::with_capacity(loaded.len());
+        for (_, document) in &loaded {
+            let read = readings.get(&document.id).cloned().unwrap_or_default();
+            let json: Vec<String> = read
+                .candidates
+                .iter()
+                .map(serde_json::to_string)
+                .collect::<std::result::Result<_, _>>()
+                .map_err(|e| Failure::Refused(e.to_string()))?;
+            let found = json.len();
+            self.lake
+                .put_candidates(&document.id, &json)
+                .map_err(|e| Failure::Refused(e.to_string()))?;
+            notes.push(format!(
+                "{}: {found} claims · {} not read",
+                document.name,
+                read.dropped.len()
+            ));
+        }
+        Ok(notes)
     }
 
     // ------------------------------------------------------------- settle --
@@ -605,10 +714,10 @@ impl Worker {
 
     // -------------------------------------------------------------- plumbing --
 
-    /// Runs `work` on its own thread, renewing the lease until it finishes.
-    fn with_heartbeat<T, F>(
+    /// Runs `work` on its own thread, renewing every lease until it finishes.
+    fn with_heartbeat_many<T, F>(
         &mut self,
-        job_id: i64,
+        job_ids: &[i64],
         stop: &AtomicBool,
         work: F,
     ) -> std::result::Result<T, Failure>
@@ -618,7 +727,7 @@ impl Worker {
     {
         let handle = std::thread::spawn(work);
         while !handle.is_finished() {
-            let _ = self.lake.heartbeat(job_id);
+            let _ = self.lake.heartbeat_many(job_ids);
             // Waited in small steps rather than one long sleep, so a job
             // that finishes in a millisecond is not charged five seconds of
             // latency by the thing watching it.
@@ -638,7 +747,22 @@ impl Worker {
                 continue;
             }
         }
-        handle.join().map_err(|_| Failure::Refused("the worker thread stopped without answering".into()))
+        handle
+            .join()
+            .map_err(|_| Failure::Refused("the worker thread stopped without answering".into()))
+    }
+
+    fn with_heartbeat<T, F>(
+        &mut self,
+        job_id: i64,
+        stop: &AtomicBool,
+        work: F,
+    ) -> std::result::Result<T, Failure>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        self.with_heartbeat_many(&[job_id], stop, work)
     }
 
     pub fn lake(&self) -> &Lake {
@@ -648,6 +772,57 @@ impl Worker {
     pub fn lake_mut(&mut self) -> &mut Lake {
         &mut self.lake
     }
+}
+
+/// Starts the I/O track plus N AI compile workers against one lake file.
+///
+/// Each thread opens its own lake connection. Callers own `stop` and join
+/// the handles on shutdown.
+pub fn spawn_pool(
+    db: &Path,
+    engine: Arc<dyn Engine>,
+    stop: Arc<AtomicBool>,
+) -> Result<Vec<JoinHandle<()>>> {
+    let workers = {
+        let lake = Lake::open(db)?;
+        lake.policy().compile_workers_capped()
+    };
+
+    let mut handles = Vec::with_capacity(workers + 1);
+
+    let io_db = db.to_path_buf();
+    let io_engine = Arc::clone(&engine);
+    let io_stop = Arc::clone(&stop);
+    handles.push(std::thread::spawn(move || {
+        match Worker::open(&io_db, io_engine) {
+            Ok(worker) => {
+                let mut worker = worker.track(Track::Io);
+                if let Err(e) = worker.run(io_stop) {
+                    eprintln!("the I/O worker stopped: {e}");
+                }
+            }
+            Err(e) => eprintln!("the I/O worker could not open the lake: {e}"),
+        }
+    }));
+
+    for index in 0..workers {
+        let ai_db = db.to_path_buf();
+        let ai_engine = Arc::clone(&engine);
+        let ai_stop = Arc::clone(&stop);
+        handles.push(std::thread::spawn(move || {
+            match Worker::open(&ai_db, ai_engine) {
+                Ok(worker) => {
+                    let mut worker = worker.track(Track::Ai);
+                    if let Err(e) = worker.run(ai_stop) {
+                        eprintln!("AI worker {index} stopped: {e}");
+                    }
+                }
+                Err(e) => eprintln!("AI worker {index} could not open the lake: {e}"),
+            }
+        }));
+    }
+
+    Ok(handles)
 }
 
 /// The two things that can go wrong, kept apart because they ask for

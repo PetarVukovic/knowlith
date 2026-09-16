@@ -191,7 +191,8 @@ fn a_client_can_initialize_and_list_everything() {
     assert_eq!(out.len(), 4, "a notification was answered: {out:#?}");
 
     assert_eq!(out[0]["result"]["protocolVersion"], "2025-11-25");
-    assert_eq!(out[0]["result"]["serverInfo"]["name"], "knowlith");
+    assert_eq!(out[0]["result"]["serverInfo"]["name"], "knowlith-termoval-d-o-o");
+    assert_eq!(out[0]["result"]["serverInfo"]["title"], "Termoval d.o.o. — company knowledge");
     assert!(out[0]["result"]["instructions"].as_str().unwrap().contains("Termoval"));
 
     let tools = out[1]["result"]["tools"].as_array().unwrap();

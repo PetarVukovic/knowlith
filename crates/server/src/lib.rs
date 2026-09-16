@@ -120,6 +120,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/review/{id}/reject", post(reject))
         .route("/api/objects/{id}/suggest", post(suggest_change))
         .route("/api/sources", get(sources).post(add_source))
+        .route("/api/sources/{id}/rescan", post(rescan_source))
         .route("/api/sources/browse", post(browse))
         .route("/api/sources/preview", get(preview_source))
         .route("/api/skills", get(skills))
@@ -303,27 +304,51 @@ struct Rename {
 ///
 /// Stored in the lake, so the gateway and the extension say the same thing
 /// without the daemon being restarted. `profile` is the schema hint for the
-/// compiler — what this firm is — not a display string.
+/// compiler — what this firm is — not a display string. A rename also
+/// rewrites connected MCP keys so Claude's connectors list keeps matching
+/// the lake.
 async fn rename_company(
     State(state): State<AppState>,
     Json(rename): Json<Rename>,
 ) -> ApiResult<Company> {
-    let lake = state.lake.lock().map_err(failed)?;
-    if let Some(name) = rename.name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        lake.set_company(name).map_err(failed)?;
-    } else if rename.profile.is_none() {
-        return Err((StatusCode::BAD_REQUEST, "a company needs a name".into()));
+    let (company, profile, name_changed) = {
+        let lake = state.lake.lock().map_err(failed)?;
+        let before = lake.company();
+        if let Some(name) = rename.name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            lake.set_company(name).map_err(failed)?;
+        } else if rename.profile.is_none() {
+            return Err((StatusCode::BAD_REQUEST, "a company needs a name".into()));
+        }
+        if let Some(profile) = rename.profile {
+            lake.set_setting("company_profile", profile.trim())
+                .map_err(failed)?;
+        }
+        let company = lake.company();
+        let profile = lake
+            .setting("company_profile")
+            .map_err(failed)?
+            .unwrap_or_default();
+        let name_changed = company != before;
+        (company, profile, name_changed)
+    };
+
+    if name_changed {
+        let _ = knowlith_desktop::rekey_all(&company);
     }
-    if let Some(profile) = rename.profile {
-        lake.set_setting("company_profile", profile.trim())
-            .map_err(failed)?;
+    // Standing instructions name the company and (when set) what it is —
+    // rewrite them whenever either field moves, for every app that has them.
+    for guide in [
+        knowlith_desktop::Guide::Codex,
+        knowlith_desktop::Guide::ClaudeCode,
+        knowlith_desktop::Guide::Cursor,
+    ] {
+        if knowlith_desktop::guidance::present(guide) {
+            let _ = knowlith_desktop::guidance::write(guide, &company, &profile);
+        }
     }
-    let profile = lake
-        .setting("company_profile")
-        .map_err(failed)?
-        .unwrap_or_default();
+
     Ok(Json(Company {
-        name: lake.company(),
+        name: company,
         profile,
     }))
 }
@@ -778,21 +803,10 @@ fn source_id(name: &str, root: &str) -> String {
 
 async fn sources(State(state): State<AppState>) -> ApiResult<Vec<SourceDto>> {
     let lake = state.lake.lock().map_err(failed)?;
-    let documents = lake.documents().map_err(failed)?;
-    let objects = lake.objects().map_err(failed)?;
-
-    let waiting = objects
-        .iter()
-        .filter(|o| o.status == ObjectStatus::Proposed)
-        .count();
-    let conflicts = objects
-        .iter()
-        .filter(|o| o.status == ObjectStatus::Conflicted)
-        .count();
 
     let mut out = Vec::new();
     for (id, name, root, kind, status, last_scan) in lake.sources().map_err(failed)? {
-        let mine: Vec<&Document> = documents.iter().collect();
+        let mine = lake.documents_for_source(&id).map_err(failed)?;
         let mut types: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
         for document in &mine {
             let ext = document
@@ -807,6 +821,14 @@ async fn sources(State(state): State<AppState>) -> ApiResult<Vec<SourceDto>> {
             .map(|(ext, count)| FileTypeDto { ext, count })
             .collect();
         file_types.sort_by_key(|entry| std::cmp::Reverse(entry.count));
+
+        let waiting = lake.proposed_count_for_source(&id).unwrap_or(0);
+        let conflicts = lake.conflict_count_for_source(&id).unwrap_or(0);
+        let last_digest = lake
+            .setting(&format!("source_digest:{id}"))
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<SourceDigestDto>(&raw).ok());
 
         let scanned = last_scan.unwrap_or_default();
         out.push(SourceDto {
@@ -826,9 +848,34 @@ async fn sources(State(state): State<AppState>) -> ApiResult<Vec<SourceDto>> {
             changes_found: waiting,
             conflicts_found: conflicts,
             file_types,
+            last_digest,
         });
     }
     Ok(Json(out))
+}
+
+async fn rescan_source(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let Some((_, _, root, _, _, _)) = lake
+        .sources()
+        .map_err(failed)?
+        .into_iter()
+        .find(|(sid, ..)| sid == &id)
+    else {
+        return Err((StatusCode::NOT_FOUND, "that folder is not a source.".into()));
+    };
+    let queued = knowlith_worker::enqueue_rescan(&lake, &id, &root).map_err(failed)?;
+    Ok(Json(serde_json::json!({
+        "queued": queued,
+        "message": if queued {
+            "Knowlith will walk this folder again and show what changed."
+        } else {
+            "A walk of this folder is already queued."
+        },
+    })))
 }
 
 /// The skills drafted from approved knowledge.
@@ -1436,11 +1483,15 @@ fn app_named(slug: &str) -> std::result::Result<knowlith_desktop::App, (StatusCo
 }
 
 /// What connecting would write, so the owner sees it before agreeing.
-async fn preview_app(Path(app): Path<String>) -> ApiResult<serde_json::Value> {
+async fn preview_app(
+    State(state): State<AppState>,
+    Path(app): Path<String>,
+) -> ApiResult<serde_json::Value> {
     let app = app_named(&app)?;
+    let company = state.lake.lock().map_err(failed)?.company();
     Ok(Json(serde_json::json!({
         "configPath": app.config_file().as_deref().map(knowlith_desktop::paths::display),
-        "snippet": knowlith_desktop::connect::manual_instructions(app),
+        "snippet": knowlith_desktop::connect::manual_instructions(app, &company),
         "refreshHint": app.refresh_hint(),
     })))
 }
@@ -1450,7 +1501,17 @@ async fn connect_app(
     Path(app): Path<String>,
 ) -> ApiResult<serde_json::Value> {
     let app = app_named(&app)?;
-    let status = knowlith_desktop::connect(app).map_err(|e| (StatusCode::CONFLICT, e.to_string()))?;
+    let (company, profile) = {
+        let lake = state.lake.lock().map_err(failed)?;
+        let company = lake.company();
+        let profile = lake
+            .setting("company_profile")
+            .map_err(failed)?
+            .unwrap_or_default();
+        (company, profile)
+    };
+    let status = knowlith_desktop::connect(app, &company)
+        .map_err(|e| (StatusCode::CONFLICT, e.to_string()))?;
 
     // The standing instruction is what makes the agent reach for the company
     // unprompted. Failing to write it does not undo the connection, so it is
@@ -1462,12 +1523,13 @@ async fn connect_app(
         knowlith_desktop::App::ClaudeDesktop => None,
     };
     let guidance = guide
-        .map(|guide| knowlith_desktop::guidance::write(guide, &state.company).is_ok())
+        .map(|guide| knowlith_desktop::guidance::write(guide, &company, &profile).is_ok())
         .unwrap_or(false);
 
     Ok(Json(serde_json::json!({
         "connected": status.connected,
         "configPath": status.config_path,
+        "serverKey": status.server_key,
         "refreshHint": status.refresh_hint,
         "needsRestart": status.needs_restart,
         "running": status.running,
@@ -1558,7 +1620,16 @@ async fn try_in_app(
 
 /// Builds the Claude Desktop extension and, by default, opens it.
 async fn build_bundle(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
-    let icon = serde_json::to_value(knowlith_desktop::company_icon(&state.company)).map_err(failed)?;
+    let (company, profile) = {
+        let lake = state.lake.lock().map_err(failed)?;
+        let company = lake.company();
+        let profile = lake
+            .setting("company_profile")
+            .map_err(failed)?
+            .unwrap_or_default();
+        (company, profile)
+    };
+    let icon = serde_json::to_value(knowlith_desktop::company_icon(&company)).map_err(failed)?;
     let tools: Vec<(String, String)> = knowlith_mcp::tools::catalogue(&icon)
         .into_iter()
         .map(|entry| (text_of(&entry, "name"), text_of(&entry, "description")))
@@ -1579,7 +1650,8 @@ async fn build_bundle(State(state): State<AppState>) -> ApiResult<serde_json::Va
     };
 
     let built = knowlith_desktop::bundle::build(&knowlith_desktop::bundle::Contents {
-        company: &state.company,
+        company: &company,
+        profile: &profile,
         tools,
         prompts,
     })
@@ -1706,9 +1778,12 @@ async fn write_policy(
     Json(mut policy): Json<knowlith_lake::Policy>,
 ) -> ApiResult<PolicyDto> {
     policy.engine = normalize_engine_preference(&policy.engine);
+    policy.compile_workers = policy.compile_workers_capped();
+    policy.compile_batch_size = policy.compile_batch_capped();
     let engine_restart = {
         let lake = state.lake.lock().map_err(failed)?;
-        let previous = normalize_engine_preference(&lake.policy().engine);
+        let previous = lake.policy();
+        let previous_engine = normalize_engine_preference(&previous.engine);
         lake.set_policy(&policy).map_err(failed)?;
         // Turning automatic reading back on should start the work that was
         // waiting for exactly that, without the owner pressing a second
@@ -1716,9 +1791,14 @@ async fn write_policy(
         if policy.processing == knowlith_lake::Processing::Automatic {
             let _ = lake.release_held();
         }
-        if previous != policy.engine {
+        if previous_engine != policy.engine {
             Some(
                 "Restart Knowlith for the new reader to take effect on queued work. The choice is saved."
+                    .into(),
+            )
+        } else if previous.compile_workers_capped() != policy.compile_workers {
+            Some(
+                "Restart Knowlith for the new worker count to take effect. The choice is saved."
                     .into(),
             )
         } else {

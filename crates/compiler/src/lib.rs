@@ -31,7 +31,7 @@ use knowlith_core::object::{Relation, RelationOrigin, RelationType, Subtype};
 use knowlith_core::{Confidence, ContextObject, Document, Evidence, ObjectKind, ObjectStatus};
 use knowlith_engine::{Engine, EngineError};
 
-pub use candidates::{Candidate, CANDIDATE_SCHEMA, INSTRUCTIONS};
+pub use candidates::{Candidate, CANDIDATE_SCHEMA, INSTRUCTIONS, propose_many};
 pub use consolidate::{Conflict, Group};
 pub use relations::{ProposedEdge, RELATION_INSTRUCTIONS, RELATION_SCHEMA, RelationRun, edge_pair, propose as propose_relations};
 pub use similar::{Hint, HintKind, hints};
@@ -103,7 +103,7 @@ pub fn compile(engine: &dyn Engine, documents: &[Document]) -> Result<Compilatio
 }
 
 /// What one document's reading produced. Stages 1 and 2 only.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Reading {
     pub candidates: Vec<Candidate>,
     pub dropped: Vec<Dropped>,
@@ -147,6 +147,64 @@ pub fn read_one(
         Err(e) => return Err(e),
     }
     Ok(())
+}
+
+/// Stages 1 and 2 over several documents in one CLI invoke.
+///
+/// Structural skips stay free. Everything that needs a model shares one
+/// child process so a folder of hundreds of files is not hundreds of cold
+/// starts. Settle still waits for the whole compile queue to drain.
+pub fn read_many(
+    engine: &dyn Engine,
+    documents: &[&Document],
+    company: Option<&str>,
+) -> Result<HashMap<String, Reading>> {
+    let mut out: HashMap<String, Reading> = HashMap::new();
+    let mut need_model: Vec<&Document> = Vec::new();
+
+    for document in documents {
+        let mut reading = Reading::default();
+        if let Some(skip) = classify(document) {
+            reading.dropped.push(Dropped {
+                document: document.name.clone(),
+                title: String::new(),
+                reason: skip.reason().to_string(),
+            });
+            out.insert(document.id.clone(), reading);
+            continue;
+        }
+        need_model.push(*document);
+        out.insert(document.id.clone(), reading);
+    }
+
+    if need_model.is_empty() {
+        return Ok(out);
+    }
+
+    match candidates::propose_many(engine, &need_model, company) {
+        Ok(by_id) => {
+            for document in need_model {
+                let reading = out.entry(document.id.clone()).or_default();
+                reading.documents_read = 1;
+                if let Some(found) = by_id.get(&document.id) {
+                    reading.candidates = found.clone();
+                }
+            }
+        }
+        Err(CompileError::Engine(e)) if !e.is_retryable() => {
+            for document in need_model {
+                let reading = out.entry(document.id.clone()).or_default();
+                reading.dropped.push(Dropped {
+                    document: document.name.clone(),
+                    title: String::new(),
+                    reason: format!("{e}"),
+                });
+            }
+        }
+        Err(e) => return Err(e),
+    }
+
+    Ok(out)
 }
 
 /// Stages 3 and 4: the deterministic half, over the whole set at once.

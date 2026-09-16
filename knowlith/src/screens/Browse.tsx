@@ -41,7 +41,18 @@ export function Browse() {
 
   const rows = useMemo(() => {
     const list: Row[] = []
+    const skillIds = new Set(skills.map((s) => s.id))
     for (const o of objects) {
+      // Skills arrive both in `objects` and `skills` — list them once, via
+      // the skills endpoint, so the same procedure is not two cards.
+      if (o.kind === "skill") continue
+      // When an AI skill already exists for a process, the process stays in
+      // Rules/Processes filters only — the Skills tab shows the runnable form.
+      if (o.kind === "process") {
+        const rest = o.id.includes(":") ? o.id.slice(o.id.indexOf(":") + 1) : o.id
+        // Prefer the runnable AI skill in All / Skills; Processes tab still lists it.
+        if (skillIds.has(`skill:${rest}`) && (filter === "all" || filter === "skill")) continue
+      }
       const kind: ObjectKind = o.kind === "term" ? "fact" : o.kind
       list.push({
         id: o.id,
@@ -64,7 +75,7 @@ export function Browse() {
     }
     list.sort((a, b) => a.title.localeCompare(b.title))
     return list
-  }, [objects, skills])
+  }, [objects, skills, filter])
 
   const q = query.trim().toLowerCase()
   const visible = rows.filter((row) => {

@@ -71,8 +71,11 @@ impl Request {
         self
     }
 
-    /// What the engine actually sends: instructions, then the document, then
-    /// the schema if the engine cannot enforce one natively.
+    /// What the engine actually sends: instructions, then the document(s),
+    /// then the schema if the engine cannot enforce one natively.
+    ///
+    /// When `input` already carries `<document` fences (a multi-doc batch),
+    /// it is appended as-is so the CLI still sees one prompt, one process.
     pub fn prompt(&self, schema_is_native: bool) -> String {
         let mut out = String::with_capacity(self.instructions.len() + self.input.len() + 256);
         out.push_str(&self.instructions);
@@ -82,9 +85,17 @@ impl Request {
                 out.push_str(schema);
             }
         }
-        out.push_str("\n\n<document>\n");
-        out.push_str(&self.input);
-        out.push_str("\n</document>\n");
+        if self.input.contains("<document") {
+            out.push_str("\n\n");
+            out.push_str(&self.input);
+            if !self.input.ends_with('\n') {
+                out.push('\n');
+            }
+        } else {
+            out.push_str("\n\n<document>\n");
+            out.push_str(&self.input);
+            out.push_str("\n</document>\n");
+        }
         out
     }
 }

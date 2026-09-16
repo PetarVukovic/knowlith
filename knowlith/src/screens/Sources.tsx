@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   AlertTriangle,
   Cloud,
@@ -32,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Panel, PanelHeader } from "@/components/ui/surface"
+import { api } from "@/lib/api"
 import { processorLabel } from "@/lib/processor"
 import type { Processor, Source } from "@/lib/types"
 import { formatBytes, formatCount, formatRelative } from "@/lib/utils"
@@ -53,10 +55,22 @@ const STATUS_TONE = {
 } as const
 
 export function Sources() {
-  const { sources, setSourceStatus, removeSource, runs, mode } = useApp()
+  const { sources, setSourceStatus, removeSource, runs, mode, refresh } = useApp()
+  const navigate = useNavigate()
   const [pendingRemoval, setPendingRemoval] = useState<Source | null>(null)
   const [adding, setAdding] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [rescanning, setRescanning] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+
+  const readAgain = async (source: Source) => {
+    setRescanning(source.id)
+    setSourceStatus(source.id, "scanning")
+    const result = await api.rescanSource(source.id)
+    setNote(result?.message ?? "Walk queued.")
+    setRescanning(null)
+    void refresh()
+  }
 
   return (
     <div className="mx-auto w-full max-w-[880px] px-4 py-8">
@@ -74,6 +88,12 @@ export function Sources() {
           Add source
         </Button>
       </div>
+
+      {note ? (
+        <p className="mt-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-[12.5px] text-muted">
+          {note}
+        </p>
+      ) : null}
 
       <div className="mt-6 grid gap-3">
         {sources.map((source) => {
@@ -117,13 +137,33 @@ export function Sources() {
                     {mode === "engineer" ? (
                       <span className="text-muted">Last analyzed {formatRelative(source.lastAnalyzed)}</span>
                     ) : null}
+                    {source.lastDigest && source.lastDigest.changed > 0 ? (
+                      <span className="text-ink">
+                        Last walk found {source.lastDigest.changed}{" "}
+                        {source.lastDigest.changed === 1 ? "file" : "files"} changed
+                        {source.lastDigest.unchanged > 0
+                          ? ` · ${source.lastDigest.unchanged} unchanged`
+                          : ""}
+                        {" · "}
+                        {formatRelative(source.lastDigest.at)}
+                      </span>
+                    ) : null}
                     <span className={source.changesFound > 0 ? "text-ink" : "text-muted"}>
                       {source.changesFound > 0
-                        ? `${source.changesFound} ${source.changesFound === 1 ? "update" : "updates"} waiting in Inbox`
+                        ? `${source.changesFound} ${source.changesFound === 1 ? "update" : "updates"} waiting for your approval`
                         : mode === "engineer"
                           ? "No context changes found"
-                          : "Nothing new since last read"}
+                          : "Nothing new waiting for approval"}
                     </span>
+                    {source.changesFound > 0 ? (
+                      <button
+                        type="button"
+                        className="w-fit text-left text-accent underline-offset-4 hover:underline"
+                        onClick={() => navigate("/review")}
+                      >
+                        Review what changed
+                      </button>
+                    ) : null}
                     {source.conflictsFound > 0 ? (
                       <span className="flex items-center gap-1.5 text-conflict">
                         <GitMerge className="size-3.5" />
@@ -182,12 +222,16 @@ export function Sources() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => {
-                      setSourceStatus(source.id, "scanning")
-                      setTimeout(() => setSourceStatus(source.id, "active"), 1400)
-                    }}
+                    disabled={rescanning === source.id}
+                    onClick={() => void readAgain(source)}
                   >
-                    <RefreshCw className={source.status === "scanning" ? "animate-spin" : undefined} />
+                    <RefreshCw
+                      className={
+                        source.status === "scanning" || rescanning === source.id
+                          ? "animate-spin"
+                          : undefined
+                      }
+                    />
                     Read again
                   </Button>
                   <DropdownMenu>

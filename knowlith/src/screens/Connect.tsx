@@ -80,15 +80,17 @@ function Use({ tool }: { tool: AiTool }) {
 }
 
 /** The verb on the button, which is never just "Connect". */
-function verb(tool: AiTool): string {
+function verb(tool: AiTool, company: string): string {
   if (tool.state === "needs-attention") return "Repair"
   if (tool.state === "connected") return tool.running ? "Open" : "Open"
-  return tool.slug === "claude-desktop" ? "Install in Claude" : "Add Knowlith"
+  if (tool.slug === "claude-desktop") return "Install in Claude"
+  const name = company.trim() && company !== "Your company" ? company : "company knowledge"
+  return `Add ${name}`
 }
 
 export function Connect() {
   const navigate = useNavigate()
-  const { firstRun, setFirstRun, companyName } = useApp()
+  const { firstRun, setFirstRun, companyName, objects } = useApp()
 
   const [tools, setTools] = useState<AiTool[] | null>(null)
   const [preview, setPreview] = useState<{ slug: string; body: ConnectPreview } | null>(null)
@@ -116,7 +118,13 @@ export function Connect() {
         return
       }
       setBusy(tool.slug)
-      const result = await toolsApi.open(tool.slug)
+      // Open with a ready question in the composer — empty Open left owners
+      // staring at a blank chat with no reason to reach for Knowlith.
+      const prompt =
+        objects.find((o) => o.status === "approved") != null
+          ? `What does ${companyName} say that I should check before I answer a customer?`
+          : `Using the ${companyName} knowledge server, what has been approved so far?`
+      const result = await toolsApi.try(tool.slug, prompt)
       setNote(result?.message ?? null)
       setBusy(null)
       void refresh()
@@ -228,7 +236,7 @@ export function Connect() {
                       ) : (
                         <Check />
                       )}
-                      {verb(tool)}
+                      {verb(tool, companyName)}
                     </Button>
                   ) : (
                     <span className="shrink-0 text-[12px] text-faint">Not installed here</span>

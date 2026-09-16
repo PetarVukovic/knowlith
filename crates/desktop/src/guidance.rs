@@ -54,11 +54,17 @@ impl Guide {
 /// Short on purpose. It competes for attention with everything else in the
 /// owner's instructions file, and a page of guidance about one MCP server
 /// is a page the agent will skim.
-pub fn block(company: &str) -> String {
+pub fn block(company: &str, profile: &str) -> String {
+    let key = crate::connect::server_key(company);
+    let about = match profile.trim() {
+        "" => String::new(),
+        text => format!("What this company is: {text}\n\n"),
+    };
     format!(
         "{BEGIN}\n\
          ## {company}'s own knowledge\n\n\
-         The `knowlith` MCP server holds this company's approved rules, prices, procedures and \
+         {about}\
+         The `{key}` MCP server holds this company's approved rules, prices, procedures and \
          vocabulary. When a question touches how {company} works, it is the source — more \
          authoritative than this file, than the repository, and than anything you already know.\n\n\
          - Begin a real piece of work with `get_relevant_context`, which lists everything the \
@@ -77,14 +83,14 @@ pub fn block(company: &str) -> String {
 /// Adds or replaces the block, leaving the rest of the file alone.
 ///
 /// Returns the path written.
-pub fn write(guide: Guide, company: &str) -> std::io::Result<PathBuf> {
+pub fn write(guide: Guide, company: &str, profile: &str) -> std::io::Result<PathBuf> {
     let path = guide.path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
 
     let existing = fs::read_to_string(&path).unwrap_or_default();
-    let updated = replace(&existing, &block(company));
+    let updated = replace(&existing, &block(company, profile));
     atomically(&path, &updated)?;
     Ok(path)
 }
@@ -156,17 +162,24 @@ mod tests {
 
     #[test]
     fn the_block_says_the_three_things_that_change_behaviour() {
-        let text = block("Termoval d.o.o.");
+        let text = block("Termoval d.o.o.", "");
         assert!(text.contains("get_relevant_context"));
         assert!(text.contains("check_coverage"));
         assert!(text.contains("lookup_value"));
         assert!(text.contains("open question"));
+        assert!(text.contains("`knowlith-termoval-d-o-o`"));
         assert!(text.starts_with(BEGIN) && text.ends_with(END));
     }
 
     #[test]
+    fn the_block_names_what_the_company_is_when_the_owner_said_so() {
+        let text = block("bb", "HVAC installer for Croatian SMBs.");
+        assert!(text.contains("What this company is: HVAC installer for Croatian SMBs."));
+    }
+
+    #[test]
     fn writing_into_an_empty_file_produces_only_the_block() {
-        let out = replace("", &block("Termoval"));
+        let out = replace("", &block("Termoval", ""));
         assert!(out.starts_with(BEGIN));
         assert_eq!(out.matches(BEGIN).count(), 1);
     }
@@ -174,19 +187,19 @@ mod tests {
     #[test]
     fn the_owners_own_instructions_survive() {
         let mine = "# My rules\n\nAlways write tests first.\n";
-        let once = replace(mine, &block("Termoval"));
+        let once = replace(mine, &block("Termoval", ""));
         assert!(once.contains("Always write tests first."));
 
         // And writing twice does not leave two blocks.
-        let twice = replace(&once, &block("Termoval"));
+        let twice = replace(&once, &block("Termoval", ""));
         assert_eq!(twice.matches(BEGIN).count(), 1, "{twice}");
         assert!(twice.contains("Always write tests first."));
     }
 
     #[test]
     fn a_block_in_the_middle_is_replaced_without_moving_what_is_around_it() {
-        let mine = format!("# Top\n\n{}\n\n# Bottom\n", block("Old Co"));
-        let updated = replace(&mine, &block("New Co"));
+        let mine = format!("# Top\n\n{}\n\n# Bottom\n", block("Old Co", ""));
+        let updated = replace(&mine, &block("New Co", ""));
         assert!(updated.contains("# Top"));
         assert!(updated.contains("# Bottom"));
         assert!(updated.contains("New Co"));
@@ -196,7 +209,7 @@ mod tests {
     #[test]
     fn removing_leaves_the_file_as_it_was() {
         let mine = "# My rules\n\nAlways write tests first.\n";
-        let with = replace(mine, &block("Termoval"));
+        let with = replace(mine, &block("Termoval", ""));
         assert_eq!(without_block(&with).trim(), mine.trim());
     }
 

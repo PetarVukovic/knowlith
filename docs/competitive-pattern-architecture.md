@@ -270,6 +270,9 @@ existing try deep links + CLI spawn.
 - **Write-settle** (3s mtime debounce) in `knowlith-worker` rescan before extract.
 - **Company profile** in Settings → lake `company_profile` → compiler stage-2 instructions.
 - **Cursor** as a first-class AI tool (`~/.cursor/mcp.json` + rules guidance).
+- **Dual-track workers + CLI batch compile**: one I/O track (rescan/recheck) and N AI
+  tracks (default 2, max 4) packing up to `compileBatchSize` documents (default 8)
+  into one local CLI invoke — no external HTTP API when the engine is a CLI.
 
 When the remaining items are decided, replace open checkboxes with a dated
 implementation plan and link it from `tasks/todo.md`.

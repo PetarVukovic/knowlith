@@ -23,13 +23,53 @@ use serde_json::{Map, Value, json};
 use crate::apps::{App, Format};
 use crate::paths;
 
-/// The name the owner sees after the slash in their chat box.
+/// The key used before connectors listed the company by name.
 ///
-/// Deliberately the product name and not the company's: two companies that
-/// both use Knowlith should be able to compare notes, and a slash command
-/// that differs per install is one nobody can help anybody else with. The
-/// company's identity arrives as the icon and the titles, not as the prefix.
-pub const SERVER_NAME: &str = "knowlith";
+/// Still recognised on read and removed on write, so an older install that
+/// says `knowlith` (or a bare company name from a brief interim) becomes
+/// `knowlith-<company>` the next time Connect is pressed — without asking
+/// the owner to edit JSON by hand.
+pub const LEGACY_SERVER_NAME: &str = "knowlith";
+
+/// Kept so older callers compile; prefer [`server_key`].
+pub const SERVER_NAME: &str = LEGACY_SERVER_NAME;
+
+/// What Claude / Cursor / Codex show in their connectors list.
+///
+/// The list label *is* the `mcpServers` key. Form is `knowlith-<company>`
+/// so the product stays recognisable and two companies on one machine do
+/// not collide. Empty / placeholder names fall back to the legacy product
+/// key rather than inventing a label the owner did not choose.
+pub fn server_key(company: &str) -> String {
+    let trimmed = company.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("your company") {
+        return LEGACY_SERVER_NAME.to_string();
+    }
+    format!("knowlith-{}", company_slug(trimmed))
+}
+
+/// Company name as a connector-safe suffix: lowercase, no diacritics, no
+/// spaces. `Termoval d.o.o.` → `termoval-d-o-o`.
+fn company_slug(company: &str) -> String {
+    let folded: String = company
+        .chars()
+        .flat_map(|c| c.to_lowercase())
+        .map(|c| match c {
+            'č' | 'ć' => 'c',
+            'ž' => 'z',
+            'š' => 's',
+            'đ' => 'd',
+            c if c.is_ascii_alphanumeric() => c,
+            _ => '-',
+        })
+        .collect();
+    let joined: Vec<&str> = folded.split('-').filter(|p| !p.is_empty()).take(8).collect();
+    if joined.is_empty() {
+        "company".to_string()
+    } else {
+        joined.join("-")
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
@@ -71,6 +111,10 @@ pub struct Status {
     /// Where the answer came from, so an owner who wants to check can.
     pub config_path: Option<String>,
     pub connected: bool,
+    /// The key currently sitting in the client's server list, when any —
+    /// usually the company name, or `knowlith` on an older install.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_key: Option<String>,
     /// Set when the config names a `knowlith` binary that is not this one.
     /// After an upgrade that moves the binary, the entry is still there and
     /// still says "connected" while pointing at a file that no longer
@@ -90,10 +134,11 @@ pub fn status_all() -> Vec<Status> {
 
 pub fn status(app: App) -> Status {
     let config = app.config_file();
-    let recorded = config.as_deref().and_then(|path| recorded_command(app, path));
+    let recorded = config.as_deref().and_then(|path| recorded_entry(app, path));
     let expected = paths::binary();
     let stale = recorded
         .as_ref()
+        .map(|(_, command)| command)
         .filter(|command| !same_program(command, &expected))
         .cloned();
 
@@ -104,6 +149,7 @@ pub fn status(app: App) -> Status {
         installed: app.installed(),
         config_path: config.as_deref().map(paths::display),
         connected: recorded.is_some(),
+        server_key: recorded.map(|(key, _)| key),
         stale_command: stale,
         needs_restart: app.needs_restart(),
         refresh_hint: app.refresh_hint(),
@@ -111,26 +157,26 @@ pub fn status(app: App) -> Status {
     }
 }
 
-/// Adds Knowlith to an application's server list, or updates the entry to
-/// point at this binary.
+/// Adds Knowlith to an application's server list under the company name.
 ///
-/// Idempotent: connecting an already-connected application rewrites the same
-/// entry and reports success, which is what makes the button in the
-/// interface safe to press twice.
-pub fn connect(app: App) -> Result<Status> {
+/// Idempotent: connecting an already-connected application rewrites the
+/// entry (and migrates a legacy `knowlith` key) and reports success, which
+/// is what makes the button in the interface safe to press twice.
+pub fn connect(app: App, company: &str) -> Result<Status> {
     let path = app
         .config_file()
         .ok_or(ConnectError::NoConfigLocation(app.label()))?;
     let command = paths::binary();
+    let key = server_key(company);
 
     match app.format() {
-        Format::JsonServers => write_json(&path, &command)?,
-        Format::TomlServers => write_toml(&path, &command)?,
+        Format::JsonServers => write_json(&path, &command, &key)?,
+        Format::TomlServers => write_toml(&path, &command, &key)?,
     }
 
     // Read back before claiming anything. A write that succeeded and a file
     // that parses are two different facts.
-    let confirmed = recorded_command(app, &path).is_some();
+    let confirmed = recorded_entry(app, &path).is_some();
     if !confirmed {
         return Err(ConnectError::Write {
             path: paths::display(&path),
@@ -140,8 +186,21 @@ pub fn connect(app: App) -> Result<Status> {
     Ok(status(app))
 }
 
+/// Rewrites every connected application's key to the current company name.
+///
+/// Used after a rename so Claude's connectors list does not keep showing
+/// yesterday's name next to today's lake.
+pub fn rekey_all(company: &str) -> Vec<Status> {
+    App::ALL
+        .into_iter()
+        .filter(|app| status(*app).connected)
+        .filter_map(|app| connect(app, company).ok())
+        .collect()
+}
+
 /// Removes Knowlith from an application's server list, leaving every other
-/// server alone.
+/// server alone. Matches by our binary and by the legacy key, so a rename
+/// that left an old company-named entry still disconnects cleanly.
 pub fn disconnect(app: App) -> Result<Status> {
     let path = app
         .config_file()
@@ -154,7 +213,7 @@ pub fn disconnect(app: App) -> Result<Status> {
         Format::JsonServers => {
             let mut root = read_json(&path)?;
             if let Some(servers) = servers_map_mut(&mut root) {
-                servers.remove(SERVER_NAME);
+                remove_our_json(servers);
             }
             backup(&path)?;
             write_atomically(&path, format!("{}\n", serde_json::to_string_pretty(&root).unwrap_or_default()).as_bytes())?;
@@ -165,7 +224,7 @@ pub fn disconnect(app: App) -> Result<Status> {
                 .get_mut("mcp_servers")
                 .and_then(|item| item.as_table_like_mut())
             {
-                servers.remove(SERVER_NAME);
+                remove_our_toml(servers);
             }
             backup(&path)?;
             write_atomically(&path, document.to_string().as_bytes())?;
@@ -176,7 +235,7 @@ pub fn disconnect(app: App) -> Result<Status> {
 
 // ------------------------------------------------------------------- json --
 
-fn write_json(path: &Path, command: &str) -> Result<()> {
+fn write_json(path: &Path, command: &str, key: &str) -> Result<()> {
     let mut root = read_json(path)?;
 
     // Claude Code's `~/.claude.json` carries the owner's entire history and
@@ -190,7 +249,10 @@ fn write_json(path: &Path, command: &str) -> Result<()> {
     });
 
     let servers = servers_map_mut(&mut root).expect("read_json guarantees an object root");
-    servers.insert(SERVER_NAME.to_string(), entry);
+    // Drop every previous Knowlith entry — legacy product key, yesterday's
+    // company name, a stale binary path — before writing today's.
+    remove_our_json(servers);
+    servers.insert(key.to_string(), entry);
 
     backup(path)?;
     let text = serde_json::to_string_pretty(&root).map_err(|e| ConnectError::Write {
@@ -243,7 +305,7 @@ fn servers_map_mut(root: &mut Value) -> Option<&mut Map<String, Value>> {
 
 // ------------------------------------------------------------------- toml --
 
-fn write_toml(path: &Path, command: &str) -> Result<()> {
+fn write_toml(path: &Path, command: &str, key: &str) -> Result<()> {
     let mut document = read_toml(path)?;
 
     let servers = document
@@ -256,6 +318,8 @@ fn write_toml(path: &Path, command: &str) -> Result<()> {
             source: std::io::Error::other("mcp_servers is not a table"),
         })?;
 
+    remove_our_toml(servers);
+
     let mut entry = toml_edit::Table::new();
     entry.insert("command", toml_edit::value(command));
     let mut args = toml_edit::Array::new();
@@ -266,7 +330,7 @@ fn write_toml(path: &Path, command: &str) -> Result<()> {
     // timeout here reads to the owner as "Knowlith is broken".
     entry.insert("startup_timeout_sec", toml_edit::value(20));
 
-    servers.insert(SERVER_NAME, toml_edit::Item::Table(entry));
+    servers.insert(key, toml_edit::Item::Table(entry));
 
     backup(path)?;
     write_atomically(path, document.to_string().as_bytes())
@@ -300,27 +364,83 @@ fn read_toml(path: &Path) -> Result<toml_edit::DocumentMut> {
 
 // ---------------------------------------------------------------- reading --
 
-/// The command an application's config currently records for Knowlith.
-fn recorded_command(app: App, path: &Path) -> Option<String> {
+/// The command an application's config currently records for Knowlith, with
+/// the key it is filed under.
+///
+/// Prefers an entry whose command is this binary; falls back to the legacy
+/// product key so an older install still counts as connected.
+fn recorded_entry(app: App, path: &Path) -> Option<(String, String)> {
     let text = fs::read_to_string(path).ok()?;
+    let ours = paths::binary();
     match app.format() {
         Format::JsonServers => {
             let root: Value = serde_json::from_str(&text).ok()?;
-            root.get("mcpServers")?
-                .get(SERVER_NAME)?
-                .get("command")?
-                .as_str()
-                .map(str::to_string)
+            let servers = root.get("mcpServers")?.as_object()?;
+            let mut legacy = None;
+            for (key, value) in servers {
+                let Some(command) = value.get("command").and_then(Value::as_str) else {
+                    continue;
+                };
+                if same_program(command, &ours) {
+                    return Some((key.clone(), command.to_string()));
+                }
+                if key == LEGACY_SERVER_NAME {
+                    legacy = Some((key.clone(), command.to_string()));
+                }
+            }
+            legacy
         }
         Format::TomlServers => {
             let document = text.parse::<toml_edit::DocumentMut>().ok()?;
-            document
-                .get("mcp_servers")?
-                .get(SERVER_NAME)?
-                .get("command")?
-                .as_str()
-                .map(str::to_string)
+            let servers = document.get("mcp_servers")?.as_table_like()?;
+            let mut legacy = None;
+            for (key, item) in servers.iter() {
+                let Some(command) = item.get("command").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                if same_program(command, &ours) {
+                    return Some((key.to_string(), command.to_string()));
+                }
+                if key == LEGACY_SERVER_NAME {
+                    legacy = Some((key.to_string(), command.to_string()));
+                }
+            }
+            legacy
         }
+    }
+}
+
+fn remove_our_json(servers: &mut Map<String, Value>) {
+    let ours = paths::binary();
+    let drop: Vec<String> = servers
+        .iter()
+        .filter_map(|(key, value)| {
+            if key == LEGACY_SERVER_NAME {
+                return Some(key.clone());
+            }
+            let command = value.get("command")?.as_str()?;
+            same_program(command, &ours).then(|| key.clone())
+        })
+        .collect();
+    for key in drop {
+        servers.remove(&key);
+    }
+}
+
+fn remove_our_toml(servers: &mut dyn toml_edit::TableLike) {
+    let ours = paths::binary();
+    let drop: Vec<String> = servers
+        .iter()
+        .filter_map(|(key, item)| {
+            if key == LEGACY_SERVER_NAME {
+                return Some(key.to_string());
+            }
+            let command = item.get("command")?.as_str()?;
+            same_program(command, &ours).then(|| key.to_string())
+        })
+        .collect();
+    for key in drop {
+        servers.remove(&key);
     }
 }
 
@@ -405,8 +525,9 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 /// The snippet an owner pastes when they would rather do it by hand.
-pub fn manual_instructions(app: App) -> String {
+pub fn manual_instructions(app: App, company: &str) -> String {
     let command = paths::binary();
+    let key = server_key(company);
     let path = app
         .config_file()
         .map(|p| paths::display(&p))
@@ -414,13 +535,22 @@ pub fn manual_instructions(app: App) -> String {
 
     match app.format() {
         Format::JsonServers => format!(
-            "In {path}, inside \"mcpServers\":\n\n  \"{SERVER_NAME}\": {{\n    \"type\": \"stdio\",\n    \"command\": \"{}\",\n    \"args\": [\"mcp\"]\n  }}\n",
+            "In {path}, inside \"mcpServers\":\n\n  \"{key}\": {{\n    \"type\": \"stdio\",\n    \"command\": \"{}\",\n    \"args\": [\"mcp\"]\n  }}\n",
             command.replace('\\', "\\\\")
         ),
-        Format::TomlServers => format!(
-            "In {path}:\n\n[mcp_servers.{SERVER_NAME}]\ncommand = \"{}\"\nargs = [\"mcp\"]\n",
-            command.replace('\\', "\\\\")
-        ),
+        Format::TomlServers => {
+            // Dots and spaces in a company name need a quoted TOML key, or
+            // Codex reads nested tables the owner never wrote.
+            let keyed = if key.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
+                format!("\"{key}\"")
+            } else {
+                key
+            };
+            format!(
+                "In {path}:\n\n[mcp_servers.{keyed}]\ncommand = \"{}\"\nargs = [\"mcp\"]\n",
+                command.replace('\\', "\\\\")
+            )
+        }
     }
 }
 
@@ -451,4 +581,60 @@ pub fn backups(app: App) -> Vec<PathBuf> {
     found.sort();
     found.reverse();
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_connectors_list_shows_the_product_and_the_company() {
+        assert_eq!(server_key("bb"), "knowlith-bb");
+        assert_eq!(server_key("Termoval d.o.o."), "knowlith-termoval-d-o-o");
+        assert_eq!(server_key("  "), LEGACY_SERVER_NAME);
+        assert_eq!(server_key("Your company"), LEGACY_SERVER_NAME);
+    }
+
+    #[test]
+    fn a_json_write_files_under_the_company_and_drops_the_legacy_key() {
+        let dir = std::env::temp_dir().join(format!(
+            "knowlith-connect-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("mcp.json");
+        let ours = paths::binary();
+        fs::write(
+            &path,
+            format!(
+                r#"{{"mcpServers":{{"knowlith":{{"type":"stdio","command":"{ours}","args":["mcp"]}},"other":{{"command":"/bin/true"}}}}}}"#
+            ),
+        )
+        .unwrap();
+
+        write_json(&path, &ours, "knowlith-bb").unwrap();
+
+        let root: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let servers = root["mcpServers"].as_object().unwrap();
+        assert!(servers.contains_key("knowlith-bb"));
+        assert!(!servers.contains_key("knowlith"));
+        assert!(servers.contains_key("other"));
+        assert_eq!(
+            recorded_entry(App::Cursor, &path).map(|(k, _)| k).as_deref(),
+            Some("knowlith-bb")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn manual_toml_uses_a_plain_slug_key() {
+        let text = manual_instructions(App::Codex, "Termoval d.o.o.");
+        assert!(text.contains("[mcp_servers.knowlith-termoval-d-o-o]"), "{text}");
+        assert!(!text.contains("\"Termoval"), "{text}");
+    }
 }

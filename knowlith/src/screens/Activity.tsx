@@ -1,31 +1,57 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Check, ChevronRight } from "lucide-react"
 import { Panel, PanelHeader } from "@/components/ui/surface"
-import { tools as toolsApi } from "@/lib/api"
+import { api, tools as toolsApi } from "@/lib/api"
 import type { Usage } from "@/lib/types"
 import { cn, formatRelative } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
 
 const POLL_MS = 5000
 
+type FoundRow = {
+  id: string
+  title: string
+  detail: string
+  at: string
+  tone: string
+}
+
+type FeedItem =
+  | { kind: "used"; at: string; row: Usage }
+  | { kind: "found"; at: string; row: FoundRow }
+
 /**
  * What left Knowlith — in owner language.
  *
- * Never claims why a model answered the way it did. Only what was read,
- * and what was offered but not opened (plainly worded).
+ * Never claims why a model answered the way it did. Only what was found,
+ * what the team confirmed, and what assistants actually read.
  */
 export function Activity() {
   const { companyName } = useApp()
   const navigate = useNavigate()
-  const [rows, setRows] = useState<Usage[] | null>(null)
+  const [usage, setUsage] = useState<Usage[] | null>(null)
+  const [found, setFound] = useState<FoundRow[]>([])
   const [openId, setOpenId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     const poll = async () => {
-      const next = await toolsApi.usage()
-      if (!cancelled) setRows(next)
+      const [nextUsage, nextFound] = await Promise.all([
+        toolsApi.usage(),
+        api.getRecentActivity(),
+      ])
+      if (cancelled) return
+      setUsage(nextUsage)
+      setFound(
+        (nextFound ?? []).map((row) => ({
+          id: row.id,
+          title: plainFoundTitle(row.title),
+          detail: plainFoundDetail(row.detail),
+          at: row.at,
+          tone: row.tone,
+        })),
+      )
     }
     void poll()
     const timer = window.setInterval(poll, POLL_MS)
@@ -35,36 +61,78 @@ export function Activity() {
     }
   }, [])
 
+  const feed = useMemo(() => {
+    const items: FeedItem[] = []
+    for (const row of usage ?? []) {
+      items.push({ kind: "used", at: row.at, row })
+    }
+    for (const row of found) {
+      items.push({ kind: "found", at: row.at, row })
+    }
+    items.sort((a, b) => b.at.localeCompare(a.at))
+    return items
+  }, [usage, found])
+
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 py-8">
       <h1 className="text-[20px] font-semibold tracking-[-0.015em] text-ink">History</h1>
       <p className="mt-1 max-w-[54ch] text-[13px] text-muted">
-        What Knowlith found, what your team confirmed, and which knowledge AI assistants used.
+        Three kinds of moment, in plain words: something new was found in your folders, your team
+        confirmed it, or an AI assistant read it while answering someone.
       </p>
 
-      {rows === null ? (
+      {usage === null ? (
         <p className="mt-8 text-[13px] text-muted">Reading…</p>
-      ) : rows.length === 0 ? (
+      ) : feed.length === 0 ? (
         <Panel className="mt-7">
-          <PanelHeader title="Nothing has been used yet" />
+          <PanelHeader title="Nothing has happened yet" />
           <p className="px-4 pb-4 text-[13px] text-muted">
-            Connect an assistant and ask it one question about {companyName}. When it reads something
-            here, it appears on this list.
+            Add a folder, confirm a few findings, then ask an assistant about {companyName}. Each of
+            those steps shows up here.
           </p>
         </Panel>
       ) : (
         <ul className="mt-7 space-y-2">
-          {rows.map((row) => {
+          {feed.map((item) => {
+            if (item.kind === "found") {
+              const row = item.row
+              return (
+                <li key={row.id} className="rounded-xl border border-line bg-surface px-4 py-3.5">
+                  <div className="flex items-start gap-3">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[12px] font-medium uppercase tracking-wide text-faint">
+                        {row.tone === "conflict"
+                          ? "Needs a decision"
+                          : row.title.includes("confirmed") || row.title.includes("approved")
+                            ? "Your team confirmed"
+                            : "Found in your folders"}
+                      </span>
+                      <span className="mt-0.5 block text-[13.5px] font-medium text-ink">
+                        {row.title}
+                      </span>
+                      {row.detail ? (
+                        <span className="mt-0.5 block text-[12.5px] text-muted">{row.detail}</span>
+                      ) : null}
+                      <span className="mt-1 block text-[12px] text-faint">
+                        {formatRelative(row.at)}
+                      </span>
+                    </span>
+                  </div>
+                </li>
+              )
+            }
+
+            const row = item.row
             const open = openId === row.id
             const used = row.read
-            const summary =
+            const headline =
               used.length === 0
                 ? row.question
-                  ? `asked Knowlith about “${row.question}”`
-                  : "opened Knowlith"
+                  ? `${row.appLabel} asked about “${row.question}”`
+                  : `${row.appLabel} opened your company knowledge`
                 : used.length === 1
-                  ? `used “${used[0].title}”`
-                  : `used ${used.length} pieces of company knowledge`
+                  ? `${row.appLabel} read “${used[0].title}”`
+                  : `${row.appLabel} read ${used.length} pieces of what ${companyName} confirmed`
 
             return (
               <li key={row.id} className="rounded-xl border border-line bg-surface">
@@ -74,8 +142,11 @@ export function Activity() {
                   className="flex w-full items-start gap-3 px-4 py-3.5 text-left"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[13.5px] font-medium text-ink">
-                      {row.appLabel} {summary}
+                    <span className="block text-[12px] font-medium uppercase tracking-wide text-faint">
+                      An AI assistant used it
+                    </span>
+                    <span className="mt-0.5 block text-[13.5px] font-medium text-ink">
+                      {headline}
                     </span>
                     <span className="mt-0.5 block text-[12px] text-faint">
                       {formatRelative(row.at)}
@@ -92,11 +163,11 @@ export function Activity() {
                 {open ? (
                   <div className="border-t border-line px-4 py-3">
                     <p className="text-[12.5px] font-medium text-ink">
-                      What {row.appLabel} got from Knowlith
+                      What {row.appLabel} actually opened
                     </p>
                     {used.length === 0 ? (
                       <p className="mt-1.5 text-[13px] text-muted">
-                        Nothing was read this time
+                        Nothing from the approved list was opened this time
                         {row.question ? ` while working on “${row.question}”` : ""}.
                       </p>
                     ) : (
@@ -127,17 +198,16 @@ export function Activity() {
 
                     {row.skipped.length > 0 ? (
                       <p className="mt-3 text-[12.5px] text-muted">
-                        {row.appLabel} also had access to {row.skipped.length} other{" "}
-                        {row.skipped.length === 1 ? "item" : "items"} and did not open{" "}
-                        {row.skipped.length === 1 ? "it" : "them"}.
+                        {row.appLabel} could also have opened {row.skipped.length} other{" "}
+                        {row.skipped.length === 1 ? "item" : "items"} and did not.
                       </p>
                     ) : null}
 
                     {row.question ? (
                       <p className="mt-2 text-[12px] text-faint">
                         {row.closed
-                          ? "Checked what it had missed before finishing."
-                          : "Finished without checking what it had missed."}
+                          ? "It checked whether anything relevant was missed before finishing."
+                          : "It finished without checking whether anything relevant was missed."}
                       </p>
                     ) : null}
                   </div>
@@ -149,6 +219,17 @@ export function Activity() {
       )}
     </div>
   )
+}
+
+function plainFoundTitle(title: string): string {
+  return title
+    .replace(/ approved$/i, " — confirmed by your team")
+    .replace(/ found$/i, " — found in a document")
+    .replace(/ — documents disagree$/i, " — two documents disagree")
+}
+
+function plainFoundDetail(detail: string): string {
+  return detail.replace(/^From /, "Quote from ").replace(/\.$/, "")
 }
 
 function kindLabel(kind: string): string {

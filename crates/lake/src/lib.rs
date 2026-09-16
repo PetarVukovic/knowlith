@@ -25,13 +25,18 @@ use std::path::Path;
 use chrono::Utc;
 use knowlith_core::document::BlockKind;
 use knowlith_core::object::{RelationOrigin, RelationType};
-use knowlith_core::{Block, ContextObject, Document, DocumentKind, Evidence, Rejection};
+use knowlith_core::{
+    Block, ContextObject, Document, DocumentKind, Evidence, ObjectKind, ObjectStatus, Rejection,
+};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub use jobs::{Job, JobState, NewJob, PRIORITY_BACKGROUND, PRIORITY_NORMAL};
 pub use merge::MergeHint;
 pub use migrate::SCHEMA_VERSION;
-pub use policy::{DEFAULT_LARGE_SCAN, Held, Policy, Processing};
+pub use policy::{
+    DEFAULT_COMPILE_BATCH, DEFAULT_COMPILE_WORKERS, DEFAULT_LARGE_SCAN, Held, MAX_COMPILE_BATCH,
+    MAX_COMPILE_WORKERS, Policy, Processing,
+};
 pub use serve::{Case, Row};
 
 const SCHEMA: &str = include_str!("schema.sql");
@@ -300,6 +305,23 @@ impl Lake {
     }
 
     fn write_object(tx: &Transaction<'_>, object: &ContextObject) -> Result<()> {
+        // Re-drafting must not demote an approved skill back to Proposed —
+        // that is what made the Skills list show one green and one orange
+        // copy of the same procedure.
+        let status = {
+            let existing: Option<String> = tx
+                .query_row(
+                    "SELECT status FROM objects WHERE id = ?1",
+                    params![object.id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match (existing.as_deref(), object.kind, object.status) {
+                (Some("approved"), ObjectKind::Skill, ObjectStatus::Proposed) => "approved",
+                _ => status_str(object.status),
+            }
+        };
+
         tx.execute(
             "INSERT INTO objects
                (id, kind, subtype, title, body, status, confidence, version,
@@ -315,7 +337,7 @@ impl Lake {
                 object.subtype.map(|s| format!("{s:?}").to_lowercase()),
                 object.title,
                 object.body,
-                status_str(object.status),
+                status,
                 object.confidence.0 as f64,
                 object.version as i64,
                 object.valid_from,
@@ -514,6 +536,45 @@ impl Lake {
                 .collect::<std::result::Result<_, _>>()?
         };
         ids.iter().map(|id| self.document(id)).collect()
+    }
+
+    /// Documents that belong to one source folder.
+    pub fn documents_for_source(&self, source_id: &str) -> Result<Vec<Document>> {
+        let ids: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id FROM documents WHERE source_id = ?1 ORDER BY name")?;
+            stmt.query_map(params![source_id], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<_, _>>()?
+        };
+        ids.iter().map(|id| self.document(id)).collect()
+    }
+
+    /// Proposed objects whose evidence points into this source.
+    pub fn proposed_count_for_source(&self, source_id: &str) -> Result<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT o.id)
+             FROM objects o
+             JOIN evidence e ON e.object_id = o.id
+             JOIN documents d ON d.id = e.document_id
+             WHERE d.source_id = ?1 AND o.status = 'proposed'",
+            params![source_id],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
+    pub fn conflict_count_for_source(&self, source_id: &str) -> Result<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT o.id)
+             FROM objects o
+             JOIN evidence e ON e.object_id = o.id
+             JOIN documents d ON d.id = e.document_id
+             WHERE d.source_id = ?1 AND o.status = 'conflicted'",
+            params![source_id],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
     }
 
     pub fn sources(&self) -> Result<Vec<(String, String, String, String, String, Option<String>)>> {

@@ -59,7 +59,11 @@ impl Folder {
     }
 
     fn write(&self, name: &str, body: &str) {
-        std::fs::write(self.0.join(name), body).unwrap();
+        let path = self.0.join(name);
+        std::fs::write(&path, body).unwrap();
+        // Write-settle skips files whose mtime is <3s old. Tests must not
+        // wait that long, so the file is aged to a settled past.
+        age_mtime(&path);
     }
 
     fn path(&self) -> String {
@@ -70,6 +74,24 @@ impl Folder {
 impl Drop for Folder {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn age_mtime(path: &std::path::Path) {
+    // Prefer a portable touch; fall back to sleeping past write-settle.
+    let ok = std::process::Command::new("touch")
+        .arg("-t")
+        .arg("202001011200.00")
+        .arg(path)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        let _ = std::process::Command::new("touch")
+            .arg("-d")
+            .arg("2020-01-01 12:00:00")
+            .arg(path)
+            .status();
     }
 }
 
@@ -289,6 +311,7 @@ fn an_owner_who_turned_automatic_reading_off_gets_no_model_calls() {
             processing: knowlith_lake::Processing::Manual,
             pause_on_battery: false,
             large_scan: 500,
+            ..knowlith_lake::Policy::default()
         })
         .unwrap();
     worker

@@ -143,8 +143,19 @@ pub fn draft_all(engine: &dyn Engine, objects: &[ContextObject]) -> Result<Skill
     for process in approved.iter().filter(|o| o.kind == ObjectKind::Process) {
         out.processes_considered += 1;
 
-        let sources = foundations(process, &by_id);
         let skill_id = skill_id(&process.id);
+        // An already-approved skill is the owner's procedure. Re-drafting
+        // would flip it back to Proposed and look like a duplicate draft
+        // next to the process it came from.
+        if objects.iter().any(|o| {
+            o.id == skill_id
+                && o.kind == ObjectKind::Skill
+                && o.status == ObjectStatus::Approved
+        }) {
+            continue;
+        }
+
+        let sources = foundations(process, &by_id);
 
         match draft_one(engine, process, &sources) {
             Ok(object) => out.skills.push(object),

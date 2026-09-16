@@ -304,7 +304,12 @@ fn main() -> Result<()> {
             company,
         } => {
             let name = company_of(&lake, company.as_deref());
-            connect(app.as_deref(), dry_run, open, guidance, &name)
+            let profile = lake
+                .setting("company_profile")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            connect(app.as_deref(), dry_run, open, guidance, &name, &profile)
         }
         Command::Disconnect { app } => disconnect(app.as_deref()),
         Command::Tools => tools_status(),
@@ -549,14 +554,14 @@ fn serve(
         None
     } else {
         let engine = worker_engine(&engine_name, replay)?;
-        let mut worker = Worker::open(&db, engine)?;
         let flag = Arc::clone(&stop);
-        println!("working in the background with {}", worker_label(&engine_name, replay));
-        Some(std::thread::spawn(move || {
-            if let Err(e) = worker.run(flag) {
-                eprintln!("the background worker stopped: {e}");
-            }
-        }))
+        let n = lake.policy().compile_workers_capped();
+        println!(
+            "working in the background with {} · 1 I/O + {n} CLI workers · batch {}",
+            worker_label(&engine_name, replay),
+            lake.policy().compile_batch_capped()
+        );
+        Some(knowlith_worker::spawn_pool(&db, engine, flag)?)
     };
 
     let state = AppState::new(lake, company);
@@ -564,8 +569,10 @@ fn serve(
     let result = runtime.block_on(knowlith_server::serve(state, port));
 
     stop.store(true, Ordering::Relaxed);
-    if let Some(handle) = worker {
-        let _ = handle.join();
+    if let Some(handles) = worker {
+        for handle in handles {
+            let _ = handle.join();
+        }
     }
     result
 }
@@ -573,16 +580,20 @@ fn serve(
 /// Runs the queue down, either once or until stopped.
 fn work(db: PathBuf, engine_name: &str, replay: Option<&Path>, once: bool) -> Result<()> {
     let engine = worker_engine(engine_name, replay)?;
-    let mut worker = Worker::open(&db, engine)?;
     println!("working with {}", worker_label(engine_name, replay));
 
     if !once {
-        // Stopping this is safe at any moment. There is no goodbye: the
-        // process ends, the lease on whatever it was doing expires, and the
-        // next start picks the job up with one more attempt against it.
-        return Ok(worker.run(Arc::new(AtomicBool::new(false)))?);
+        // Dual-track pool, same shape as `serve`. Stopping is safe at any
+        // moment: leases expire and the next start picks the jobs up.
+        let stop = Arc::new(AtomicBool::new(false));
+        let handles = knowlith_worker::spawn_pool(&db, engine, stop)?;
+        for handle in handles {
+            let _ = handle.join();
+        }
+        return Ok(());
     }
 
+    let mut worker = Worker::open(&db, engine)?;
     let stop = AtomicBool::new(false);
     let mut did = 0;
     loop {
@@ -1089,6 +1100,7 @@ fn connect(
     open: bool,
     guidance: bool,
     company: &str,
+    profile: &str,
 ) -> Result<()> {
     let targets = chosen(app)?;
 
@@ -1101,19 +1113,19 @@ fn connect(
 
         if dry_run {
             println!("{} — would write into {}", target.label(), status.config_path.unwrap_or_default());
-            println!("{}", indent(&knowlith_desktop::connect::manual_instructions(target)));
+            println!("{}", indent(&knowlith_desktop::connect::manual_instructions(target, company)));
             continue;
         }
 
-        match knowlith_desktop::connect(target) {
+        match knowlith_desktop::connect(target, company) {
             Ok(now) => {
-                println!("{} — connected", target.label());
+                println!("{} — connected as {}", target.label(), now.server_key.as_deref().unwrap_or(company));
                 println!("  {}", now.config_path.unwrap_or_default());
                 println!("  {}", target.refresh_hint());
             }
             Err(e) => {
                 println!("{} — not connected: {e}", target.label());
-                println!("{}", indent(&knowlith_desktop::connect::manual_instructions(target)));
+                println!("{}", indent(&knowlith_desktop::connect::manual_instructions(target, company)));
                 continue;
             }
         }
@@ -1129,7 +1141,7 @@ fn connect(
                 knowlith_desktop::App::ClaudeDesktop => None,
             };
             if let Some(guide) = guide {
-                match knowlith_desktop::guidance::write(guide, company) {
+                match knowlith_desktop::guidance::write(guide, company, profile) {
                     Ok(path) => println!("  told {} when to use it — {}", guide.label(), path.display()),
                     Err(e) => println!("  could not write the standing instruction: {e}"),
                 }
@@ -1187,6 +1199,11 @@ fn bundle(lake: &Lake, company: &str, install: bool) -> Result<()> {
     // install screen shows the tools by name instead of a count. The list
     // comes from the gateway itself, which is the only way it cannot drift.
     let icon = serde_json::to_value(knowlith_desktop::company_icon(company))?;
+    let profile = lake
+        .setting("company_profile")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let tools = knowlith_mcp::tools::catalogue(&icon)
         .into_iter()
         .map(|entry| {
@@ -1208,6 +1225,7 @@ fn bundle(lake: &Lake, company: &str, install: bool) -> Result<()> {
 
     let built = knowlith_desktop::bundle::build(&knowlith_desktop::bundle::Contents {
         company,
+        profile: &profile,
         tools,
         prompts,
     })?;

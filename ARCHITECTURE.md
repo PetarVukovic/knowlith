@@ -107,7 +107,13 @@ itself. Transport failure defers with a growing gap; a refusal fails and is
 reported, because retrying it changes nothing.
 
 Job kinds: `rescan`, `compile_document`, `settle`, `relate`, `draft_skills`,
-`recheck`.
+`recheck`. Compile jobs may be claimed in batches by AI workers (several
+documents, one CLI process). Settle still waits until the compile queue —
+including leased jobs — is empty.
+
+The daemon runs **one I/O track** (rescan / recheck) and **N AI tracks**
+(default 2, policy-capped at 4) so a long folder walk does not starve
+compile, and large folders amortise CLI cold-start.
 
 ### The interface queues; it never scans
 

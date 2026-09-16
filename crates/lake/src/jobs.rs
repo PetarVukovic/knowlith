@@ -121,25 +121,84 @@ impl Lake {
     /// A job whose lease has run out is due again, which is how work returns
     /// after a crash without anything having to notice the crash.
     pub fn lease(&self) -> Result<Option<Job>> {
+        self.lease_filtered(None)
+    }
+
+    /// Claims the next due job whose `kind` is one of `kinds`.
+    ///
+    /// Used by dual-track workers: the I/O track only walks folders; the AI
+    /// track only talks to a CLI. Without a filter, one long rescan would
+    /// starve every compile on a single-threaded loop.
+    pub fn lease_kinds(&self, kinds: &[&str]) -> Result<Option<Job>> {
+        if kinds.is_empty() {
+            return self.lease();
+        }
+        self.lease_filtered(Some(kinds))
+    }
+
+    /// Claims another job of exactly `kind`, or `None` when that queue is dry.
+    ///
+    /// Compile workers call this after the first `compile_document` lease to
+    /// fill a multi-document CLI batch without pulling a settle mid-pack.
+    pub fn lease_kind(&self, kind: &str) -> Result<Option<Job>> {
+        self.lease_filtered(Some(&[kind]))
+    }
+
+    fn lease_filtered(&self, kinds: Option<&[&str]>) -> Result<Option<Job>> {
         let at = Utc::now();
         let now = at.to_rfc3339();
         let until = (at + Duration::seconds(LEASE_SECONDS)).to_rfc3339();
 
-        let claimed: Option<(i64, String, String, i64)> = self
-            .conn
-            .query_row(
-                "UPDATE jobs SET state = 'leased', lease_until = ?2, attempts = attempts + 1
-                 WHERE id = (
-                     SELECT id FROM jobs
-                     WHERE run_after <= ?1
-                       AND (state = 'queued' OR (state = 'leased' AND lease_until <= ?1))
-                     ORDER BY priority, run_after LIMIT 1
-                 )
-                 RETURNING id, kind, payload_json, attempts",
-                params![now, until],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
-            .optional()?;
+        // Kind filters are tiny (track sets), so the IN list is built with
+        // bound parameters rather than string-concatenated values.
+        let claimed: Option<(i64, String, String, i64)> = match kinds {
+            None => self
+                .conn
+                .query_row(
+                    "UPDATE jobs SET state = 'leased', lease_until = ?2, attempts = attempts + 1
+                     WHERE id = (
+                         SELECT id FROM jobs
+                         WHERE run_after <= ?1
+                           AND (state = 'queued' OR (state = 'leased' AND lease_until <= ?1))
+                         ORDER BY priority, run_after LIMIT 1
+                     )
+                     RETURNING id, kind, payload_json, attempts",
+                    params![now, until],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .optional()?,
+            Some(kinds) => {
+                let placeholders = (0..kinds.len())
+                    .map(|i| format!("?{}", i + 3))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "UPDATE jobs SET state = 'leased', lease_until = ?2, attempts = attempts + 1
+                     WHERE id = (
+                         SELECT id FROM jobs
+                         WHERE run_after <= ?1
+                           AND (state = 'queued' OR (state = 'leased' AND lease_until <= ?1))
+                           AND kind IN ({placeholders})
+                         ORDER BY priority, run_after LIMIT 1
+                     )
+                     RETURNING id, kind, payload_json, attempts"
+                );
+                let mut values: Vec<rusqlite::types::Value> =
+                    Vec::with_capacity(2 + kinds.len());
+                values.push(now.clone().into());
+                values.push(until.clone().into());
+                for kind in kinds {
+                    values.push((*kind).to_string().into());
+                }
+                self.conn
+                    .query_row(
+                        &sql,
+                        rusqlite::params_from_iter(values),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    )
+                    .optional()?
+            }
+        };
 
         Ok(claimed.map(|(id, kind, payload, attempts)| Job {
             id,
@@ -147,6 +206,14 @@ impl Lake {
             payload,
             attempts,
         }))
+    }
+
+    /// Renews every lease in `job_ids` (multi-doc CLI batches hold several).
+    pub fn heartbeat_many(&self, job_ids: &[i64]) -> Result<()> {
+        for id in job_ids {
+            self.heartbeat(*id)?;
+        }
+        Ok(())
     }
 
     /// Extends a claim on work that is still running.
@@ -386,6 +453,43 @@ mod tests {
         lake.enqueue(&job("a")).unwrap();
         assert!(lake.lease().unwrap().is_some());
         assert!(lake.lease().unwrap().is_none());
+    }
+
+    #[test]
+    fn two_queued_jobs_can_be_leased_by_two_workers() {
+        let lake = Lake::in_memory().unwrap();
+        lake.enqueue(&job("a")).unwrap();
+        lake.enqueue(&job("b")).unwrap();
+        let first = lake.lease().unwrap().unwrap();
+        let second = lake.lease().unwrap().unwrap();
+        assert_ne!(first.id, second.id);
+    }
+
+    #[test]
+    fn lease_kinds_skips_jobs_outside_the_track() {
+        let lake = Lake::in_memory().unwrap();
+        lake.enqueue(&NewJob {
+            kind: "rescan".into(),
+            payload: "{}".into(),
+            idempotency_key: "rescan:1".into(),
+            priority: 0,
+        })
+        .unwrap();
+        lake.enqueue(&NewJob {
+            kind: "compile_document".into(),
+            payload: "{}".into(),
+            idempotency_key: "compile:1".into(),
+            priority: 0,
+        })
+        .unwrap();
+        let ai = lake
+            .lease_kinds(&["compile_document", "settle"])
+            .unwrap()
+            .expect("compile must be claimable");
+        assert_eq!(ai.kind, "compile_document");
+        assert!(lake.lease_kinds(&["compile_document", "settle"]).unwrap().is_none());
+        let io = lake.lease_kinds(&["rescan"]).unwrap().expect("rescan waits for io track");
+        assert_eq!(io.kind, "rescan");
     }
 
     #[test]

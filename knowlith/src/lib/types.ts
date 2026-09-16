@@ -200,6 +200,14 @@ export interface Source {
   conflictsFound: number
   /** File types found during the scan, largest group first. */
   fileTypes: { ext: string; count: number }[]
+  /** Last folder walk — how many files changed vs stayed the same. */
+  lastDigest?: {
+    at: string
+    walked: number
+    changed: number
+    unchanged: number
+    unreadable: number
+  }
   error?: string
 }
 
@@ -359,6 +367,10 @@ export interface Policy {
   largeScan: number
   /** Which CLI reads documents: auto | codex | claude-code | cursor-agent | managed */
   engine: string
+  /** Parallel CLI compile workers (I/O track is separate). Default 2. */
+  compileWorkers?: number
+  /** Documents packed into one CLI invoke. Default 8. */
+  compileBatchSize?: number
 }
 
 export interface HeldWork {

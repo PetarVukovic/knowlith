@@ -226,6 +226,9 @@ export const api = {
   async getSources(): Promise<Source[]> {
     return get<Source[]>("/api/sources", fixtures.sources, [])
   },
+  async rescanSource(id: string) {
+    return post<{ queued: boolean; message: string }>(`/api/sources/${encodeURIComponent(id)}/rescan`)
+  },
   async getSkills(): Promise<SkillDoc[]> {
     return get<SkillDoc[]>("/api/skills", fixtures.skills, [])
   },

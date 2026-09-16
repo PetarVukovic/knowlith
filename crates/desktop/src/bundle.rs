@@ -51,6 +51,9 @@ pub enum BundleError {
 /// Everything the manifest needs that this crate cannot work out itself.
 pub struct Contents<'a> {
     pub company: &'a str,
+    /// Owner's short description of what the firm is. Empty until set in
+    /// Settings — never invented here.
+    pub profile: &'a str,
     /// `(name, description)` for each tool, so the install screen lists what
     /// the extension can do rather than saying "11 tools".
     pub tools: Vec<(String, String)>,
@@ -161,8 +164,8 @@ fn manifest(contents: &Contents<'_>) -> Value {
         "name": "knowlith",
         "display_name": format!("{} — company knowledge", contents.company),
         "version": env!("CARGO_PKG_VERSION"),
-        "description": format!("{}'s own rules, prices and procedures, as its owner approved them.", contents.company),
-        "long_description": long_description(contents.company),
+        "description": short_description(contents.company, contents.profile),
+        "long_description": long_description(contents.company, contents.profile),
         "author": { "name": "Knowlith" },
         "license": "Apache-2.0",
         "keywords": ["company", "knowledge", "local"],
@@ -211,10 +214,29 @@ fn manifest(contents: &Contents<'_>) -> Value {
     manifest
 }
 
-fn long_description(company: &str) -> String {
+fn short_description(company: &str, profile: &str) -> String {
+    match first_sentence(profile) {
+        Some(about) => format!("{company} — {about}"),
+        None => format!(
+            "{company}'s own rules, prices and procedures, as its owner approved them."
+        ),
+    }
+}
+
+fn long_description(company: &str, profile: &str) -> String {
+    let about = match profile.trim() {
+        "" => format!(
+            "Answers questions about {company} from the documents {company} gave Knowlith, and only \
+             from the parts its owner has approved."
+        ),
+        text => format!(
+            "{company}: {text}\n\n\
+             Answers questions about {company} from the documents it gave Knowlith, and only from \
+             the parts its owner has approved."
+        ),
+    };
     format!(
-        "Answers questions about {company} from the documents {company} gave Knowlith, and only \
-         from the parts its owner has approved.\n\n\
+        "{about}\n\n\
          **Everything stays on this machine.** The extension reads one SQLite file in your \
          Knowlith folder. It opens no network connection, and it has no key, account or server \
          behind it.\n\n\
@@ -225,6 +247,25 @@ fn long_description(company: &str) -> String {
          have not approved something yet, it tells the assistant the question is open instead of \
          answering it."
     )
+}
+
+/// The first sentence of a profile, capped so the install card stays readable.
+fn first_sentence(profile: &str) -> Option<String> {
+    let trimmed = profile.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let end = trimmed
+        .find(['.', '!', '?'])
+        .map(|i| i + 1)
+        .unwrap_or(trimmed.len());
+    let sentence: String = trimmed[..end].chars().take(160).collect();
+    let sentence = sentence.trim();
+    if sentence.is_empty() {
+        None
+    } else {
+        Some(sentence.to_string())
+    }
 }
 
 /// Opens the bundle the way a double-click would, so Claude Desktop shows
@@ -269,6 +310,7 @@ mod tests {
     fn contents() -> Contents<'static> {
         Contents {
             company: "Termoval d.o.o.",
+            profile: "HVAC installer for Croatian SMBs. Price lists matter; individual invoices usually do not.",
             tools: vec![("search_context".into(), "Finds approved rules.".into())],
             prompts: vec![Prompt {
                 name: "odobravanje-popusta".into(),
@@ -352,10 +394,19 @@ mod tests {
 
     #[test]
     fn the_description_is_honest_about_the_one_thing_it_writes() {
-        let text = long_description("Termoval");
+        let text = long_description("Termoval", "");
         assert!(text.contains("stays on this machine"));
         assert!(text.contains("suggestion"));
         assert!(text.contains("open"));
+    }
+
+    #[test]
+    fn the_install_card_leads_with_what_the_company_is() {
+        let manifest = manifest(&contents());
+        let description = manifest["description"].as_str().unwrap();
+        assert!(description.starts_with("Termoval d.o.o. — HVAC installer"), "{description}");
+        let long = manifest["long_description"].as_str().unwrap();
+        assert!(long.contains("HVAC installer for Croatian SMBs"));
     }
 
     #[test]

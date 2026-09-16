@@ -25,7 +25,10 @@ pub use apps::{App, Format, LaunchSurface, program_on_path};
 pub use autostart::Autostart;
 pub use bundle::Bundle;
 pub use guidance::Guide;
-pub use connect::{ConnectError, SERVER_NAME, Status, connect, disconnect, status, status_all};
+pub use connect::{
+    ConnectError, LEGACY_SERVER_NAME, SERVER_NAME, Status, connect, disconnect, rekey_all,
+    server_key, status, status_all,
+};
 pub use icon::{Icon, company_icon};
 pub use launch::{Outcome, TryLaunch, cli_pty_argv, open_or_restart, open_with_prompt, open_with_prompt_opts, prompt_deeplink};
 pub use pick::PickError;

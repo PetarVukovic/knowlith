@@ -112,6 +112,16 @@ pub struct FileTypeDto {
     pub count: usize,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceDigestDto {
+    pub at: String,
+    pub walked: usize,
+    pub changed: usize,
+    pub unchanged: usize,
+    pub unreadable: usize,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceDto {
@@ -129,6 +139,9 @@ pub struct SourceDto {
     pub changes_found: usize,
     pub conflicts_found: usize,
     pub file_types: Vec<FileTypeDto>,
+    /// Last walk summary, when the worker has recorded one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_digest: Option<SourceDigestDto>,
 }
 
 #[derive(Serialize)]

@@ -2,10 +2,10 @@
 //!
 //! This is what "the reading happens on your Mac, on your subscription"
 //! means concretely: Knowlith spawns `codex`, `claude` or `agent`, hands it
-//! one document, reads the answer, and the process exits. Nothing is kept
-//! running between jobs — a long-lived child would hold state that does
-//! not survive a crash, and every piece of state in this system has to live
-//! in the lake instead.
+//! one document or a small batch of them, reads the answer, and the process
+//! exits. Nothing is kept running between jobs — a long-lived child would
+//! hold state that does not survive a crash, and every piece of state in this
+//! system has to live in the lake instead.
 //!
 //! All three CLIs are invoked read-only and non-interactive. None is given
 //! a writable workspace, because the compiler never needs one and a sandbox

@@ -36,6 +36,22 @@ pub enum Processing {
 /// do, and the difference between those is a question worth asking once.
 pub const DEFAULT_LARGE_SCAN: usize = 500;
 
+/// How many CLI compile workers run beside the I/O track.
+///
+/// Extract/rescan stays on its own thread so a long walk never blocks
+/// reading. Each of these workers owns one CLI child at a time; more than
+/// four on a laptop mostly hits the provider's rate limit.
+pub const DEFAULT_COMPILE_WORKERS: usize = 2;
+pub const MAX_COMPILE_WORKERS: usize = 4;
+
+/// How many documents one CLI invoke may read together.
+///
+/// Cold-start of `codex` / `claude` / `agent` dominates wall-clock on large
+/// folders. Packing several documents into one process cuts that cost without
+/// calling any external HTTP API.
+pub const DEFAULT_COMPILE_BATCH: usize = 8;
+pub const MAX_COMPILE_BATCH: usize = 20;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Policy {
@@ -51,10 +67,24 @@ pub struct Policy {
     /// so rather than pretending the switch is live.
     #[serde(default = "default_engine")]
     pub engine: String,
+    /// Parallel CLI compile workers (I/O track is always separate).
+    #[serde(default = "default_compile_workers")]
+    pub compile_workers: usize,
+    /// Documents packed into one CLI invoke.
+    #[serde(default = "default_compile_batch")]
+    pub compile_batch_size: usize,
 }
 
 fn default_engine() -> String {
     "auto".into()
+}
+
+fn default_compile_workers() -> usize {
+    DEFAULT_COMPILE_WORKERS
+}
+
+fn default_compile_batch() -> usize {
+    DEFAULT_COMPILE_BATCH
 }
 
 impl Default for Policy {
@@ -64,11 +94,22 @@ impl Default for Policy {
             pause_on_battery: true,
             large_scan: DEFAULT_LARGE_SCAN,
             engine: default_engine(),
+            compile_workers: DEFAULT_COMPILE_WORKERS,
+            compile_batch_size: DEFAULT_COMPILE_BATCH,
         }
     }
 }
 
 impl Policy {
+    /// Clamped worker / batch sizes so a hand-edited lake cannot spawn chaos.
+    pub fn compile_workers_capped(&self) -> usize {
+        self.compile_workers.clamp(1, MAX_COMPILE_WORKERS)
+    }
+
+    pub fn compile_batch_capped(&self) -> usize {
+        self.compile_batch_size.clamp(1, MAX_COMPILE_BATCH)
+    }
+
     /// Whether a job that needs a model may start right now.
     ///
     /// Takes the power state rather than reading it, so the decision is a
@@ -205,6 +246,8 @@ mod tests {
             pause_on_battery: false,
             large_scan: 50,
             engine: "cursor-agent".into(),
+            compile_workers: 3,
+            compile_batch_size: 12,
         };
         lake.set_policy(&mine).unwrap();
         assert_eq!(lake.policy(), mine);
@@ -217,6 +260,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(raw.engine, "auto");
+        assert_eq!(raw.compile_workers, DEFAULT_COMPILE_WORKERS);
+        assert_eq!(raw.compile_batch_size, DEFAULT_COMPILE_BATCH);
+    }
+
+    #[test]
+    fn worker_and_batch_knobs_are_capped() {
+        let loose = Policy {
+            compile_workers: 99,
+            compile_batch_size: 0,
+            ..Policy::default()
+        };
+        assert_eq!(loose.compile_workers_capped(), MAX_COMPILE_WORKERS);
+        assert_eq!(loose.compile_batch_capped(), 1);
     }
 
     #[test]

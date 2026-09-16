@@ -102,6 +102,8 @@ export function Settings() {
     const next = {
       ...policyState.policy,
       engine: policyState.policy.engine || "auto",
+      compileWorkers: policyState.policy.compileWorkers ?? 2,
+      compileBatchSize: policyState.policy.compileBatchSize ?? 8,
       ...patch,
     }
     const saved = await background.setPolicy(next)
@@ -376,6 +378,63 @@ export function Settings() {
                     onBlur={() => {
                       const n = Math.max(50, Math.min(50000, Math.round(policyState.policy.largeScan)))
                       void patchPolicy({ largeScan: n })
+                    }}
+                  />
+                </Field>
+
+                <Field
+                  label="CLI workers"
+                  hint="Parallel compile workers beside the folder walk. Restart Knowlith after changing. Default 2, max 4."
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={4}
+                    step={1}
+                    className="max-w-[140px]"
+                    value={policyState.policy.compileWorkers ?? 2}
+                    disabled={saving === "policy"}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isFinite(n)) return
+                      setPolicyState({
+                        ...policyState,
+                        policy: { ...policyState.policy, compileWorkers: n },
+                      })
+                    }}
+                    onBlur={() => {
+                      const n = Math.max(1, Math.min(4, Math.round(policyState.policy.compileWorkers ?? 2)))
+                      void patchPolicy({ compileWorkers: n })
+                    }}
+                  />
+                </Field>
+
+                <Field
+                  label="Documents per CLI run"
+                  hint="How many files one Codex / Claude / Cursor process reads together. Higher = fewer cold starts. Default 8."
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={20}
+                    step={1}
+                    className="max-w-[140px]"
+                    value={policyState.policy.compileBatchSize ?? 8}
+                    disabled={saving === "policy"}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isFinite(n)) return
+                      setPolicyState({
+                        ...policyState,
+                        policy: { ...policyState.policy, compileBatchSize: n },
+                      })
+                    }}
+                    onBlur={() => {
+                      const n = Math.max(
+                        1,
+                        Math.min(20, Math.round(policyState.policy.compileBatchSize ?? 8)),
+                      )
+                      void patchPolicy({ compileBatchSize: n })
                     }}
                   />
                 </Field>
