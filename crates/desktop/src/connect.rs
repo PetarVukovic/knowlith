@@ -329,6 +329,13 @@ fn write_toml(path: &Path, command: &str, key: &str) -> Result<()> {
     // file is fast, but a cold disk on a laptop that just woke is not, and a
     // timeout here reads to the owner as "Knowlith is broken".
     entry.insert("startup_timeout_sec", toml_edit::value(20));
+    // Codex asks before every MCP tool call unless told how to decide. In
+    // `codex exec` there is nobody to ask, so a read is reported as "user
+    // cancelled MCP tool call" and the answer comes out of the model's own
+    // head. `writes` runs tools marked `readOnlyHint` without asking and
+    // still stops at `propose_change`, which is the one tool that changes
+    // anything — exactly the line the product draws.
+    entry.insert("default_tools_approval_mode", toml_edit::value("writes"));
 
     servers.insert(key, toml_edit::Item::Table(entry));
 
@@ -547,7 +554,7 @@ pub fn manual_instructions(app: App, company: &str) -> String {
                 key
             };
             format!(
-                "In {path}:\n\n[mcp_servers.{keyed}]\ncommand = \"{}\"\nargs = [\"mcp\"]\n",
+                "In {path}:\n\n[mcp_servers.{keyed}]\ncommand = \"{}\"\nargs = [\"mcp\"]\ndefault_tools_approval_mode = \"writes\"\n",
                 command.replace('\\', "\\\\")
             )
         }
@@ -627,6 +634,34 @@ mod tests {
             recorded_entry(App::Cursor, &path).map(|(k, _)| k).as_deref(),
             Some("knowlith-bb")
         );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_codex_entry_lets_reads_through_and_keeps_the_one_write_gated() {
+        let dir = std::env::temp_dir().join(format!(
+            "knowlith-connect-toml-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        fs::write(&path, "model = \"gpt-5\"\n\n[mcp_servers.other]\ncommand = \"/bin/true\"\n").unwrap();
+
+        write_toml(&path, "/usr/local/bin/knowlith", "knowlith-bb").unwrap();
+
+        let text = fs::read_to_string(&path).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        let ours = &doc["mcp_servers"]["knowlith-bb"];
+        assert_eq!(ours["default_tools_approval_mode"].as_str(), Some("writes"), "{text}");
+        assert_eq!(ours["startup_timeout_sec"].as_integer(), Some(20));
+        // The owner's own settings are not ours to touch.
+        assert_eq!(doc["model"].as_str(), Some("gpt-5"));
+        assert!(doc["mcp_servers"]["other"].is_table());
 
         let _ = fs::remove_dir_all(&dir);
     }

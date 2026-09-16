@@ -139,7 +139,17 @@ impl App {
                     .unwrap_or_else(paths::home);
                 Some(base.join(".claude.json"))
             }
-            App::Codex => Some(paths::home().join(".codex").join("config.toml")),
+            App::Codex => {
+                // Same story as `CLAUDE_CONFIG_DIR`: Codex reads `config.toml`
+                // from `CODEX_HOME` when set. The ChatGPT desktop app, the
+                // CLI and the IDE extension all share that one file.
+                let base = std::env::var("CODEX_HOME")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| paths::home().join(".codex"));
+                Some(base.join("config.toml"))
+            }
             App::Cursor => Some(paths::home().join(".cursor").join("mcp.json")),
         }
     }
@@ -474,6 +484,8 @@ mod client_name_tests {
         assert_eq!(App::from_client_name("Claude Code"), Some(App::ClaudeCode));
         assert_eq!(App::from_client_name("codex"), Some(App::Codex));
         assert_eq!(App::from_client_name("codex-cli"), Some(App::Codex));
+        // What the Codex CLI / ChatGPT desktop app actually send today.
+        assert_eq!(App::from_client_name("codex-mcp-client"), Some(App::Codex));
         assert_eq!(App::from_client_name("cursor"), Some(App::Cursor));
         assert_eq!(App::from_client_name("cursor-vscode"), Some(App::Cursor));
     }
