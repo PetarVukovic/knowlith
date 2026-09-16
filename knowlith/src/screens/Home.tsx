@@ -79,8 +79,14 @@ export function Home() {
   // An empty lake has nothing waiting on the owner, which made it "healthy"
   // — a green tick over a company that has not been read yet. Nothing and
   // fine are different states and the page has to say which.
-  const empty = objects.length === 0 && sources.length === 0
-  const healthy = !empty && attention.length === 0
+  //
+  // Having a folder is not the same as having read it. The first version
+  // of this line asked for a source as well, so a company with a folder
+  // and nothing out of it yet was called healthy: a green tick over four
+  // zeroes, which is the same mistake one condition further along.
+  const nothingRead = objects.length === 0
+  const noFolders = sources.length === 0
+  const healthy = !nothingRead && attention.length === 0
 
   return (
     <div className="mx-auto w-full max-w-[880px] px-4 py-8">
@@ -94,11 +100,13 @@ export function Home() {
             )}
           >
             {healthy ? <CheckCircle2 className="size-3.5" /> : null}
-            {empty
+            {noFolders
               ? "Nothing has been read yet. Point Knowlith at a folder to start."
-              : healthy
-                ? "Company context is healthy"
-                : `Company context is in use, with ${attention.length} ${attention.length === 1 ? "thing" : "things"} waiting on you`}
+              : nothingRead
+                ? "Your folders are here. Nothing has come out of them yet."
+                : healthy
+                  ? "Company context is healthy"
+                  : `Company context is in use, with ${attention.length} ${attention.length === 1 ? "thing" : "things"} waiting on you`}
           </p>
         </div>
         <Button variant="default" onClick={() => navigate("/sources")}>
@@ -144,9 +152,14 @@ export function Home() {
       </div>
 
       <h2 className="mt-9 text-[15px] font-semibold text-ink">Needs your attention</h2>
-      {healthy ? (
+      {attention.length === 0 ? (
         <Panel className="mt-3 p-4 text-[13px] text-muted">
-          Nothing is waiting. New findings appear here the next time Knowlith reads your folders.
+          {/* An unread company is not a settled one, and the reassuring
+              sentence below would be the wrong half of the truth while
+              the panel above is still working through the folder. */}
+          {nothingRead
+            ? "Nothing to decide yet. Findings appear here as they come out of your folders."
+            : "Nothing is waiting. New findings appear here the next time Knowlith reads your folders."}
         </Panel>
       ) : (
         <div className="mt-3 grid gap-2">

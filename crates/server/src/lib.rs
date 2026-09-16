@@ -952,11 +952,20 @@ async fn work(State(state): State<AppState>) -> ApiResult<WorkDto> {
     let outstanding: i64 = pending.iter().map(|(_, n)| *n).sum();
     let waiting = |kind: &str| pending.iter().any(|(k, n)| k == kind && *n > 0);
 
+    let held_total: i64 = lake.held().map_err(failed)?.iter().map(|(_, _, n)| *n).sum();
+
     // The stage is the earliest thing still outstanding, because that is
     // what the later stages are waiting for. Reading a folder while three
     // documents are still being read is "reading", not "preparing skills",
     // even though a relate job is sitting behind them in the queue.
-    let (stage, doing) = if waiting("rescan") {
+    //
+    // Unless every last outstanding job is held, in which case none of
+    // those stages is happening. A spinner over "Reading the documents"
+    // while the banner underneath says twenty-four jobs are waiting is
+    // the screen contradicting itself on the same screen.
+    let (stage, doing) = if outstanding > 0 && held_total >= outstanding {
+        ("held", "Paused — nothing is being read")
+    } else if waiting("rescan") {
         ("reading", "Looking through your folder")
     } else if waiting("compile_document") {
         ("reading", "Reading the documents")

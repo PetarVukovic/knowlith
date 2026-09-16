@@ -232,3 +232,36 @@ async fn housekeeping_that_found_nothing_is_not_news() {
     let out = work(lake).await;
     assert!(out["lines"].as_array().expect("lines").is_empty());
 }
+
+/// A spinner over "Reading the documents" while the banner underneath
+/// says twenty-four jobs are waiting is the screen contradicting itself.
+#[tokio::test]
+async fn nothing_is_reading_when_every_outstanding_job_is_held() {
+    let lake = lake();
+    for key in ["a", "b"] {
+        queue(&lake, "compile_document", key, "{}");
+        let job = lake.lease().expect("lease").expect("a job");
+        lake.hold(job.id, knowlith_lake::Held::Battery.as_str()).expect("held");
+    }
+
+    let out = work(lake).await;
+    assert_eq!(out["stage"], "held");
+    assert_eq!(out["doing"], "Paused — nothing is being read");
+    assert_eq!(out["held"]["count"], 2);
+}
+
+/// One job still moving means work is still happening, however much is
+/// held behind it. Reporting that as paused would be the same lie the
+/// other way round.
+#[tokio::test]
+async fn work_still_moving_is_not_reported_as_paused() {
+    let lake = lake();
+    queue(&lake, "compile_document", "held", "{}");
+    let job = lake.lease().expect("lease").expect("a job");
+    lake.hold(job.id, knowlith_lake::Held::Battery.as_str()).expect("held");
+    queue(&lake, "compile_document", "running", "{}");
+
+    let out = work(lake).await;
+    assert_eq!(out["stage"], "reading");
+    assert_eq!(out["held"]["count"], 1);
+}

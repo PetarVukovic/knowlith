@@ -437,7 +437,7 @@ export type UsedObject = {
  * to predict from, so any number would be invented.
  */
 export type Work = {
-  stage: "reading" | "thinking" | "preparing" | "idle"
+  stage: "reading" | "thinking" | "preparing" | "held" | "idle"
   doing: string
   done: number
   total: number

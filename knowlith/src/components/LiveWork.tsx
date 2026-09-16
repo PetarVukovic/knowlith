@@ -33,8 +33,10 @@ export function LiveWork() {
       // Once a second while there is something to watch, and rarely when
       // there is not. A panel that polls hard over an idle daemon is a
       // laptop fan spinning for nothing.
-      const busy = next !== null && next.stage !== "idle"
-      timer.current = window.setTimeout(pull, busy ? 1000 : 5000)
+      // Held is not busy. Polling once a second over a queue that has
+      // been paused since lunchtime buys nothing.
+      const moving = next !== null && next.stage !== "idle" && next.stage !== "held"
+      timer.current = window.setTimeout(pull, moving ? 1000 : 5000)
     }
 
     void pull()
@@ -47,23 +49,26 @@ export function LiveWork() {
   if (!work) return null
 
   const failures = work.lines.filter((line) => line.state === "failed")
-  const busy = work.stage !== "idle"
+  const paused = work.stage === "held"
+  const moving = work.stage !== "idle" && !paused
   // An idle daemon with nothing to report is not worth a panel. One that
   // has just finished, or that could not read something, is.
-  if (!busy && failures.length === 0 && work.lines.length === 0) return null
+  if (work.stage === "idle" && failures.length === 0 && work.lines.length === 0) return null
 
   const percent = work.total > 0 ? Math.round((work.done / work.total) * 100) : 100
 
   return (
     <section className="rounded-xl border border-line bg-surface">
       <header className="flex flex-wrap items-center gap-2.5 border-b border-line px-4 py-3">
-        {busy ? (
+        {moving ? (
           <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />
+        ) : paused ? (
+          <PauseCircle className="size-3.5 shrink-0 text-pending" />
         ) : (
           <Check className="size-3.5 shrink-0 text-confirmed" />
         )}
         <span className="text-[13px] font-medium text-ink">
-          {busy ? work.doing : "Up to date"}
+          {work.stage === "idle" ? "Up to date" : work.doing}
         </span>
         {work.total > 0 ? (
           <span className="ml-auto font-mono text-[11.5px] tabular-nums text-faint">
@@ -75,7 +80,7 @@ export function LiveWork() {
       {work.total > 0 ? (
         <div className="h-[3px] w-full bg-surface-3" role="progressbar" aria-valuenow={percent}>
           <div
-            className="h-full bg-accent transition-[width] duration-500"
+            className={cn("h-full transition-[width] duration-500", paused ? "bg-pending" : "bg-accent")}
             style={{ width: `${percent}%` }}
           />
         </div>
