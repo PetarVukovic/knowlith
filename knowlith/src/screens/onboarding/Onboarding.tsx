@@ -1,8 +1,8 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { ArrowLeft, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { background } from "@/lib/api"
+import { background, getWorkFeed } from "@/lib/api"
 import type { Inventory, Processor, SourceKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
@@ -13,6 +13,7 @@ import { StepPreview } from "./StepPreview"
 import { StepProcessing } from "./StepProcessing"
 import { StepSource } from "./StepSource"
 import { StepWelcome } from "./StepWelcome"
+
 /**
  * The first few minutes.
  *
@@ -25,12 +26,34 @@ import { StepWelcome } from "./StepWelcome"
  * Home stays closed until the folder has been read and the first-run path
  * (review → connect) has finished. Escaping early used to open an empty
  * dashboard and look like the product had nothing to say.
+ *
+ * The wizard step itself is not stored. Refresh used to drop the owner on
+ * Welcome while the daemon was still reading — the lake already had a source,
+ * and the honest screen is Building or Discovery, not the start.
  */
 const DECISIONS = 4
 
+function asProcessor(value: string | undefined, fallback: Processor): Processor {
+  if (value === "codex" || value === "claude-code" || value === "cursor-agent" || value === "managed") {
+    return value
+  }
+  return fallback
+}
+
 export function Onboarding() {
   const navigate = useNavigate()
-  const { completeOnboarding, setFirstRun, setCompany, addSource } = useApp()
+  const {
+    completeOnboarding,
+    setFirstRun,
+    setCompany,
+    addSource,
+    ready,
+    sources,
+    companyName,
+    companyLogo,
+    discovery,
+    objects,
+  } = useApp()
 
   const [step, setStep] = useState(0)
   const [name, setName] = useState("")
@@ -42,6 +65,45 @@ export function Onboarding() {
   const [allowStart, setAllowStart] = useState(false)
   const [granted, setGranted] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  /** False until we know whether to resume mid-read or start at Welcome. */
+  const [placed, setPlaced] = useState(false)
+
+  useEffect(() => {
+    if (!ready || placed) return
+    let cancelled = false
+
+    const place = async () => {
+      // No folder attached yet — the welcome path is the only honest one.
+      if (sources.length === 0) {
+        if (!cancelled) setPlaced(true)
+        return
+      }
+
+      const [feed, policy] = await Promise.all([getWorkFeed(), background.policy()])
+      if (cancelled) return
+
+      const knownName = companyName.trim() && companyName !== "Your company" ? companyName.trim() : ""
+      if (knownName) setName(knownName)
+      if (companyLogo) setLogo(companyLogo)
+      setProcessor(asProcessor(policy?.policy.engine ?? sources[0]?.processor, "codex"))
+
+      const knowledge =
+        (discovery?.rules ?? 0) +
+        (discovery?.processes ?? 0) +
+        (discovery?.terms ?? 0) +
+        (discovery?.skills ?? 0)
+      const busy = feed !== null && feed.stage !== "idle"
+      // Still reading, held, or finished with nothing to show yet → Building.
+      // Idle with findings → Discovery. Never Welcome once a source exists.
+      setStep(busy || (knowledge === 0 && objects.length === 0) ? 5 : 6)
+      setPlaced(true)
+    }
+
+    void place()
+    return () => {
+      cancelled = true
+    }
+  }, [ready, placed, sources, companyName, companyLogo, discovery, objects])
 
   const canContinue =
     (step === 0 && name.trim().length > 1) ||
@@ -71,9 +133,12 @@ export function Onboarding() {
     // "Your company" while the work is already running.
     setCompany(name.trim(), logo)
     // Persist who should read — the worker binds this at daemon start.
+    // First read runs even on battery. pauseOnBattery:true here used to hold
+    // every compile job, so the building screen hit 100% with nothing found
+    // and spun on "Preparing review" until the laptop was plugged in.
     await background.setPolicy({
       processing: "automatic",
-      pauseOnBattery: true,
+      pauseOnBattery: false,
       largeScan: 500,
       engine: processor,
     })
@@ -83,10 +148,20 @@ export function Onboarding() {
   }
 
   const wide = step >= 4
+  const displayName = name.trim() || (companyName !== "Your company" ? companyName : "") || "your company"
+
+  if (!ready || !placed) {
+    return <div className="min-h-full bg-surface" />
+  }
 
   return (
     <div className="min-h-full bg-surface">
-      <div className={cn("mx-auto w-full px-5 py-12 sm:py-16", wide ? "max-w-[720px]" : "max-w-[600px]")}>
+      <div
+        className={cn(
+          "mx-auto w-full px-5 py-12 sm:py-16",
+          step >= 5 ? "max-w-[860px]" : wide ? "max-w-[720px]" : "max-w-[600px]",
+        )}
+      >
         {step < DECISIONS ? (
           <div className="flex items-center gap-1.5 pb-10" aria-hidden>
             {Array.from({ length: DECISIONS }, (_, i) => (
@@ -143,14 +218,15 @@ export function Onboarding() {
         ) : null}
 
         {step === 5 ? (
-          <StepBuilding company={name.trim() || "your company"} onDone={() => setStep(6)} />
+          <StepBuilding
+            company={displayName}
+            processor={processor}
+            onDone={() => setStep(6)}
+          />
         ) : null}
 
         {step === 6 ? (
-          <StepDiscovery
-            company={name.trim() || "your company"}
-            onReview={() => enterApp("review")}
-          />
+          <StepDiscovery company={displayName} onReview={() => enterApp("review")} />
         ) : null}
 
         {step < DECISIONS ? (
