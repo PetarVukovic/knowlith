@@ -60,6 +60,38 @@ pub struct Job {
     pub attempts: i64,
 }
 
+/// One line of work, as the owner should read it.
+///
+/// `subject` is whatever the job's payload identified — a document id, a
+/// source id, or nothing at all for the jobs that act on the whole lake.
+/// Turning that into a name is the server's job, because only the server
+/// knows what the owner calls it.
+#[derive(Debug, Clone)]
+pub struct WorkLine {
+    pub kind: String,
+    pub state: String,
+    pub subject: Option<String>,
+    pub note: Option<String>,
+    pub error: Option<String>,
+    pub at: Option<String>,
+    pub attempts: i64,
+}
+
+/// What a job's payload was about, if it was about one thing.
+///
+/// Read leniently. A payload shape that changes must cost a missing name on
+/// one line of a log, never a failed query — the panel exists to report
+/// trouble, and it would be a poor one if a surprise silenced it.
+fn subject_of(payload: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    for key in ["document_id", "source_id", "id", "root"] {
+        if let Some(found) = value.get(key).and_then(|v| v.as_str()) {
+            return Some(found.to_string());
+        }
+    }
+    None
+}
+
 /// How long a worker holds a claim before it has to renew.
 const LEASE_SECONDS: i64 = 60;
 /// After this many attempts a job stops being retried and starts being
@@ -127,10 +159,17 @@ impl Lake {
         Ok(())
     }
 
-    pub fn finish(&self, job_id: i64) -> Result<()> {
+    /// Marks a job done, and keeps what it did.
+    ///
+    /// `note` is the sentence the worker hands back — "14 claims · 2 not
+    /// read". It used to go to the command line and nowhere else, which
+    /// left an owner watching the interface with a queue that emptied and
+    /// no account of what came out of it.
+    pub fn finish(&self, job_id: i64, note: &str) -> Result<()> {
         self.conn.execute(
-            "UPDATE jobs SET state = 'done', finished_at = ?2, lease_until = NULL WHERE id = ?1",
-            params![job_id, Utc::now().to_rfc3339()],
+            "UPDATE jobs SET state = 'done', finished_at = ?2, lease_until = NULL, note = ?3
+             WHERE id = ?1",
+            params![job_id, Utc::now().to_rfc3339(), note],
         )?;
         Ok(())
     }
@@ -221,6 +260,83 @@ impl Lake {
             params![kind],
             |r| r.get(0),
         )?)
+    }
+
+    /// The most recent work, newest first.
+    ///
+    /// Held jobs come too, and they carry no `finished_at` — a job waiting
+    /// for the owner to plug the laptop in is the single most useful line
+    /// on the panel, and ordering it away because it has no end time is
+    /// how it would go missing.
+    pub fn recent_work(&self, limit: usize) -> Result<Vec<WorkLine>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, state, payload_json, note, last_error, finished_at, created_at, attempts
+               FROM jobs
+              WHERE state IN ('done', 'failed', 'dead', 'held', 'leased')
+              ORDER BY coalesce(finished_at, created_at) DESC
+              LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |r| {
+                let payload: String = r.get(2)?;
+                let finished: Option<String> = r.get(5)?;
+                let created: String = r.get(6)?;
+                Ok(WorkLine {
+                    kind: r.get(0)?,
+                    state: r.get(1)?,
+                    subject: subject_of(&payload),
+                    note: r.get(3)?,
+                    error: r.get(4)?,
+                    at: Some(finished.unwrap_or(created)),
+                    attempts: r.get(7)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// How many jobs have finished since the current burst of work began.
+    ///
+    /// A burst begins when the oldest job still outstanding was queued.
+    /// That definition needs no extra bookkeeping and gets the important
+    /// case right: adding a folder this afternoon starts a bar at zero
+    /// rather than at whatever nine hundred jobs from last week would make
+    /// it. With nothing outstanding there is no burst, and the answer is
+    /// nought.
+    pub fn finished_this_burst(&self) -> Result<i64> {
+        let began: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT min(created_at) FROM jobs WHERE state IN ('queued', 'leased', 'held')",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let Some(began) = began else {
+            return Ok(0);
+        };
+        Ok(self.conn.query_row(
+            "SELECT count(*) FROM jobs
+              WHERE state IN ('done', 'failed', 'dead') AND finished_at >= ?1",
+            params![began],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// How much is outstanding, by kind, so the interface can say which
+    /// stage the work is in without a stored field that could disagree
+    /// with the queue.
+    pub fn pending_by_kind(&self) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, count(*) FROM jobs
+              WHERE state IN ('queued', 'leased', 'held')
+              GROUP BY kind",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     pub fn job_counts(&self) -> Result<Vec<(String, i64)>> {

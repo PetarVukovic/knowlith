@@ -135,6 +135,28 @@ than approved — seven pairs to decide about, and 55 graph edges.
 The lake defaults to `~/Knowlith/data/lake.sqlite`; pass `--db` for another
 path. `scan --dry-run` counts without storing.
 
+### Watching it work
+
+Every worker hands back a sentence when it finishes a job — `Cjenik 2026.xlsx:
+14 claims · 2 not read`, `51 kept · 30 dropped · 3 conflicts`. Those used to go
+to the command line and nowhere else, so an owner who added a folder in the
+interface watched a number count down with no account of what came out of it.
+They are now kept on the job and served by `GET /api/work`, which the dashboard
+polls once a second while there is work and every five seconds when there is
+not.
+
+The stage shown on screen (`reading`, `thinking`, `preparing`) is derived from
+what is still queued rather than stored, so it cannot disagree with the queue.
+Progress counts the current burst — the jobs queued since the last time nothing
+was outstanding — so adding a folder starts the bar at nought rather than at
+whatever last week's history would make it.
+
+There is deliberately no estimated time. A document takes a second or a minute
+depending on its size and the engine, and the first run has nothing to predict
+from, so any figure would be invented. A document that would not read stays on
+the panel after the queue drains: it is the one line there that asks the owner
+for something.
+
 ### The API is not open to every page you have open
 
 The daemon listens on `127.0.0.1`, and for a while a comment in the router

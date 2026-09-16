@@ -425,3 +425,31 @@ export type UsedObject = {
   title: string
   kind: "rule" | "process" | "term" | "skill" | "fact"
 }
+
+/**
+ * What Knowlith is doing right now.
+ *
+ * `done` and `total` count the current burst of work, not the whole
+ * history — adding a folder starts the bar at nought rather than at
+ * whatever last week's jobs would make it. There is deliberately no
+ * estimated time: a document takes anywhere from a second to a minute
+ * depending on its size and the engine, and the first run has no history
+ * to predict from, so any number would be invented.
+ */
+export type Work = {
+  stage: "reading" | "thinking" | "preparing" | "idle"
+  doing: string
+  done: number
+  total: number
+  held: { reason: string; count: number } | null
+  lines: WorkLine[]
+}
+
+export type WorkLine = {
+  /** The document's name, never its id. */
+  subject: string
+  /** What the job did, in its own words: "14 claims · 2 not read". */
+  note: string
+  state: "done" | "failed" | "working"
+  at: string
+}

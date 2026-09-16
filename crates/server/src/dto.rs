@@ -524,3 +524,52 @@ pub struct UsedObjectDto {
     /// `rule` | `process` | `term` | `skill` | `fact`.
     pub kind: String,
 }
+
+/// What Knowlith is doing right now, and what it just did.
+///
+/// One response rather than three, because the panel is one thing on
+/// screen and three requests a second racing each other would show a
+/// progress bar and a log that disagree about how far along the work is.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkDto {
+    /// `reading` | `thinking` | `preparing` | `idle`.
+    ///
+    /// Derived from what is still queued, never stored. A stored stage is
+    /// a second source of truth about the queue, and the day it disagrees
+    /// the owner is told the work is finished while it runs.
+    pub stage: &'static str,
+    /// A sentence for the stage, in the owner's words rather than the
+    /// worker's job kinds.
+    pub doing: &'static str,
+    /// Finished within this burst of work, and the total it belongs to.
+    /// Both zero when nothing is happening.
+    pub done: usize,
+    pub total: usize,
+    pub held: Option<HoldDto>,
+    /// Newest first. What was read, what came out of it, and what would
+    /// not read at all.
+    pub lines: Vec<WorkLineDto>,
+}
+
+/// Work the owner's own policy is holding back.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HoldDto {
+    /// Plain words: "Knowlith is running on battery".
+    pub reason: String,
+    pub count: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkLineDto {
+    /// What it was about, by name. Never an id: `doc:9982ba86ea32837c`
+    /// describes the owner's own file in a vocabulary they cannot read.
+    pub subject: String,
+    /// What the job did, in the worker's own words.
+    pub note: String,
+    /// `done` | `failed` | `working`.
+    pub state: &'static str,
+    pub at: String,
+}

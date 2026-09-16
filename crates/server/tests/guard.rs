@@ -19,13 +19,15 @@ const SECRET: &str = "the-owners-token";
 fn app() -> axum::Router {
     // A lake of its own per test, so nothing here depends on the order
     // these run in or on what is in the developer's own `~/Knowlith`.
+    // A counter, not only a timestamp: two tests on two threads read the
+    // same nanosecond, shared one lake file, and the second one's job was
+    // silently swallowed by the idempotency key the first had already
+    // used. That failed about one run in ten and looked like a queue bug.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
         "knowlith-guard-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("a clock")
-            .as_nanos()
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).expect("a directory");
     let lake = Lake::open(&dir.join("lake.sqlite")).expect("a lake");

@@ -103,6 +103,21 @@ impl Held {
             Held::TooMuchAtOnce => "too-much-at-once",
         }
     }
+
+    /// Back from what was written on the job.
+    ///
+    /// The queue stores [`Held::as_str`], and the interface needs the
+    /// sentence. Without this the owner is shown `too-much-at-once`, which
+    /// is a slug, in a panel that is supposed to explain itself.
+    pub fn from_slug(slug: &str) -> Option<Held> {
+        match slug {
+            "ask" => Some(Held::Ask),
+            "manual" => Some(Held::Manual),
+            "battery" => Some(Held::Battery),
+            "too-much-at-once" => Some(Held::TooMuchAtOnce),
+            _ => None,
+        }
+    }
 }
 
 const KEY: &str = "policy";
@@ -161,6 +176,9 @@ mod tests {
         for held in [Held::Ask, Held::Manual, Held::Battery, Held::TooMuchAtOnce] {
             assert!(!held.reason().is_empty());
             assert!(!held.as_str().contains(' '));
+            // Every slug the queue can store must come back as a sentence,
+            // or the work panel prints the slug at the owner.
+            assert_eq!(Held::from_slug(held.as_str()), Some(held));
         }
     }
 

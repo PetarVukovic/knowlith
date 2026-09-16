@@ -39,6 +39,7 @@ import type {
   SourceAdded,
   TreeNode,
   Usage,
+  Work,
 } from "./types"
 
 const LATENCY = 120
@@ -423,6 +424,24 @@ export const tools = {
   async bundle() {
     return post<{ path: string; megabytes: number; version: string }>("/api/bundle")
   },
+}
+
+/**
+ * What the daemon is doing, for the panel on the dashboard.
+ *
+ * Returns null when there is no daemon, which the panel reads as "nothing
+ * to show" rather than "nothing is happening" — those are different, and
+ * only one of them is worth a progress bar.
+ */
+export async function getWorkFeed(): Promise<Work | null> {
+  if (!(await connected())) return null
+  try {
+    const response = await ask("/api/work")
+    if (!response.ok) return null
+    return (await response.json()) as Work
+  } catch {
+    return null
+  }
 }
 
 export const background = {

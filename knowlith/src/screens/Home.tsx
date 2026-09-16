@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom"
 import { ArrowRight, CheckCircle2, ChevronRight, GitMerge, PauseCircle, RefreshCw } from "lucide-react"
+import { LiveWork } from "@/components/LiveWork"
 import { KindIcon, kindMeta } from "@/components/Domain"
 import { Button } from "@/components/ui/button"
 import { Panel } from "@/components/ui/surface"
@@ -104,6 +105,13 @@ export function Home() {
           <RefreshCw />
           Read sources again
         </Button>
+      </div>
+
+      {/* Above the tiles, because while a folder is being read the tiles
+          are the thing that is changing and this is the explanation for
+          why. It takes itself off screen when there is nothing to say. */}
+      <div className="mt-7 empty:mt-0">
+        <LiveWork />
       </div>
 
       <div className="mt-7 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-4">

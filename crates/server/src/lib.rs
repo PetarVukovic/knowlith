@@ -128,6 +128,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tool-reads", get(tool_reads))
         .route("/api/activity", get(activity))
         .route("/api/usage", get(usage))
+        .route("/api/work", get(work))
         .route("/api/tree", get(tree))
         .route("/api/tools", get(tools))
         .route("/api/tools/{app}/connect", post(connect_app))
@@ -935,6 +936,146 @@ async fn activity(State(state): State<AppState>) -> ApiResult<Vec<ActivityDto>> 
     Ok(Json(out))
 }
 
+// ------------------------------------------------------------ the work --
+
+/// What Knowlith is doing, for the panel the owner watches after adding a
+/// folder.
+///
+/// Everything here is read off the queue. The workers have always handed
+/// back a sentence for each job they finished; until now it went to the
+/// command line and nowhere else, so an owner watching the interface saw a
+/// number go down and never learned what came out of it.
+async fn work(State(state): State<AppState>) -> ApiResult<WorkDto> {
+    let lake = state.lake.lock().map_err(failed)?;
+
+    let pending = lake.pending_by_kind().map_err(failed)?;
+    let outstanding: i64 = pending.iter().map(|(_, n)| *n).sum();
+    let waiting = |kind: &str| pending.iter().any(|(k, n)| k == kind && *n > 0);
+
+    // The stage is the earliest thing still outstanding, because that is
+    // what the later stages are waiting for. Reading a folder while three
+    // documents are still being read is "reading", not "preparing skills",
+    // even though a relate job is sitting behind them in the queue.
+    let (stage, doing) = if waiting("rescan") {
+        ("reading", "Looking through your folder")
+    } else if waiting("compile_document") {
+        ("reading", "Reading the documents")
+    } else if waiting("settle") {
+        ("thinking", "Working out what agrees and what does not")
+    } else if waiting("relate") || waiting("draft_skills") {
+        ("preparing", "Preparing skills and connections")
+    } else {
+        ("idle", "Nothing to do")
+    };
+
+    // Both halves of one burst. `done` counts what finished since the last
+    // time the queue was empty — anything older belongs to a different
+    // afternoon and would make the bar start at ninety per cent.
+    let done = lake.finished_this_burst().map_err(failed)? as usize;
+    let total = done + outstanding.max(0) as usize;
+
+    let held = lake
+        .held()
+        .map_err(failed)?
+        .into_iter()
+        .max_by_key(|(_, _, count)| *count)
+        .map(|(_, reason, count)| HoldDto {
+            // The queue stores the slug. Printing `too-much-at-once` at
+            // the owner in a panel meant to explain itself is not an
+            // explanation.
+            reason: knowlith_lake::Held::from_slug(&reason)
+                .map(|held| held.reason().to_string())
+                .unwrap_or(reason),
+            count,
+        });
+
+    let documents = lake.documents().map_err(failed)?;
+    let sources = lake.sources().map_err(failed)?;
+    let name_of = |subject: &str| -> String {
+        if let Some(document) = documents.iter().find(|d| d.id == subject) {
+            return document.name.clone();
+        }
+        if let Some((_, name, _, _, _, _)) = sources.iter().find(|(id, ..)| id == subject) {
+            return name.clone();
+        }
+        // A path is already readable; an id never is.
+        if subject.contains(std::path::MAIN_SEPARATOR) {
+            return std::path::Path::new(subject)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| subject.to_string());
+        }
+        "a document that is no longer there".into()
+    };
+
+    let lines = lake
+        .recent_work(LINES)
+        .map_err(failed)?
+        .into_iter()
+        .filter_map(|line| {
+            let state = match line.state.as_str() {
+                "done" => "done",
+                "failed" | "dead" => "failed",
+                "leased" => "working",
+                // A held job is reported by the banner above with its
+                // reason, and repeating it once per job would bury the
+                // work that did happen under a wall of the same sentence.
+                _ => return None,
+            };
+            let subject = line
+                .subject
+                .as_deref()
+                .map(name_of)
+                .unwrap_or_else(|| whole_lake(&line.kind).to_string());
+            let note = line.note.or(line.error).unwrap_or_else(|| "started".into());
+            // A job that finished with nothing to report is not news. The
+            // hourly re-check of stored quotes says nothing when nothing
+            // moved, and without this it would be the only line on an
+            // idle machine's panel, renewed every hour.
+            if note.is_empty() {
+                return None;
+            }
+            Some(WorkLineDto {
+                note: without_prefix(&note, &subject).to_string(),
+                subject,
+                state,
+                at: line.at.unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    Ok(Json(WorkDto { stage, doing, done, total, held, lines }))
+}
+
+/// Drops the document name a worker put in front of its own sentence.
+///
+/// `compile_document` reports "Cjenik.xlsx: 4 claims · 0 not read", which
+/// is right on a command line where nothing else says which file it was.
+/// The panel has a column for that, so printed as-is the name lands twice
+/// on the same row.
+fn without_prefix<'a>(note: &'a str, subject: &str) -> &'a str {
+    note.strip_prefix(subject)
+        .and_then(|rest| rest.strip_prefix(": "))
+        .unwrap_or(note)
+}
+
+/// How many lines of history the panel gets.
+///
+/// A log, not a feed: enough to see the last few minutes of a scan, few
+/// enough that asking once a second costs nothing.
+const LINES: usize = 60;
+
+/// What to call a job that was not about one document.
+fn whole_lake(kind: &str) -> &'static str {
+    match kind {
+        "settle" => "Everything read so far",
+        "relate" => "Connections between everything",
+        "draft_skills" => "Skills",
+        "recheck" => "Quotes already approved",
+        _ => "Your company",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1223,7 +1364,15 @@ async fn read_policy(State(state): State<AppState>) -> ApiResult<PolicyDto> {
             .held()
             .unwrap_or_default()
             .into_iter()
-            .map(|(kind, reason, count)| HeldDto { kind, reason, count })
+            .map(|(kind, reason, count)| HeldDto {
+                kind,
+                // The queue stores the slug; the interface needs the
+                // sentence. `too-much-at-once` is not an explanation.
+                reason: knowlith_lake::Held::from_slug(&reason)
+                    .map(|held| held.reason().to_string())
+                    .unwrap_or(reason),
+                count,
+            })
             .collect(),
         on_battery: knowlith_desktop::power().on_battery(),
     }))

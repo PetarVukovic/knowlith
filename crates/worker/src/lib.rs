@@ -179,7 +179,9 @@ impl Worker {
         let outcome = self.dispatch(&job, stop);
         match outcome {
             Ok(note) => {
-                self.lake.finish(job.id)?;
+                // Kept, not only printed. This sentence is the whole of
+                // what the owner is shown about work that went right.
+                self.lake.finish(job.id, &note)?;
                 tick.outcome = Some(note);
             }
             // A network is not a failure. Wait longer, try again, say nothing
@@ -358,7 +360,8 @@ impl Worker {
 
         let _ = self.lake.mark_scanned(&payload.source_id);
         Ok(format!(
-            "{walked} files walked · {changed} changed · {unchanged} unchanged · {unreadable} not readable"
+            "{} · {changed} changed · {unchanged} unchanged · {unreadable} not readable",
+            plural(walked, "file walked", "files walked")
         ))
     }
 
@@ -559,6 +562,13 @@ impl Worker {
             if self.lake.mark_stale(object_id).is_ok() {
                 marked += 1;
             }
+        }
+        // Nothing to say when nothing moved. This job runs every hour for
+        // the life of the installation, and reported each time it would
+        // be the only thing on an idle machine's work panel — telling the
+        // owner, hourly, that nothing happened.
+        if marked == 0 {
+            return Ok(String::new());
         }
         Ok(format!("{marked} objects now rest on something that moved"))
     }
@@ -789,5 +799,25 @@ mod policy_tests {
         assert!(!needs_a_model(KIND_RESCAN));
         assert!(!needs_a_model(KIND_SETTLE));
         assert!(!needs_a_model(KIND_RECHECK));
+    }
+}
+
+/// `1 file walked`, not `1 files walked`.
+///
+/// The owner reads these sentences on the dashboard, where a folder with
+/// one document in it is an ordinary case rather than an edge one.
+fn plural(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
+}
+
+#[cfg(test)]
+mod plural_tests {
+    use super::plural;
+
+    #[test]
+    fn one_is_not_reported_in_the_plural() {
+        assert_eq!(plural(1, "file walked", "files walked"), "1 file walked");
+        assert_eq!(plural(0, "file walked", "files walked"), "0 files walked");
+        assert_eq!(plural(2, "file walked", "files walked"), "2 files walked");
     }
 }

@@ -9,7 +9,7 @@ use knowlith_core::object::{Relation, RelationOrigin, RelationType, Subtype};
 use knowlith_core::{Confidence, ContextObject, Evidence, ObjectKind, ObjectStatus};
 use knowlith_extract::extract_bytes;
 use knowlith_graph::Graph;
-use knowlith_lake::{Lake, LakeError};
+use knowlith_lake::{Lake, LakeError, NewJob, PRIORITY_NORMAL};
 use std::path::Path;
 
 const UVJETI: &str = "\
@@ -460,4 +460,146 @@ fn an_approval_with_no_text_is_refused() {
     let stored = lake.object("rule:test").unwrap().unwrap();
     assert_eq!(stored.status, ObjectStatus::Approved);
     assert_eq!(stored.body, "Popust je 5%.");
+}
+
+// ------------------------------------------------------- the work panel --
+
+/// The sentence a worker hands back is the only account an owner gets of
+/// work that went right. It used to go to the command line and nowhere
+/// else, so the interface showed a queue emptying and nothing else.
+#[test]
+fn what_a_job_did_is_kept_not_only_printed() {
+    let lake = Lake::in_memory().unwrap();
+    lake.enqueue(&NewJob {
+        kind: "compile_document".into(),
+        payload: r#"{"document_id":"doc:abc"}"#.into(),
+        idempotency_key: "one".into(),
+        priority: PRIORITY_NORMAL,
+    })
+    .unwrap();
+
+    let job = lake.lease().unwrap().expect("a job");
+    lake.finish(job.id, "Cjenik 2026.xlsx: 14 claims · 2 not read").unwrap();
+
+    let work = lake.recent_work(10).unwrap();
+    assert_eq!(work.len(), 1);
+    assert_eq!(work[0].note.as_deref(), Some("Cjenik 2026.xlsx: 14 claims · 2 not read"));
+    assert_eq!(work[0].subject.as_deref(), Some("doc:abc"));
+    assert_eq!(work[0].state, "done");
+}
+
+/// A document that would not read is the one line on the panel that asks
+/// the owner for something, so it must not vanish when the queue drains.
+#[test]
+fn a_failure_outlives_the_queue_it_was_in() {
+    let lake = Lake::in_memory().unwrap();
+    lake.enqueue(&NewJob {
+        kind: "compile_document".into(),
+        payload: r#"{"document_id":"doc:locked"}"#.into(),
+        idempotency_key: "locked".into(),
+        priority: PRIORITY_NORMAL,
+    })
+    .unwrap();
+    let job = lake.lease().unwrap().expect("a job");
+    lake.fail(job.id, "the file is password protected").unwrap();
+
+    // Nothing is outstanding any more.
+    assert!(lake.lease().unwrap().is_none());
+    assert_eq!(lake.pending_by_kind().unwrap(), vec![]);
+
+    let work = lake.recent_work(10).unwrap();
+    assert_eq!(work.len(), 1, "the failure was forgotten with the queue");
+    assert_eq!(work[0].state, "failed");
+    assert_eq!(work[0].error.as_deref(), Some("the file is password protected"));
+}
+
+/// The bar must start at nought when the owner adds a folder, not at
+/// whatever last week's nine hundred finished jobs would make it.
+#[test]
+fn progress_counts_this_burst_and_not_the_whole_history() {
+    let lake = Lake::in_memory().unwrap();
+
+    // Yesterday's work, finished and done with.
+    lake.enqueue(&NewJob {
+        kind: "compile_document".into(),
+        payload: "{}".into(),
+        idempotency_key: "old".into(),
+        priority: PRIORITY_NORMAL,
+    })
+    .unwrap();
+    let old = lake.lease().unwrap().expect("a job");
+    lake.finish(old.id, "done long ago").unwrap();
+
+    // With nothing outstanding there is no burst to be part of.
+    assert_eq!(lake.finished_this_burst().unwrap(), 0);
+
+    // Now the owner adds a folder: two jobs, one of which finishes.
+    for key in ["new-1", "new-2"] {
+        lake.enqueue(&NewJob {
+            kind: "compile_document".into(),
+            payload: "{}".into(),
+            idempotency_key: key.into(),
+            priority: PRIORITY_NORMAL,
+        })
+        .unwrap();
+    }
+    let first = lake.lease().unwrap().expect("a job");
+    lake.finish(first.id, "one of two").unwrap();
+
+    assert_eq!(
+        lake.finished_this_burst().unwrap(),
+        1,
+        "yesterday's job was counted into today's progress"
+    );
+    assert_eq!(
+        lake.pending_by_kind().unwrap(),
+        vec![("compile_document".to_string(), 1)]
+    );
+}
+
+/// The stage shown on screen is read off the queue, so it has to be
+/// possible to tell the kinds apart.
+#[test]
+fn outstanding_work_is_reported_per_kind() {
+    let lake = Lake::in_memory().unwrap();
+    for (kind, key) in [("rescan", "r"), ("compile_document", "c1"), ("compile_document", "c2")] {
+        lake.enqueue(&NewJob {
+            kind: kind.into(),
+            payload: "{}".into(),
+            idempotency_key: key.into(),
+            priority: PRIORITY_NORMAL,
+        })
+        .unwrap();
+    }
+
+    let mut pending = lake.pending_by_kind().unwrap();
+    pending.sort();
+    assert_eq!(
+        pending,
+        vec![
+            ("compile_document".to_string(), 2),
+            ("rescan".to_string(), 1),
+        ]
+    );
+}
+
+/// A payload whose shape nobody anticipated must cost one missing name,
+/// never a failed query — the panel exists to report trouble.
+#[test]
+fn an_unreadable_payload_does_not_take_the_panel_down() {
+    let lake = Lake::in_memory().unwrap();
+    lake.enqueue(&NewJob {
+        kind: "settle".into(),
+        payload: "not json at all".into(),
+        idempotency_key: "odd".into(),
+        priority: PRIORITY_NORMAL,
+    })
+    .unwrap();
+    let job = lake.lease().unwrap().expect("a job");
+    lake.finish(job.id, "51 kept").unwrap();
+
+    let work = lake.recent_work(10).unwrap();
+    assert_eq!(work.len(), 1);
+    assert_eq!(work[0].subject, None);
+    assert_eq!(work[0].note.as_deref(), Some("51 kept"));
 }

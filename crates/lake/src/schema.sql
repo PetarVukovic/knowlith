@@ -202,11 +202,19 @@ CREATE TABLE IF NOT EXISTS jobs (
     lease_until      TEXT,
     run_after        TEXT NOT NULL,
     last_error       TEXT,
+    -- What the job actually did, in words, kept so the interface can show
+    -- the owner the work rather than a spinner. Every worker already
+    -- produces this sentence; before it was written here it went to the
+    -- command line and nowhere else.
+    note             TEXT,
     created_at       TEXT NOT NULL,
     finished_at      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_ready ON jobs(state, priority, run_after);
+-- The work panel asks for the newest lines once a second while a folder is
+-- being read, and the job history only ever grows.
+CREATE INDEX IF NOT EXISTS idx_jobs_finished ON jobs(finished_at DESC);
 
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,

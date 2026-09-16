@@ -17,7 +17,7 @@ use crate::Result;
 /// The shape this build expects. Bumped whenever a step is added, and stored
 /// so a lake written by a newer Knowlith can be recognised rather than
 /// quietly half-read by an older one.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 pub fn run(conn: &Connection) -> Result<()> {
     // A read of what is actually there beats a version number: a lake that
@@ -51,6 +51,31 @@ pub fn run(conn: &Connection) -> Result<()> {
         // and opened none of them has no reads to take it from — and that
         // case is the interesting one.
         conn.execute("ALTER TABLE cases ADD COLUMN app TEXT", [])?;
+    }
+
+    // Guarded on the table as well as the column, for the same reason
+    // `cases` is: a partial lake — one restored from a backup of the
+    // knowledge without the queue — must still open, because the screen
+    // that would explain the problem cannot load until it does.
+    if has_table(conn, "jobs")? && !has_column(conn, "jobs", "note")? {
+        // What a job actually did, in words. The workers have always
+        // produced this sentence and it has always gone to the command
+        // line and nowhere else, so an owner watching the interface saw a
+        // queue drain with no account of what came out of it.
+        //
+        // Nullable: every job finished before this column existed said
+        // something, and none of it was kept.
+        conn.execute("ALTER TABLE jobs ADD COLUMN note TEXT", [])?;
+    }
+
+    if has_table(conn, "jobs")? && !has_index(conn, "idx_jobs_finished")? {
+        // The work panel asks for the most recent lines every second while
+        // a folder is being read. Without this it is a scan of the whole
+        // job history each time, and that history only grows.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_finished ON jobs(finished_at DESC)",
+            [],
+        )?;
     }
 
     if !has_index(conn, "idx_tool_reads_app")? {

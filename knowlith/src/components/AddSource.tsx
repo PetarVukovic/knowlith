@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { AlertTriangle, FolderOpen, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
@@ -24,6 +25,7 @@ import { useApp } from "@/state/AppState"
  */
 export function AddSource({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { addSource } = useApp()
+  const navigate = useNavigate()
   const [found, setFound] = useState<Browsed | null>(null)
   const [typed, setTyped] = useState("")
   const [busy, setBusy] = useState<"browsing" | "checking" | "adding" | null>(null)
@@ -73,6 +75,10 @@ export function AddSource({ open, onClose }: { open: boolean; onClose: () => voi
     setBusy(null)
     if (typeof result === "string") return setError(result)
     close()
+    // Straight to the dashboard, where the work panel is already watching
+    // the queue. Leaving the owner on the folder list after adding one is
+    // leaving them where nothing visibly happens.
+    navigate("/home")
   }
 
   const inventory = found?.inventory ?? null
