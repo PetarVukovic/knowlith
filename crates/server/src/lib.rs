@@ -159,7 +159,29 @@ pub fn router(state: AppState) -> Router {
         // outside the guard above so it stays reachable without a token —
         // it is the page that carries the token in the first place.
         .fallback(interface)
+        // `layer`, not `route_layer`: this one must cover the page too. The
+        // page is exactly what a rebound domain would read the token out of.
+        .layer(axum::middleware::from_fn(loopback_only))
         .with_state(state)
+}
+
+/// Refuses a request that arrived under a domain name that is not this
+/// machine — see [`auth::is_loopback_host`] for the attack it stops.
+async fn loopback_only(request: Request, next: Next) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    if let Some(host) = host
+        && !auth::is_loopback_host(host)
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            format!("Knowlith answers only at 127.0.0.1 and localhost, not at {host}"),
+        )
+            .into_response();
+    }
+    next.run(request).await
 }
 
 /// Turns away everything that did not come from the owner's own interface.

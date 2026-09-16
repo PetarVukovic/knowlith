@@ -150,6 +150,55 @@ async fn the_page_itself_needs_no_token() {
 }
 
 #[tokio::test]
+async fn a_rebound_domain_is_not_handed_the_page_or_the_token() {
+    // DNS rebinding: a page loaded from `evil.example.com:7717` whose DNS
+    // answer is then switched to 127.0.0.1 is same-origin with the daemon
+    // as far as the browser knows, so it may read `/` — and the token in
+    // it. The only thing left that tells the two apart is `Host`.
+    for path in ["/", "/index.html", "/api/health"] {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(path)
+                    .header("host", "evil.example.com:7717")
+                    .header(knowlith_server::auth::HEADER, SECRET)
+                    .body(Body::empty())
+                    .expect("a request"),
+            )
+            .await
+            .expect("a response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path} answered a rebound host");
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.expect("a body");
+        assert!(
+            !String::from_utf8_lossy(&body).contains(SECRET),
+            "{path} leaked the token to a rebound host"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_owners_own_address_is_still_served() {
+    // The check above must not turn away the addresses the owner really
+    // types, or the ones Vite and the shipped binary answer at.
+    for host in ["127.0.0.1:7717", "localhost:5173", "localhost", "[::1]:7717"] {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/health")
+                    .header("host", host)
+                    .header(knowlith_server::auth::HEADER, SECRET)
+                    .body(Body::empty())
+                    .expect("a request"),
+            )
+            .await
+            .expect("a response");
+        assert_eq!(response.status(), StatusCode::OK, "{host} was refused");
+    }
+}
+
+#[tokio::test]
 async fn nothing_here_is_offered_to_another_origin() {
     // The hole was `allow_origin(Any)`: with it, a page anywhere could not
     // only trigger these endpoints but read what came back. No response

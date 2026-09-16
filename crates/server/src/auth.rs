@@ -130,6 +130,31 @@ fn same(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |seen, (x, y)| seen | (x ^ y)) == 0
 }
 
+/// Whether a `Host` header names this machine and nothing else.
+///
+/// The token defends against a page on another origin. It does not defend
+/// against a page that *becomes* this origin: a site at `evil.example:7717`
+/// whose DNS answer is switched to `127.0.0.1` after the page has loaded is
+/// same-origin with the daemon as far as the browser can tell, so it may
+/// read `/` and the token written into it, and from there everything. The
+/// one thing that request still carries is the domain the page was loaded
+/// from, in `Host` — so a `Host` that is not loopback is refused before any
+/// route sees it. Browsers always send the header; a request without one
+/// did not come from a browser and is left to the token.
+pub fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim();
+    let bare = if let Some(rest) = host.strip_prefix('[') {
+        // `[::1]:7717` — the port follows the bracket, not the last colon.
+        match rest.split_once(']') {
+            Some((inside, port)) if port.is_empty() || port.starts_with(':') => inside,
+            _ => return false,
+        }
+    } else {
+        host.rsplit_once(':').map(|(name, _)| name).unwrap_or(host)
+    };
+    bare.eq_ignore_ascii_case("localhost") || bare == "127.0.0.1" || bare == "::1"
+}
+
 /// Puts the token where the interface can find it.
 ///
 /// The page the daemon serves is same-origin with the API, so it could be
@@ -180,6 +205,16 @@ mod tests {
         assert!(!token.matches("abc12"));
         assert!(!token.matches("abc1234"));
         assert!(!token.matches(""));
+    }
+
+    #[test]
+    fn only_this_machine_is_a_valid_host() {
+        for ok in ["127.0.0.1", "127.0.0.1:7717", "localhost", "LocalHost:5173", "[::1]", "[::1]:7717"] {
+            assert!(is_loopback_host(ok), "{ok} should be accepted");
+        }
+        for bad in ["evil.example.com", "evil.example.com:7717", "127.0.0.1.evil.com", "localhost.evil.com", "[::1", "", "192.168.1.5:7717"] {
+            assert!(!is_loopback_host(bad), "{bad} should be refused");
+        }
     }
 
     #[test]

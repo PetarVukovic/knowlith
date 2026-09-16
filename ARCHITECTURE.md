@@ -167,6 +167,16 @@ binary, and the token never enters a browser.
 interface, not 401 from the guard. Reported as unauthorised, it sends whoever
 is debugging it hunting a permission problem that does not exist.
 
+The token defends against a page on *another* origin. It does not defend
+against a page that becomes this one: a site at `evil.example:7717` whose DNS
+answer is switched to `127.0.0.1` after the page has loaded is same-origin
+with the daemon as far as the browser can tell, and may read `/` — and the
+token written into it. The only thing that request still carries is the
+domain the page was loaded from, in `Host`. So a second check, on the whole
+router this time (the page included), refuses any `Host` that is not
+`127.0.0.1`, `localhost` or `::1`. Found by asking the running daemon for `/`
+with `Host: evil.example.com` and getting the token back.
+
 ## Showing the work
 
 Every worker hands back a sentence when it finishes a job — `Cjenik 2026.xlsx:
