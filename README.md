@@ -1,5 +1,8 @@
 # Knowlith
 
+> [`ARCHITECTURE.md`](ARCHITECTURE.md) is the shape of the system and why it is
+> that shape. [`CLAUDE.md`](CLAUDE.md) is for anyone editing the code.
+
 Your company knowledge, compiled for every AI.
 
 A Rust daemon that reads a company's folder and turns it into knowledge that

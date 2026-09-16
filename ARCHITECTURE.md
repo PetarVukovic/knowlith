@@ -1,0 +1,225 @@
+# Architecture
+
+Knowlith reads a company's own folders and compiles them into approved,
+evidence-backed knowledge, which it then serves to that company's AI tools.
+Nothing reaches a tool until a person has approved it, and nothing can be
+approved without the sentence it came from.
+
+This document is the shape of the system and the reasoning behind it.
+`README.md` is how to run it; `CLAUDE.md` is how to work on it.
+
+## The whole path
+
+```
+a folder on disk
+      │
+      │  extract — deterministic. Bytes in, blocks with offsets out.
+      ▼
+   documents ──────────────────────────────┐
+      │                                     │  content hash decides what is new
+      │  compile — four stages, one model   │
+      ▼                                     │
+   candidates ── evidence gate ── objects ──┘
+      │              ▲
+      │              └─ mechanical: the quote must be at those bytes
+      │
+      │  a person approves
+      ▼
+  approved objects ──► MCP gateway ──► Claude, Codex, another tool
+      │                     │
+      │                     └─ every read recorded, with which app asked
+      ▼
+   the interface: what is known, where it came from, who approved it,
+                  and where it is being used
+```
+
+## The crates
+
+Eleven, in a Cargo workspace. Edition 2024, resolver 3.
+
+| Crate | Lines | What it owns |
+| --- | --- | --- |
+| `core` | 625 | Domain types and the mechanical evidence check. No I/O, no inference. |
+| `extract` | 1369 | Files in, blocks with byte offsets out. XLSX, CSV, DOCX, PDF, text. No inference. |
+| `lake` | 2606 | SQLite storage, the evidence gate on write, the durable queue, the policy. |
+| `compiler` | 2955 | Four stages from documents to knowledge. Exactly one asks a model. |
+| `engine` | 1230 | Where the model runs: the owner's own CLI as a child process, or a recorded replay. |
+| `graph` | 308 | Impact, propagation order and cycle detection over approved objects. |
+| `worker` | 823 | The background loop that drains the queue. |
+| `mcp` | 2716 | The gateway. Approved knowledge served to AI tools over stdio. |
+| `server` | 2410 | The local HTTP API, bound to `127.0.0.1`, behind a token. |
+| `desktop` | 2712 | Where files live per operating system, and handing Knowlith to installed AI apps. |
+| `cli` | 1273 | The `knowlith` command. |
+
+The interface is React and Vite under `knowlith/`, compiled into the binary at
+build time by `crates/server/build.rs`.
+
+## Decisions worth understanding before changing anything
+
+### Four compiler stages, not ten
+
+Every stage that involves a model multiplies its own error into everything
+after it. At 95% per stage, ten stages land near 60% — which is worse than
+useless, because it is wrong in a way that looks right.
+
+1. **Structural** — pick the blocks worth asking about. Deterministic.
+2. **Candidates** — a model reads one document and proposes claims, each with
+   the sentence it came from. *The only stage with an engine in it.*
+3. **Consolidate** — group, rank by time and authority, mark conflicts.
+4. **Relate / skills** — edges between objects, and skills from approved
+   processes.
+
+Where a format allows it, stage 2 barely runs: an XLSX price list is read
+almost entirely deterministically, because a spreadsheet already has the
+structure a model would otherwise have to guess.
+
+### The evidence gate is mechanical before it is semantic
+
+A model proposes a claim and names the span it came from. Before anything is
+stored, the daemon reads those exact bytes out of the document and compares
+strings. A quote that is not there is refused, whatever the model said about
+it.
+
+"A second model thinks this looks right" is not a gate. This one is arithmetic.
+
+### Offsets point into the rendition, not the file
+
+A PDF or a spreadsheet has no byte offsets a person could use. Extraction
+produces a rendered text with blocks, and offsets address *that*. The rendition
+is stored alongside the document so a quote can be re-checked years later
+against the same text it was taken from.
+
+### Two processes, one lake
+
+`serve` (the daemon and its HTTP API) and `mcp` (the gateway a tool spawns) are
+**separate processes** sharing one SQLite file in WAL mode. The daemon cannot
+observe a live MCP session directly.
+
+Everything the interface knows about tool usage therefore travels through the
+lake. This is the constraint that shaped the whole of proof-of-use below.
+
+### The queue is durable and the lease is not a flag
+
+Work outlives the process that started it. A worker claims a job until a
+timestamp; if it dies, the lease expires and the job returns to the queue with
+nobody having to notice the crash. Idempotency keys make a retry recognise
+itself. Transport failure defers with a growing gap; a refusal fails and is
+reported, because retrying it changes nothing.
+
+Job kinds: `rescan`, `compile_document`, `settle`, `relate`, `draft_skills`,
+`recheck`.
+
+### The interface queues; it never scans
+
+Adding a folder records a source and enqueues a `rescan`. The walking is the
+worker's. This is what makes "you can close this window" true rather than
+reassuring.
+
+## Proof of use
+
+A configuration entry proves a button was pressed. It does not prove that
+knowledge reached a conversation.
+
+**Reads are attributed.** `clientInfo.name` arrives on every `initialize` and
+is normalised in exactly one place, `App::from_client_name`, then carried on
+every `tool_reads` row and every case. An unrecognised client stays
+unattributed — "Another tool" — and is never folded into one of the three.
+Telling an owner that Codex read their rules when it was Cursor is worse than
+silence.
+
+**Titles are not reads.** `get_relevant_context` returns titles and opens a
+case, and deliberately records nothing. Recording it would inflate the counts
+and destroy the coverage figure.
+
+**Coverage is possible because the set is finite.** The approved set is known
+and the gateway named what it offered, so the interface can report what an
+agent *skipped* — which nothing built on open-ended retrieval can do.
+
+## The API is behind a token
+
+The daemon listens on `127.0.0.1`, and for a while a comment in the router
+claimed that made it private. It does not. Loopback keeps the *network* out; it
+does nothing about the owner's own browser, which will carry a request to
+`127.0.0.1` on behalf of any page they have open.
+
+With `allow_origin(Any)` a website could:
+
+- `GET /api/sources/preview?path=…` — map any folder on the disk;
+- `POST /api/sources {"path":"/…"}` — have the daemon read one, then collect
+  the text back through `/api/objects`;
+- `POST /api/sources/browse` — open a native folder chooser on the desktop
+  (no body, so no preflight to fail).
+
+So every `/api` request must carry a secret written to `~/Knowlith/api.token`
+at mode 0600. A page cannot read that file, and a header it cannot set is a
+header no cross-origin request will carry. There is **no cross-origin allowance
+at all**: in development Vite forwards `/api` to the daemon and attaches the
+token in Node, so the browser is same-origin exactly as it is in the shipped
+binary, and the token never enters a browser.
+
+`route_layer`, not `layer`: a mistyped path must come back 404 from the
+interface, not 401 from the guard. Reported as unauthorised, it sends whoever
+is debugging it hunting a permission problem that does not exist.
+
+## Showing the work
+
+Every worker hands back a sentence when it finishes a job — `Cjenik 2026.xlsx:
+14 claims · 2 not read`. Those sentences are kept on the job and served by
+`GET /api/work`.
+
+The **stage** (`reading`, `thinking`, `preparing`, `held`, `idle`) is derived
+from what is still queued, never stored, so it cannot disagree with the queue.
+When every outstanding job is held, the stage is `held` — a spinner over
+"Reading the documents" while the banner beneath says twenty-four jobs are
+waiting is the screen contradicting itself.
+
+**Progress counts the current burst** — jobs queued since nothing was
+outstanding — so a folder added today starts the bar at nought rather than at
+last week's history.
+
+A job that finished with nothing to report says nothing. The hourly `recheck`
+would otherwise be the only line on an idle machine's panel, renewed every
+hour.
+
+## Storage: five primitives, not five copies
+
+Each answers a different question, and only the first two exist today.
+
+| Primitive | The question it answers |
+| --- | --- |
+| SQLite (`lake`) | What is stored, what is queued, what was read. The source of truth. |
+| Canonical objects | What does this company say, in a form a person can read and edit. |
+| Graph | What depends on this, and what breaks if it changes. Derived. |
+| Vector index | What is this about, when nobody knows the right word. *Not built.* |
+| CodeGraph | Where does the code disagree with the policy. *Not built.* |
+
+The graph is **derived**. Canonical objects remain the source of truth, and the
+graph can be rebuilt from them at any time.
+
+## Where the model runs
+
+Three placements, with different consequences for who pays and what may be
+claimed about privacy:
+
+1. **The owner's own CLI** as a child process — `claude` or `codex`, detected
+   on `PATH`. The documents never leave the machine, and the owner's existing
+   subscription pays.
+2. **A recorded replay** — `--replay <dir>` uses saved replies and calls
+   nothing. This is how the test suite exercises the whole loop offline, and
+   how `--record` produces new fixtures.
+3. **Managed** — not available in this build.
+
+`knowlith engines` reports what it can actually see.
+
+## Open shape
+
+The biggest known gap is not a bug. The compiler reads documents with no
+context about **what the company is** — so a folder of twenty invoices yields
+`Invoice number`, `Invoice parties`, `Invoice total and tax`: the schema of an
+invoice, extracted twenty times. Correct, and useless.
+
+Fixing it means asking the owner about their company before compiling, and the
+constraint to design around is that **the worker has no user**: it runs in the
+background, possibly with the window closed, so a child process cannot stop and
+wait on stdin. The questions have to travel through the interface and the
+answers into the lake, not through the engine's standard input.
