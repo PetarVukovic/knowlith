@@ -197,7 +197,7 @@ export const api = {
   async getCompany() {
     return get<{ name: string; profile: string }>(
       "/api/company",
-      fixtures.company,
+      { name: fixtures.company.name, profile: "" },
       { name: "", profile: "" },
     )
   },

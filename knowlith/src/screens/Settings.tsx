@@ -98,9 +98,10 @@ export function Settings() {
   const patchPolicy = async (patch: Partial<Policy>) => {
     if (!policyState) return
     setSaving("policy")
+    // Prefer the saved engine; only default when a lake predates the field.
     const next = {
-      engine: "auto",
       ...policyState.policy,
+      engine: policyState.policy.engine || "auto",
       ...patch,
     }
     const saved = await background.setPolicy(next)

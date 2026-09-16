@@ -12,28 +12,28 @@ import type { AiTool, ObjectKind } from "@/lib/types"
 import { cn, formatRelative } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
 
-const COUNT_HELP: Record<string, { label: string; hint: string; kind: ObjectKind | "skill" }> = {
+const COUNT_HELP = {
   rule: {
     label: "Rules",
     hint: "A decision your company already made — limits, deadlines, who approves what.",
-    kind: "rule",
+    kind: "rule" as ObjectKind | "skill",
   },
   process: {
     label: "Processes",
     hint: "How work is done here, step by step.",
-    kind: "process",
+    kind: "process" as ObjectKind | "skill",
   },
   skill: {
     label: "AI skills",
     hint: "Tasks connected AI assistants can carry out using your approved knowledge.",
-    kind: "skill",
+    kind: "skill" as ObjectKind | "skill",
   },
   term: {
     label: "Business terms",
     hint: "Words, products and meanings specific to your company.",
-    kind: "term",
+    kind: "term" as ObjectKind | "skill",
   },
-}
+} as const
 
 function greeting(name: string): string {
   const hour = new Date().getHours()
