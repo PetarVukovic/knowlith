@@ -154,8 +154,39 @@ struct QuizOut {
     proposed_object_id: Option<String>,
 }
 
-/// Runs the full build supervisor pass over everything in the lake.
-pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<RunReport, String> {
+#[derive(Debug, thiserror::Error)]
+pub enum RunError {
+    #[error(transparent)]
+    Engine(#[from] knowlith_engine::EngineError),
+    #[error("{0}")]
+    Invalid(String),
+}
+
+impl From<String> for RunError {
+    fn from(message: String) -> Self { Self::Invalid(message) }
+}
+
+impl RunError {
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::Engine(error) if error.is_retryable())
+    }
+}
+
+pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<RunReport, RunError> {
+    run_for_job(lake, engine, session_id, None)
+}
+
+/// Keep the durable lease alive while each bounded CLI request is in flight.
+pub fn run_for_job(lake: &mut Lake, engine: &dyn Engine, session_id: &str, job_id: Option<i64>) -> Result<RunReport, RunError> {
+    let result = run_inner(lake, engine, session_id, job_id);
+    if let Err(error) = &result {
+        let _ = lake.set_build_phase(if error.is_retryable() { "retrying" } else { "failed" });
+        let _ = lake.finish_supervisor_session(session_id, "interrupted");
+    }
+    result
+}
+
+fn run_inner(lake: &mut Lake, engine: &dyn Engine, session_id: &str, job_id: Option<i64>) -> Result<RunReport, RunError> {
     lake.set_build_phase("active").map_err(|e| e.to_string())?;
     lake.open_supervisor_session(session_id, engine.name())
         .map_err(|e| e.to_string())?;
@@ -167,7 +198,7 @@ pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<Run
         .unwrap_or_default();
     let documents = lake.documents().map_err(|e| e.to_string())?;
     if documents.is_empty() {
-        return Err("no documents to supervise".into());
+        return Err("no documents to supervise".to_string().into());
     }
 
     let names: HashMap<String, String> = documents
@@ -193,7 +224,14 @@ pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<Run
             let batch = parse_json(&reply)?;
             (reply, batch)
         } else {
-            let reply = engine.run(&request).map_err(|e| e.to_string())?.text;
+            let reply = std::thread::scope(|scope| {
+                let handle = scope.spawn(|| engine.run(&request));
+                while !handle.is_finished() {
+                    if let Some(id) = job_id { let _ = lake.heartbeat(id); }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                handle.join().unwrap_or_else(|_| Err(knowlith_engine::EngineError::Transport("The AI reader stopped unexpectedly.".into())))
+            })?.text;
             let batch = parse_json(&reply)?;
             lake.set_setting(&key, &reply).map_err(|e| e.to_string())?;
             (reply, batch)
@@ -478,6 +516,27 @@ mod tests {
             self.0.lock().unwrap().push(request.input.clone());
             Ok(knowlith_engine::Reply::new("capture", r#"{"entities":[],"canonical":[],"quiz":[]}"#))
         }
+    }
+
+    struct Interrupted(std::sync::atomic::AtomicUsize);
+    impl Engine for Interrupted {
+        fn name(&self) -> &str { "interrupted" }
+        fn run(&self, _: &Request) -> knowlith_engine::Result<knowlith_engine::Reply> {
+            let call = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call == 1 { return Err(knowlith_engine::EngineError::Transport("rate limited".into())); }
+            Ok(knowlith_engine::Reply::new("interrupted", r#"{"entities":[],"canonical":[],"quiz":[]}"#))
+        }
+    }
+
+    #[test]
+    fn an_interrupted_build_resumes_without_repeating_finished_batches() {
+        let mut lake = sample_lake(format!("{}END", "A long company document. ".repeat(8000)));
+        let engine = Interrupted(std::sync::atomic::AtomicUsize::new(0));
+        let error = run(&mut lake, &engine, "resume").unwrap_err();
+        assert!(error.is_retryable());
+        let expected = build_batches(&lake.documents().unwrap(), "").unwrap().into_iter().collect::<BTreeSet<_>>().len();
+        run(&mut lake, &engine, "resume").unwrap();
+        assert_eq!(engine.0.load(std::sync::atomic::Ordering::SeqCst), expected + 1);
     }
 
     #[test]

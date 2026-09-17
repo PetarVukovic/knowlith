@@ -243,6 +243,11 @@ impl Engine for CliEngine {
             command.stdin(Stdio::piped());
         }
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
         let mut child = command.spawn().map_err(|e| match e.kind() {
             // Not installed is the owner's problem to fix, and retrying
             // it every five minutes would never fix it.
@@ -339,56 +344,75 @@ impl Engine for CliEngine {
 /// On timeout the child is actually killed. Letting it run would hold a job
 /// lease that never returns, and keep a model answering a question nobody is
 /// listening to any more.
+const MAX_OUTPUT: u64 = 8 * 1024 * 1024;
+
+fn stop_child_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // All CLI descendants inherit our dedicated process group.
+        let _ = Command::new("/bin/kill").args(["-9", &format!("-{}", child.id())])
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill").args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn wait_with_timeout(
     mut child: std::process::Child,
     timeout: Duration,
     label: &str,
 ) -> Result<std::process::Output> {
-    let mut out_pipe = child.stdout.take();
-    let mut err_pipe = child.stderr.take();
-    let out_reader = std::thread::spawn(move || {
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (tx, rx) = std::sync::mpsc::channel();
+    fn drain(pipe: impl Read) -> Result<Vec<u8>> {
         let mut buffer = Vec::new();
-        if let Some(pipe) = out_pipe.as_mut() {
-            let _ = pipe.read_to_end(&mut buffer);
+        pipe.take(MAX_OUTPUT + 1).read_to_end(&mut buffer)
+            .map_err(|e| EngineError::Transport(format!("could not read CLI output: {e}")))?;
+        if buffer.len() as u64 > MAX_OUTPUT {
+            return Err(EngineError::Refused("The CLI output exceeded the 8 MiB limit. Use a smaller batch.".into()));
         }
-        buffer
-    });
-    let err_reader = std::thread::spawn(move || {
-        let mut buffer = Vec::new();
-        if let Some(pipe) = err_pipe.as_mut() {
-            let _ = pipe.read_to_end(&mut buffer);
-        }
-        buffer
-    });
-
+        Ok(buffer)
+    }
+    let out_tx = tx.clone();
+    std::thread::spawn(move || { let _ = out_tx.send((true, stdout.map(drain).unwrap_or_else(|| Ok(vec![])))); });
+    std::thread::spawn(move || { let _ = tx.send((false, stderr.map(drain).unwrap_or_else(|| Ok(vec![])))); });
     let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let within = if timeout.as_secs() == 0 {
-                        format!("{} ms", timeout.as_millis())
-                    } else {
-                        format!("{} s", timeout.as_secs())
-                    };
-                    return Err(EngineError::Transport(format!(
-                        "{label} did not answer within {within}, and was stopped"
-                    )));
-                }
-                std::thread::sleep(POLL);
+    let mut status = None;
+    let mut out = None;
+    let mut err = None;
+    loop {
+        while let Ok((is_stdout, result)) = rx.try_recv() {
+            match result {
+                Ok(bytes) => { if is_stdout { out = Some(bytes); } else { err = Some(bytes); } }
+                Err(error) => { stop_child_tree(&mut child); return Err(error); }
             }
-            Err(e) => return Err(EngineError::Transport(format!("{label} could not be waited on: {e}"))),
         }
-    };
-
-    Ok(std::process::Output {
-        status,
-        stdout: out_reader.join().unwrap_or_default(),
-        stderr: err_reader.join().unwrap_or_default(),
-    })
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(result) => status = result,
+                Err(error) => {
+                    stop_child_tree(&mut child);
+                    return Err(EngineError::Transport(format!("{label} could not be waited on: {error}")));
+                }
+            }
+        }
+        if status.is_some() && out.is_some() && err.is_some() {
+            // Also closes stdin inherited by any lingering grandchild.
+            stop_child_tree(&mut child);
+            return Ok(std::process::Output { status: status.unwrap(), stdout: out.unwrap(), stderr: err.unwrap() });
+        }
+        if Instant::now() >= deadline {
+            stop_child_tree(&mut child);
+            return Err(EngineError::Transport(format!("{label} did not answer within {} ms, and was stopped", timeout.as_millis())));
+        }
+        std::thread::sleep(POLL);
+    }
 }
 
 /// How often the wait checks whether the child has finished. Short enough

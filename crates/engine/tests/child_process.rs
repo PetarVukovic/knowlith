@@ -200,3 +200,19 @@ printf '%s\n' '{"payload":{"type":"token_count","info":{"total_token_usage":{"in
     assert_eq!(usage.cache_tokens, Some(4));
     assert!(usage.cost_usd.is_none());
 }
+
+#[test]
+fn excessive_child_output_is_refused_without_unbounded_allocation() {
+    let path = script("noisy", "head -c 9000000 /dev/zero\n");
+    let result = engine(&path).run(&Request::new("candidates", "x", "y").with_timeout(Duration::from_secs(5)));
+    assert!(matches!(result, Err(EngineError::Refused(_))), "oversized output must not become a reply");
+}
+
+#[test]
+fn a_grandchild_holding_output_open_is_also_bounded_by_the_deadline() {
+    let path = script("inherited-pipe", "sleep 300 &\nexit 0\n");
+    let start = Instant::now();
+    let result = engine(&path).run(&Request::new("candidates", "x", "y").with_timeout(Duration::from_millis(200)));
+    assert!(result.is_err());
+    assert!(start.elapsed() < Duration::from_secs(5));
+}

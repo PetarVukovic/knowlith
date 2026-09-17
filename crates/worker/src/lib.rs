@@ -691,8 +691,8 @@ impl Worker {
             return Ok("stopped before supervisor started".into());
         }
         let engine = self.job_engine();
-        let report = knowlith_supervisor::run(&mut self.lake, &*engine, &session_id)
-            .map_err(Failure::Refused)?;
+        let report = knowlith_supervisor::run_for_job(&mut self.lake, &*engine, &session_id, Some(job.id))
+            .map_err(|error| if error.is_retryable() { Failure::Transport(error.to_string()) } else { Failure::Refused(error.to_string()) })?;
         let _ = self
             .lake
             .set_setting("supervised_at", &docs.len().to_string());
