@@ -45,25 +45,29 @@ Knowlith runs only on your computer. Your documents are read by the AI you alrea
 
 ## Install
 
-One command. No administrator. No Knowlith account, no Knowlith server.
+One command. No administrator. No Knowlith account, no Knowlith server. The installer downloads the binary, starts Knowlith, and opens onboarding in your browser.
 
 ```sh
-# macOS and Linux
+# macOS and Linux — install, start, open browser
 curl -fsSL https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.sh | sh
 ```
 
 ```powershell
-# Windows
+# Windows — same
 irm https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.ps1 | iex
 ```
 
-The installer downloads a single binary (UI embedded — no Node at runtime) and places it on your `PATH`. Binaries for macOS (Apple Silicon and Intel), Linux and Windows are on the [Releases](https://github.com/PetarVukovic/knowlith/releases) page.
+Headless install (no browser): `KNOWLITH_NO_START=1 curl -fsSL ... | sh`
+
+Binaries for macOS (Apple Silicon and Intel), Linux and Windows are on the [Releases](https://github.com/PetarVukovic/knowlith/releases) page.
 
 **Contributors:** build from source with `cargo build --release --bin knowlith` or use `sh scripts/dev.sh` for hot reload.
 
 ---
 
 ## Quick start
+
+After `curl | sh`, onboarding is already open. Later:
 
 ```sh
 knowlith start            # daemon + worker + open browser

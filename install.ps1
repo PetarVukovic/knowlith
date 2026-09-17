@@ -146,17 +146,31 @@ try {
     & $target_exe --version
     if ($LASTEXITCODE -ne 0) { Fail 'the binary was installed but will not run.' }
 
-    Write-Host ""
-    Write-Host "Next:"
-    Write-Host "  knowlith scan C:\Users\you\Documents\YourCompany   read a folder"
-    Write-Host "  knowlith start                                     open the interface in your browser"
-    Write-Host "  knowlith serve                                     same, without opening a browser tab"
-    Write-Host "  knowlith connect                                   hand it to Claude and Codex"
-    Write-Host "  knowlith autostart on                              keep it running when you close the window"
-    Write-Host ""
-    Write-Host "What it reads is kept in your Knowlith folder. Knowlith itself sends nothing anywhere;"
-    Write-Host "the AI tool you choose to read with (Claude, Codex, Cursor) sends document text to its vendor."
-    Write-Host ""
+    # -------------------------------------------------------------- start --
+
+    $running = $false
+    try {
+        $null = Invoke-WebRequest -Uri 'http://127.0.0.1:7717/api/health' -UseBasicParsing -TimeoutSec 2
+        $running = $true
+    } catch {
+        $running = $false
+    }
+
+    if ($env:KNOWLITH_NO_START -eq '1') {
+        Write-Host ""
+        Write-Host "Installed. Run: knowlith start"
+        Write-Host ""
+    } elseif ($running) {
+        Say 'already running on port 7717 — opening the interface'
+        Start-Process 'http://127.0.0.1:7717/onboarding'
+        Write-Host ""
+    } else {
+        Say 'starting — onboarding opens in your browser'
+        Write-Host '  Name your company, pick a folder, review what was found.'
+        Write-Host '  Close this window with Ctrl-C when you are done.'
+        Write-Host ""
+        & $target_exe start
+    }
 }
 finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue

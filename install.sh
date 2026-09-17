@@ -172,11 +172,39 @@ fi
 printf '\n'
 "$BIN_DIR/knowlith" --version 2>/dev/null || die "the binary was installed but will not run."
 
-printf '\nNext:\n'
-printf '  %s scan ~/Documents/YourCompany   read a folder\n' "knowlith"
-printf '  %s start                          open the interface in your browser\n' "knowlith"
-printf '  %s serve                          same, without opening a browser tab\n' "knowlith"
-printf '  %s connect                        hand it to Claude and Codex\n' "knowlith"
-printf '  %s autostart on                   keep it running when you close the window\n' "knowlith"
-printf '\nWhat it reads is kept in ~/Knowlith. Knowlith itself sends nothing anywhere;\n'
-printf 'the AI tool you choose to read with (Claude, Codex, Cursor) sends document text to its vendor.\n\n'
+# ------------------------------------------------------------------ start --
+
+open_ui() {
+  url="http://127.0.0.1:7717"
+  case "$os" in
+    Darwin) open "$url" 2>/dev/null || true ;;
+    Linux)
+      if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" 2>/dev/null || true
+      fi
+      ;;
+  esac
+}
+
+listening() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:7717 -sTCP:LISTEN >/dev/null 2>&1
+  else
+    curl -sf http://127.0.0.1:7717/api/health >/dev/null 2>&1
+  fi
+}
+
+export PATH="$BIN_DIR:$PATH"
+
+if [ "${KNOWLITH_NO_START:-}" = "1" ]; then
+  printf '\nInstalled. Run: knowlith start\n\n'
+elif listening; then
+  say 'already running on port 7717 — opening the interface'
+  open_ui
+  printf '\nConfigure at http://127.0.0.1:7717/onboarding\n\n'
+else
+  say 'starting — onboarding opens in your browser'
+  printf '  Name your company, pick a folder, review what was found.\n'
+  printf '  Ctrl-C here stops Knowlith when you are done.\n\n'
+  exec "$BIN_DIR/knowlith" start
+fi
