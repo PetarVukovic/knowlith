@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Loader2, Maximize2, Minimize2, Network, RefreshCw } from "lucide-react"
 import { BrainInspector } from "@/components/BrainInspector"
+import { DocumentPreview } from "@/components/SourcePreview"
 import { ResizeHandle, usePanelSize } from "@/components/Resizable"
 import { Button } from "@/components/ui/button"
 import { brain as brainApi } from "@/lib/api"
@@ -28,6 +29,7 @@ export function Brain() {
   const [kindFilter, setKindFilter] = useState<string>("all")
   const [fullscreen, setFullscreen] = useState(false)
   const [resetSignal, setResetSignal] = useState(0)
+  const [docPreviewId, setDocPreviewId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setData(await brainApi.get())
@@ -61,7 +63,10 @@ export function Brain() {
 
   const open = useCallback(
     (node: BrainNode) => {
-      if (node.kind === "document") return
+      if (node.kind === "document") {
+        setDocPreviewId(node.id.startsWith("doc:") ? node.id.slice(4) : node.id)
+        return
+      }
       navigate(
         node.kind === "skill"
           ? `/skills/${encodeURIComponent(node.id)}`
@@ -195,9 +200,16 @@ export function Brain() {
             assistants={data.assistants}
             onSelectId={setSelectedId}
             onOpen={open}
+            onOpenDocument={setDocPreviewId}
           />
         ) : null}
       </aside>
+
+      <DocumentPreview
+        documentId={docPreviewId}
+        open={docPreviewId !== null}
+        onOpenChange={(open) => !open && setDocPreviewId(null)}
+      />
     </div>
   )
 }

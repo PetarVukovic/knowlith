@@ -32,6 +32,7 @@ import type {
   Policy,
   PolicyState,
   SourceDocument,
+  SourceDocumentIndex,
   ToolRead,
   ContextObject,
   DiscoverySummary,
@@ -258,6 +259,16 @@ export const api = {
   },
   async getSourceDocuments(): Promise<SourceDocument[]> {
     return get<SourceDocument[]>("/api/documents", fixtures.sourceDocuments, [])
+  },
+  async getSourceDocumentIndex(sourceId: string): Promise<SourceDocumentIndex[]> {
+    return get<SourceDocumentIndex[]>(
+      `/api/sources/${encodeURIComponent(sourceId)}/documents`,
+      [],
+      [],
+    )
+  },
+  async keepGoneReview(objectId: string, documentId: string): Promise<void> {
+    await post(`/api/review/gone/${encodeURIComponent(objectId)}/keep`, { documentId })
   },
   /** Reads the MCP gateway actually recorded, keyed by object id. */
   async getToolReads(): Promise<Record<string, ToolRead[]>> {

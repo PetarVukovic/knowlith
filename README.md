@@ -77,6 +77,24 @@ knowlith export           # write approved knowledge to ~/Knowlith/knowledge/
 
 Until you approve, AI tools see subjects — not answers.
 
+### From source (one command)
+
+When building from this repository, use `scripts/start.sh` — it starts the daemon with an explicit reader, applies the same settings the UI would save (via curl), and opens the interface fullscreen:
+
+```sh
+sh scripts/start.sh --fresh --demo
+```
+
+| Flag / env | Meaning |
+| --- | --- |
+| `--fresh` | Move aside the existing `~/Knowlith` and start empty |
+| `--demo` | Add `~/Documents/knowlith-demo/invoices` and enqueue a read |
+| `KNOWLITH_ENGINE=cursor-agent` | Reader CLI (default: `cursor-agent`; also `codex`, `claude-code`) |
+
+Supervisor demo end-to-end (reset, compile, build quiz): `sh scripts/fresh-start.sh`
+
+**Changing the reader in Settings only takes effect after you restart Knowlith.** The background worker binds its engine at daemon start; curl and the UI persist the choice for the next start.
+
 ---
 
 ## Test the running daemon (curl)
@@ -131,9 +149,10 @@ See [`docs/mcp-rich-context.md`](docs/mcp-rich-context.md) for the rich context 
 ## What you get in the interface
 
 - **Onboarding wizard** — one decision per screen; Home stays closed until a folder is read and the first review path finishes.
-- **Review queue** — only you can clear it. An undecided subject is never silently answered.
+- **Review queue** — only you can clear it. An undecided subject is never silently answered. Missing source files surface as their own review rows — not as silent approval.
+- **Build quiz** — after the build supervisor reads a whole folder, confirm its synthesis of company rules before they become knowledge (`/build-quiz`).
 - **Company brain** — 3D graph; click to highlight connections; double-click to open; ask in Claude Desktop, Codex or Terminal via `Try in your AI`.
-- **Sources** — folders watched with write-settle and filesystem events; periodic rescan as safety net.
+- **Sources** — folders watched with write-settle and filesystem events; periodic rescan as safety net; per-file index shows which approved objects still quote each snapshot.
 - **Activity** — which tool asked, what it opened, what it skipped.
 - **Portable export** — `~/Knowlith/knowledge/` mirrors approved objects as Markdown you can back up or move.
 
@@ -142,10 +161,14 @@ See [`docs/mcp-rich-context.md`](docs/mcp-rich-context.md) for the rich context 
 ## Development
 
 ```sh
-sh scripts/dev.sh          # daemon on 7717 + Vite on 5173
-sh scripts/dev.sh --fresh  # same, from an empty company
-cargo test --workspace     # ~370 tests
+sh scripts/start.sh --fresh --demo   # production UI on 7717, curl setup, fullscreen browser
+sh scripts/dev.sh                    # daemon on 7717 + Vite on 5173 (hot reload)
+sh scripts/dev.sh --fresh            # same, from an empty company
+KNOWLITH_ENGINE=codex sh scripts/dev.sh   # override reader (default: cursor-agent)
+cargo test --workspace               # ~370 tests
 ```
+
+Reset local install: `sh scripts/reset.sh --yes`
 
 Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)  
 Contributing: [`CLAUDE.md`](CLAUDE.md)

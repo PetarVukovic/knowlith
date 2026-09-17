@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import {
   AlertTriangle,
   Cloud,
@@ -110,7 +110,12 @@ export function Sources() {
 
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[14px] font-medium text-ink">{source.name}</span>
+                    <Link
+                      to={`/sources/${encodeURIComponent(source.id)}`}
+                      className="text-[14px] font-medium text-ink hover:text-accent hover:underline"
+                    >
+                      {source.name}
+                    </Link>
                     <Badge tone={STATUS_TONE[source.status]}>
                       {source.status === "active"
                         ? "Reading"

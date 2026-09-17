@@ -868,6 +868,7 @@ export const compilerRuns: CompilerRun[] = [
  */
 export const sourceDocuments: SourceDocument[] = [
   {
+    id: "popusti-2026-docx",
     name: "Popusti-2026.docx",
     kind: "docx",
     path: "/Users/ana/Termoval/Prodaja/Pravilnici/Popusti-2026.docx",
@@ -889,6 +890,7 @@ export const sourceDocuments: SourceDocument[] = [
     ],
   },
   {
+    id: "pravilnik-prodaja-2023-pdf",
     name: "Pravilnik-prodaja-2023.pdf",
     kind: "pdf",
     path: "/Users/ana/Termoval/Prodaja/Arhiva/Pravilnik-prodaja-2023.pdf",
@@ -900,6 +902,7 @@ export const sourceDocuments: SourceDocument[] = [
     ],
   },
   {
+    id: "dopis-uprava-2026-03-pdf",
     name: "Dopis-uprava-2026-03.pdf",
     kind: "pdf",
     path: "/Users/ana/Termoval/Prodaja/Dopisi/Dopis-uprava-2026-03.pdf",
@@ -911,6 +914,7 @@ export const sourceDocuments: SourceDocument[] = [
     ],
   },
   {
+    id: "ponuda-template-docx",
     name: "Ponuda-template.docx",
     kind: "docx",
     path: "/Users/ana/Termoval/Prodaja/Predlosci/Ponuda-template.docx",
@@ -923,6 +927,7 @@ export const sourceDocuments: SourceDocument[] = [
     ],
   },
   {
+    id: "opci-uvjeti-2026-docx",
     name: "Opci-uvjeti-2026.docx",
     kind: "docx",
     path: "\\\\termoval-nas\\Zajednicko\\Pravni\\Opci-uvjeti-2026.docx",
@@ -935,6 +940,7 @@ export const sourceDocuments: SourceDocument[] = [
     ],
   },
   {
+    id: "jamstveni-list-ugradnja-pdf",
     name: "Jamstveni-list-ugradnja.pdf",
     kind: "pdf",
     path: "\\\\termoval-nas\\Zajednicko\\Servis\\Jamstveni-list-ugradnja.pdf",
@@ -945,6 +951,7 @@ export const sourceDocuments: SourceDocument[] = [
     ],
   },
   {
+    id: "servis-procedura-docx",
     name: "Servis-procedura.docx",
     kind: "docx",
     path: "/Users/ana/Termoval/Servis/Servis-procedura.docx",
@@ -956,6 +963,7 @@ export const sourceDocuments: SourceDocument[] = [
     ],
   },
   {
+    id: "ugovor-odrzavanje-konzum-pdf",
     name: "Ugovor-odrzavanje-Konzum.pdf",
     kind: "pdf",
     path: "\\\\termoval-nas\\Zajednicko\\Ugovori\\Ugovor-odrzavanje-Konzum.pdf",
@@ -967,6 +975,7 @@ export const sourceDocuments: SourceDocument[] = [
     ],
   },
   {
+    id: "cjenik-2026-xlsx",
     name: "Cjenik-2026.xlsx",
     kind: "xlsx",
     path: "/Users/ana/Termoval/Prodaja/Cjenik-2026.xlsx",

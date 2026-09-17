@@ -75,8 +75,12 @@ trap stop INT TERM EXIT
 say 'building the daemon (debug — first time takes a minute)'
 cargo build --bin knowlith >/dev/null 2>&1 || die 'the daemon did not build — run `cargo build --bin knowlith` to see why'
 
-say "daemon   http://127.0.0.1:$PORT"
-./target/debug/knowlith serve --port "$PORT" >"$ROOT/dev.log" 2>&1 &
+# Engine defaults to cursor-agent so a Settings change mid-session is not
+# required to avoid auto picking Claude Code on a fresh lake.
+ENGINE="${KNOWLITH_ENGINE:-cursor-agent}"
+
+say "daemon   http://127.0.0.1:$PORT ($ENGINE)"
+./target/debug/knowlith serve --port "$PORT" --engine "$ENGINE" >"$ROOT/dev.log" 2>&1 &
 DAEMON=$!
 
 # Given a moment, so a daemon that exits on startup is reported here rather

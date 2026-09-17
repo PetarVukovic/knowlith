@@ -124,6 +124,42 @@ async fn a_folder_that_was_never_read_does_not_carry_a_date() {
 }
 
 #[tokio::test]
+async fn a_source_lists_files_and_what_quotes_them() {
+    let mut lake = lake();
+    let doc = knowlith_core::Document {
+        id: "doc:abc123".into(),
+        path: "/tmp/invoices/INV-001.pdf".into(),
+        name: "INV-001.pdf".into(),
+        kind: knowlith_core::DocumentKind::Pdf,
+        byte_len: 100,
+        sha256: "abc123".repeat(8),
+        text: "Total due in 15 days.".into(),
+        text_sha256: "def".into(),
+        verbatim: false,
+        modified: "2026-01-01T00:00:00Z".into(),
+        columns: None,
+        blocks: vec![knowlith_core::Block {
+            locator: "page 1".into(),
+            kind: knowlith_core::BlockKind::Paragraph,
+            text: "Total due in 15 days.".into(),
+            start_byte: 0,
+            end_byte: 22,
+            page: Some(1),
+            sheet: None,
+            row: None,
+            cells: None,
+        }],
+    };
+    lake.lake.put_document("invoices-1", &doc).expect("stored");
+    let (status, out) = call(&lake, Method::GET, "/api/sources/invoices-1/documents", "").await;
+    assert_eq!(status, StatusCode::OK);
+    let files = out.as_array().expect("files");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["name"], "INV-001.pdf");
+    assert!(files[0]["quotedBy"].as_array().expect("quotes").is_empty());
+}
+
+#[tokio::test]
 async fn a_folder_nobody_added_cannot_be_paused_or_removed() {
     let lake = lake();
     let (status, _) = call(&lake, Method::PUT, "/api/sources/nope/status", r#"{"paused":true}"#).await;

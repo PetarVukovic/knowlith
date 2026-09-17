@@ -14,6 +14,7 @@ import { BuildQuiz } from "@/screens/BuildQuiz"
 import { Review } from "@/screens/Review"
 import { Settings } from "@/screens/Settings"
 import { SkillDetail } from "@/screens/SkillDetail"
+import { SourceDetail } from "@/screens/SourceDetail"
 import { Sources } from "@/screens/Sources"
 import { Workspace } from "@/screens/Workspace"
 import { AppProvider, useApp } from "@/state/AppState"
@@ -63,6 +64,7 @@ export function App() {
               <Route path="/review" element={<Review />} />
               <Route path="/build-quiz" element={<BuildQuiz />} />
               <Route path="/sources" element={<Sources />} />
+              <Route path="/sources/:sourceId" element={<SourceDetail />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/connect" element={<Connect />} />
               <Route path="/activity" element={<Activity />} />

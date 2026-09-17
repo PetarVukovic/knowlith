@@ -367,16 +367,19 @@ async fn review(State(state): State<AppState>) -> ApiResult<Vec<ReviewItemDto>> 
         let Some(object) = all.iter().find(|o| o.id == gone.object_id) else {
             continue;
         };
-        items.push(review_item(
+        let mut item = review_item(
             object,
             &all,
             &documents,
             Some(SourceGoneDto {
-                document_id: gone.document_id,
+                document_id: gone.document_id.clone(),
                 document_name: gone.document_name,
                 document_path: gone.document_path,
             }),
-        ));
+        );
+        // One object can lose several files; the usual rev-{object} id would collide.
+        item.id = format!("rev-gone-{}-{}", gone.object_id, gone.document_id);
+        items.push(item);
     }
 
     Ok(Json(items))

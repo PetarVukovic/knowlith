@@ -60,6 +60,8 @@ interface AppState {
 
   approve: (itemId: string, edited: boolean) => void
   reject: (itemId: string) => void
+  /** Source file left disk; owner keeps approved knowledge anyway. */
+  keepGone: (objectId: string, documentId: string) => void
   mergeObjects: (keepId: string, dropId: string) => void
   keepBoth: (keepId: string, dropId: string) => void
   setSourceStatus: (id: string, status: Source["status"]) => void
@@ -343,6 +345,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setReview((queue) => queue.filter((i) => i.id !== itemId))
   }, [])
 
+  const keepGone = useCallback((objectId: string, documentId: string) => {
+    void api.keepGoneReview(objectId, documentId).then(() => {
+      setReview((queue) =>
+        queue.filter((i) => !(i.sourceGone && i.objectId === objectId && i.sourceGone.documentId === documentId)),
+      )
+    })
+  }, [])
+
   /**
    * Fold one object into another.
    *
@@ -477,6 +487,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       work,
       approve,
       reject,
+      keepGone,
       mergeObjects,
       keepBoth,
       setSourceStatus,
@@ -516,6 +527,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       work,
       approve,
       reject,
+      keepGone,
       mergeObjects,
       keepBoth,
       setSourceStatus,

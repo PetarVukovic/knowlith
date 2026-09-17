@@ -127,7 +127,15 @@ export interface ReviewItem {
   affects: Relation[]
   conflict?: ConflictDetail
   coverage?: CoverageDetail
+  /** The source file is gone from disk; owner must keep or remove the knowledge. */
+  sourceGone?: SourceGoneDetail
   compiledAt: string
+}
+
+export interface SourceGoneDetail {
+  documentId: string
+  documentName: string
+  documentPath: string
 }
 
 /**
@@ -225,13 +233,33 @@ export interface SourceBlock {
 }
 
 export interface SourceDocument {
+  id: string
   name: string
   kind: "docx" | "pdf" | "xlsx"
   path: string
   modified: string
+  /** Set when a rescan found the file no longer on disk. */
+  goneAt?: string | null
   /** Set for spreadsheets; `blocks` then carry `cells`. */
   columns?: string[]
   blocks: SourceBlock[]
+}
+
+export interface QuotingObjectSummary {
+  id: string
+  title: string
+  kind: ObjectKind
+  status: ObjectStatus
+}
+
+export interface SourceDocumentIndex {
+  id: string
+  name: string
+  kind: "docx" | "pdf" | "xlsx"
+  path: string
+  modified: string
+  goneAt?: string | null
+  quotedBy: QuotingObjectSummary[]
 }
 
 export interface DiscoverySummary {

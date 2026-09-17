@@ -1,6 +1,17 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowRight, Check, Combine, GitMerge, Layers, Lightbulb, Pencil, PartyPopper, X } from "lucide-react"
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  Combine,
+  GitMerge,
+  Layers,
+  Lightbulb,
+  Pencil,
+  PartyPopper,
+  X,
+} from "lucide-react"
 import { Confidence, ImpactStrip, KindIcon, RelationList, kindMeta } from "@/components/Domain"
 import { DiffView } from "@/components/DiffView"
 import { EvidenceCard, EvidenceList } from "@/components/Evidence"
@@ -118,7 +129,7 @@ function MergeHints() {
 }
 
 export function Review() {
-  const { review, approve, reject, mode, firstRun, setFirstRun } = useApp()
+  const { review, approve, reject, keepGone, mode, firstRun, setFirstRun } = useApp()
   const navigate = useNavigate()
   const guided = firstRun === "review"
   const [justApproved, setJustApproved] = useState(false)
@@ -228,10 +239,13 @@ export function Review() {
                 <span className="flex items-center gap-1.5">
                   <KindIcon kind={r.kind} />
                   <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">{r.title}</span>
-                  {r.conflict ? <GitMerge className="size-3 shrink-0 text-conflict" /> : null}
+                  {r.sourceGone ? <AlertTriangle className="size-3 shrink-0 text-conflict" /> : null}
+                  {!r.sourceGone && r.conflict ? <GitMerge className="size-3 shrink-0 text-conflict" /> : null}
                 </span>
                 <span className="mt-1 flex items-center gap-2 pl-5">
-                  <span className="text-[11.5px] text-faint">{r.before ? "changed" : "new"}</span>
+                  <span className="text-[11.5px] text-faint">
+                    {r.sourceGone ? "source gone" : r.before ? "changed" : "new"}
+                  </span>
                   <Confidence value={r.confidence} />
                 </span>
               </button>
@@ -274,11 +288,32 @@ export function Review() {
             </div>
 
             <p className="mt-1.5 text-[13px] text-muted">
-              {item.before
-                ? "Knowlith found that what it had on file no longer matches your documents."
-                : "Knowlith found something it did not know before."}{" "}
-              <Confidence value={item.confidence} />
+              {item.sourceGone
+                ? "The source file is no longer on disk. Decide whether this knowledge should stay in use."
+                : item.before
+                  ? "Knowlith found that what it had on file no longer matches your documents."
+                  : "Knowlith found something it did not know before."}{" "}
+              {!item.sourceGone ? <Confidence value={item.confidence} /> : null}
             </p>
+
+            {item.sourceGone ? (
+              <Panel className="mt-5 overflow-hidden border-conflict/30">
+                <div className="flex items-center gap-2 border-b border-conflict/20 bg-conflict-soft px-3.5 py-2">
+                  <AlertTriangle className="size-3.5 text-conflict" />
+                  <span className="text-[12.5px] font-medium text-conflict">Source file gone</span>
+                </div>
+                <div className="space-y-2 p-3.5 text-[13px] text-muted">
+                  <p>
+                    <span className="font-medium text-ink">{item.sourceGone.documentName}</span> is no longer at{" "}
+                    <span className="font-mono text-[12px] text-faint">{item.sourceGone.documentPath}</span>.
+                  </p>
+                  <p>
+                    Knowlith still has the snapshot it read. Keeping leaves this rule in use with that quote; removing
+                    takes it out of what your AI tools can read.
+                  </p>
+                </div>
+              </Panel>
+            ) : null}
 
             {item.conflict ? (
               <Panel className="mt-5 overflow-hidden border-conflict/30">
@@ -345,40 +380,51 @@ export function Review() {
 
             <div className="mt-6 grid gap-5 lg:grid-cols-[1fr_320px]">
               <section className="min-w-0">
-                {guided ? <Coachmark>This is what Knowlith believes is current.</Coachmark> : null}
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <h2 className="text-[13px] font-semibold text-ink">
-                    {item.before ? "What changes" : "What gets added"}
-                  </h2>
-                  {draft === null ? (
-                    <Button variant="ghost" size="sm" onClick={() => setDraft(item.after)}>
-                      <Pencil />
-                      Edit before approving
-                    </Button>
-                  ) : (
-                    <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>
-                      <X />
-                      Discard my edit
-                    </Button>
-                  )}
-                </div>
-
-                {draft === null ? (
-                  <DiffView before={item.before} after={item.after} />
+                {item.sourceGone ? (
+                  <>
+                    <h2 className="mb-2 text-[13px] font-semibold text-ink">Knowledge in use today</h2>
+                    <Panel className="p-3.5">
+                      <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{item.after}</p>
+                    </Panel>
+                  </>
                 ) : (
-                  <Textarea rows={14} value={draft} onChange={(e) => setDraft(e.target.value)} />
-                )}
+                  <>
+                    {guided ? <Coachmark>This is what Knowlith believes is current.</Coachmark> : null}
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h2 className="text-[13px] font-semibold text-ink">
+                        {item.before ? "What changes" : "What gets added"}
+                      </h2>
+                      {draft === null ? (
+                        <Button variant="ghost" size="sm" onClick={() => setDraft(item.after)}>
+                          <Pencil />
+                          Edit before approving
+                        </Button>
+                      ) : (
+                        <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>
+                          <X />
+                          Discard my edit
+                        </Button>
+                      )}
+                    </div>
 
-                <h2 className="mb-2 mt-6 text-[13px] font-semibold text-ink">What this affects</h2>
-                <ImpactStrip relations={item.affects} objectId={item.objectId} className="mb-2" />
-                <Panel className="p-2">
-                  <RelationList relations={item.affects} emptyLabel="Nothing else uses this yet." />
-                </Panel>
-                {item.affects.length > 0 ? (
-                  <p className="mt-2 text-[12px] text-muted">
-                    Approving updates these immediately. Anything already sent out stays as it was.
-                  </p>
-                ) : null}
+                    {draft === null ? (
+                      <DiffView before={item.before} after={item.after} />
+                    ) : (
+                      <Textarea rows={14} value={draft} onChange={(e) => setDraft(e.target.value)} />
+                    )}
+
+                    <h2 className="mb-2 mt-6 text-[13px] font-semibold text-ink">What this affects</h2>
+                    <ImpactStrip relations={item.affects} objectId={item.objectId} className="mb-2" />
+                    <Panel className="p-2">
+                      <RelationList relations={item.affects} emptyLabel="Nothing else uses this yet." />
+                    </Panel>
+                    {item.affects.length > 0 ? (
+                      <p className="mt-2 text-[12px] text-muted">
+                        Approving updates these immediately. Anything already sent out stays as it was.
+                      </p>
+                    ) : null}
+                  </>
+                )}
               </section>
 
               <aside className="min-w-0">
@@ -399,7 +445,7 @@ export function Review() {
               </aside>
             </div>
 
-            {guided ? (
+            {guided && !item.sourceGone ? (
               <div className="mt-8">
                 <Coachmark>
                   Approve makes this available to your AI tools. It does not modify the source files.
@@ -410,26 +456,53 @@ export function Review() {
             <div
               className={cn(
                 "sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-line bg-bg py-3",
-                guided ? "mt-0" : "mt-8",
+                guided && !item.sourceGone ? "mt-0" : "mt-8",
               )}
             >
-              <Button
-                variant="primary"
-                onClick={() => {
-                  decide((id) => approve(id, draft !== null))
-                  if (guided) setJustApproved(true)
-                }}
-              >
-                <Check />
-                {draft !== null ? "Approve my version" : "Approve"}
-              </Button>
-              <Button variant="danger" onClick={() => decide(reject)}>
-                <X />
-                Reject
-              </Button>
-              <span className="text-[12px] text-faint">
-                Approving puts this in front of every AI tool you have connected.
-              </span>
+              {item.sourceGone ? (
+                <>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      if (!item.sourceGone) return
+                      const at = review.findIndex((r) => r.id === item.id)
+                      const next = review[at + 1] ?? review[at - 1] ?? null
+                      keepGone(item.objectId, item.sourceGone.documentId)
+                      setPickedId(next?.id ?? null)
+                    }}
+                  >
+                    <Check />
+                    Keep in use
+                  </Button>
+                  <Button variant="danger" onClick={() => decide(reject)}>
+                    <X />
+                    Remove from knowledge
+                  </Button>
+                  <span className="text-[12px] text-faint">
+                    Keeping does not bring the file back — it only leaves the approved rule available.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      decide((id) => approve(id, draft !== null))
+                      if (guided) setJustApproved(true)
+                    }}
+                  >
+                    <Check />
+                    {draft !== null ? "Approve my version" : "Approve"}
+                  </Button>
+                  <Button variant="danger" onClick={() => decide(reject)}>
+                    <X />
+                    Reject
+                  </Button>
+                  <span className="text-[12px] text-faint">
+                    Approving puts this in front of every AI tool you have connected.
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>

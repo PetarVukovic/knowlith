@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AppWindow, ExternalLink, Loader2, Terminal } from "lucide-react"
+import { AppWindow, ExternalLink, FileText, Loader2, Terminal } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { failed, tools as toolsApi } from "@/lib/api"
 import { objectTryPrompt } from "@/lib/askAi"
@@ -37,6 +37,7 @@ export function BrainInspector({
   assistants,
   onSelectId,
   onOpen,
+  onOpenDocument,
 }: {
   companyName: string
   kindFilter: string
@@ -47,6 +48,7 @@ export function BrainInspector({
   assistants: BrainAssistant[]
   onSelectId: (id: string) => void
   onOpen: (node: BrainNode) => void
+  onOpenDocument?: (documentId: string) => void
 }) {
   const navigate = useNavigate()
   const [busy, setBusy] = useState<string | null>(null)
@@ -128,12 +130,25 @@ export function BrainInspector({
                     : selected.kind[0].toUpperCase() + selected.kind.slice(1)}
               </div>
             </div>
-            {selected.kind !== "document" ? (
+            {selected.kind === "document" ? (
+              <Button
+                size="sm"
+                variant="subtle"
+                onClick={() => {
+                  const id = selected.id.startsWith("doc:") ? selected.id.slice(4) : selected.id
+                  onOpenDocument?.(id)
+                  onOpen(selected)
+                }}
+              >
+                <FileText className="size-3.5" />
+                Open snapshot
+              </Button>
+            ) : (
               <Button size="sm" variant="subtle" onClick={() => onOpen(selected)}>
                 <ExternalLink className="size-3.5" />
                 Open
               </Button>
-            ) : null}
+            )}
           </div>
 
           {around.length > 0 ? (

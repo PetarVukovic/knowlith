@@ -243,6 +243,28 @@ fn the_graph_in_memory_agrees_with_the_graph_on_disk() {
 }
 
 #[test]
+fn a_file_missing_from_disk_asks_the_owner_what_to_do_with_what_rested_on_it() {
+    let (mut lake, doc) = lake_with_document();
+    let quote = span(&doc, "Rok plaćanja je 15 dana od izdavanja računa.");
+    let mut approved = object("rule:terms", ObjectKind::Rule, vec![quote], vec![]);
+    approved.status = ObjectStatus::Approved;
+    approved.decided_by = Some("You".into());
+    lake.put_object(&approved).unwrap();
+    lake.connection()
+        .execute(
+            "UPDATE documents SET path = '/tmp/this-file-is-gone.docx' WHERE id = ?1",
+            rusqlite::params![doc.id],
+        )
+        .unwrap();
+    assert_eq!(lake.reconcile_missing_files("src-1").unwrap(), 1);
+    let pending = lake.pending_gone_reviews().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].object_id, "rule:terms");
+    assert!(lake.keep_gone_review("rule:terms", &doc.id).unwrap());
+    assert!(lake.pending_gone_reviews().unwrap().is_empty());
+}
+
+#[test]
 fn an_edited_source_file_invalidates_the_check_it_already_passed() {
     let (mut lake, doc) = lake_with_document();
     let quote = span(&doc, "Rok plaćanja je 15 dana od izdavanja računa.");
