@@ -196,6 +196,34 @@ listening() {
 
 export PATH="$BIN_DIR:$PATH"
 
+has_start() {
+  "$BIN_DIR/knowlith" --help 2>/dev/null | grep -q '^  start '
+}
+
+has_serve_open() {
+  "$BIN_DIR/knowlith" serve --help 2>/dev/null | grep -q -- '--open'
+}
+
+launch_knowlith() {
+  if has_start; then
+    exec "$BIN_DIR/knowlith" start
+  elif has_serve_open; then
+    exec "$BIN_DIR/knowlith" serve --open
+  else
+    # v0.1.0 — no `start`, no `serve --open`; open once the listener is up.
+    (
+      for _ in $(seq 1 60); do
+        if curl -sf http://127.0.0.1:7717/api/health >/dev/null 2>&1; then
+          open_ui
+          break
+        fi
+        sleep 0.5
+      done
+    ) &
+    exec "$BIN_DIR/knowlith" serve
+  fi
+}
+
 if [ "${KNOWLITH_NO_START:-}" = "1" ]; then
   printf '\nInstalled. Run: knowlith start\n\n'
 elif listening; then
@@ -206,5 +234,5 @@ else
   say 'starting — onboarding opens in your browser'
   printf '  Name your company, pick a folder, review what was found.\n'
   printf '  Ctrl-C here stops Knowlith when you are done.\n\n'
-  exec "$BIN_DIR/knowlith" start
+  launch_knowlith
 fi

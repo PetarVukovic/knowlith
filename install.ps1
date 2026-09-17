@@ -169,7 +169,23 @@ try {
         Write-Host '  Name your company, pick a folder, review what was found.'
         Write-Host '  Close this window with Ctrl-C when you are done.'
         Write-Host ""
-        & $target_exe start
+        $help = & $target_exe --help 2>&1 | Out-String
+        if ($help -match '(?m)^  start ') {
+            & $target_exe start
+        } elseif ((& $target_exe serve --help 2>&1 | Out-String) -match '--open') {
+            & $target_exe serve --open
+        } else {
+            Start-Job -ScriptBlock {
+                for ($i = 0; $i -lt 60; $i++) {
+                    try {
+                        $null = Invoke-WebRequest -Uri 'http://127.0.0.1:7717/api/health' -UseBasicParsing -TimeoutSec 1
+                        Start-Process 'http://127.0.0.1:7717/onboarding'
+                        break
+                    } catch { Start-Sleep -Milliseconds 500 }
+                }
+            } | Out-Null
+            & $target_exe serve
+        }
     }
 }
 finally {
