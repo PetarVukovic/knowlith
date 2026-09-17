@@ -21,9 +21,11 @@
 //! cores — so the count is capped and owned by policy.
 //!
 //! **A lease is renewed, not assumed.** The engine call runs on its own
-//! thread so the loop can keep the lease alive while it waits. Without that,
-//! every job that takes longer than sixty seconds is silently handed to a
-//! second worker that does not exist, and then re-run.
+//! thread so the loop can keep the lease alive while it waits. The claim
+//! carries a generation: a heartbeat from the previous holder is ignored,
+//! and that holder kills its CLI child. Without the generation, two AI
+//! workers would both extend the same row and two agents would answer the
+//! same prompt.
 //!
 //! **Shutdown drops the job rather than corrupting it.** There is no
 //! goodbye: the process stops, the lease expires, and the next start picks
@@ -37,7 +39,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use knowlith_core::Document;
-use knowlith_engine::{Engine, EngineError};
+use knowlith_engine::{Engine, EngineError, Reply, Request};
 use knowlith_extract::{ExtractError, extract_file, is_noise};
 use knowlith_lake::{Lake, NewJob, PRIORITY_BACKGROUND, PRIORITY_NORMAL, ScanTarget};
 use serde::{Deserialize, Serialize};
@@ -215,6 +217,13 @@ impl Worker {
             Ok(notes) => {
                 let mut summary = Vec::new();
                 for (job, note) in jobs.iter().zip(notes.into_iter()) {
+                    if !self.lake.heartbeat(job).unwrap_or(false) {
+                        knowlith_desktop::paths::log_daemon(
+                            "lost a job lease after the work returned; not finishing the row",
+                        );
+                        tick.outcome = Some("lost the lease".into());
+                        return Ok(tick);
+                    }
                     // Kept, not only printed. This sentence is the whole of
                     // what the owner is shown about work that went right.
                     self.lake.finish(job.id, &note)?;
@@ -249,6 +258,15 @@ impl Worker {
                     self.lake.fail(job.id, &reason)?;
                 }
                 tick.outcome = Some(format!("failed: {reason}"));
+            }
+            Err(Failure::LostLease) => {
+                // The job belongs to someone else now. Finishing, deferring
+                // or failing it would steal their claim. The child was asked
+                // to stop; this tick has nothing left to write.
+                knowlith_desktop::paths::log_daemon(
+                    "lost a job lease; the CLI child was stopped",
+                );
+                tick.outcome = Some("lost the lease".into());
             }
         }
         Ok(tick)
@@ -448,7 +466,9 @@ impl Worker {
             }
             walked += 1;
             if walked % 25 == 0 {
-                let _ = self.lake.heartbeat(job.id);
+                if !self.still_holding(job)? {
+                    return Err(Failure::LostLease);
+                }
             }
 
             // Write-settle: a file whose mtime is still moving was often
@@ -545,18 +565,18 @@ impl Worker {
         }
 
         let company = self.lake.setting("company_profile").ok().flatten();
-        let engine = self.job_engine();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let engine = self.leashed(&cancel);
         let engine_name = engine.name().to_string();
         let docs_for_engine: Vec<Document> = loaded.iter().map(|(_, d)| d.clone()).collect();
-        let job_ids: Vec<i64> = loaded.iter().map(|(id, _)| *id).collect();
         let subject = batch_subject(loaded.iter().map(|(_, document)| document.name.as_str()));
 
         // Stages 1 and 2 only. What the engine says about these documents is
         // stored as-is; deciding which claim is current happens once, over
         // everything, in `settle`.
-        let batch = self.with_heartbeat_many(&job_ids, stop, move || {
+        let batch = self.with_heartbeat_many(jobs, stop, &cancel, move || {
             let refs: Vec<&Document> = docs_for_engine.iter().collect();
-            knowlith_compiler::read_many(&*engine, &refs, company.as_deref())
+            knowlith_compiler::read_many(&engine, &refs, company.as_deref())
         })??;
         record_cli_usage(
             &self.lake,
@@ -602,7 +622,9 @@ impl Worker {
     /// a thirteenth document does not make the first twelve need reading
     /// again, but it absolutely makes them need comparing again.
     fn settle(&mut self, job: &knowlith_lake::Job) -> std::result::Result<String, Failure> {
-        let _ = self.lake.heartbeat(job.id);
+        if !self.still_holding(job)? {
+            return Err(Failure::LostLease);
+        }
 
         let documents = self.lake.documents().map_err(|e| Failure::Refused(e.to_string()))?;
         let stored = self.lake.candidates().map_err(|e| Failure::Refused(e.to_string()))?;
@@ -661,11 +683,12 @@ impl Worker {
         stop: &AtomicBool,
     ) -> std::result::Result<String, Failure> {
         let objects = self.lake.objects().map_err(|e| Failure::Refused(e.to_string()))?;
-        let engine = self.job_engine();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let engine = self.leashed(&cancel);
         let engine_name = engine.name().to_string();
 
-        let run = self.with_heartbeat(job.id, stop, move || {
-            knowlith_compiler::draft_all(&*engine, &objects)
+        let run = self.with_heartbeat(job, stop, &cancel, move || {
+            knowlith_compiler::draft_all(&engine, &objects)
         })??;
         record_cli_usage(
             &self.lake,
@@ -698,16 +721,41 @@ impl Worker {
     ) -> std::result::Result<String, Failure> {
         let docs = self.lake.documents().map_err(|e| Failure::Refused(e.to_string()))?;
         let session_id = format!("build:{}", job.id);
-        let _ = self.lake.heartbeat(job.id);
+        if !self.still_holding(job)? {
+            return Err(Failure::LostLease);
+        }
         if stop.load(Ordering::Relaxed) {
             return Ok("stopped before supervisor started".into());
         }
-        let engine = self.job_engine();
-        let report = knowlith_supervisor::run_for_job(&mut self.lake, &*engine, &session_id, Some(job.id))
-            .map_err(|error| match error {
-                knowlith_supervisor::RunError::Engine(error) => Failure::from(error),
-                other => Failure::Refused(other.to_string()),
-            })?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let engine = self.leashed(&cancel);
+        knowlith_desktop::paths::log_daemon(&format!(
+            "supervise job {} generation {} with {}",
+            job.id,
+            job.generation,
+            engine.name()
+        ));
+        let report = match knowlith_supervisor::run_for_job(
+            &mut self.lake,
+            &engine,
+            &session_id,
+            Some(job),
+            Some(&cancel),
+        ) {
+            Ok(report) => report,
+            Err(error) => {
+                if !self.lake.heartbeat(job).unwrap_or(false) {
+                    return Err(Failure::LostLease);
+                }
+                return Err(match error {
+                    knowlith_supervisor::RunError::Engine(error) => Failure::from(error),
+                    other => Failure::Refused(other.to_string()),
+                });
+            }
+        };
+        if !self.still_holding(job)? {
+            return Err(Failure::LostLease);
+        }
         let _ = self
             .lake
             .set_setting("supervised_at", &docs.len().to_string());
@@ -731,11 +779,12 @@ impl Worker {
         stop: &AtomicBool,
     ) -> std::result::Result<String, Failure> {
         let objects = self.lake.objects().map_err(|e| Failure::Refused(e.to_string()))?;
-        let engine = self.job_engine();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let engine = self.leashed(&cancel);
         let engine_name = engine.name().to_string();
 
-        let run = self.with_heartbeat(job.id, stop, move || {
-            knowlith_compiler::propose_relations(&*engine, &objects)
+        let run = self.with_heartbeat(job, stop, &cancel, move || {
+            knowlith_compiler::propose_relations(&engine, &objects)
         })??;
         record_cli_usage(
             &self.lake,
@@ -788,7 +837,9 @@ impl Worker {
     /// the gateway keeps serving it and says so, because silently serving a
     /// stale answer and silently withholding one are both worse.
     fn recheck(&mut self, job: &knowlith_lake::Job) -> std::result::Result<String, Failure> {
-        let _ = self.lake.heartbeat(job.id);
+        if !self.still_holding(job)? {
+            return Err(Failure::LostLease);
+        }
         let broken = self
             .lake
             .recheck_evidence()
@@ -813,10 +864,15 @@ impl Worker {
     // -------------------------------------------------------------- plumbing --
 
     /// Runs `work` on its own thread, renewing every lease until it finishes.
+    ///
+    /// If a heartbeat returns false the lease has been claimed by someone
+    /// else: `cancel` is set so the CLI child dies, and this returns
+    /// [`Failure::LostLease`] instead of finishing the row.
     fn with_heartbeat_many<T, F>(
         &mut self,
-        job_ids: &[i64],
+        jobs: &[knowlith_lake::Job],
         stop: &AtomicBool,
+        cancel: &AtomicBool,
         work: F,
     ) -> std::result::Result<T, Failure>
     where
@@ -824,43 +880,65 @@ impl Worker {
         T: Send + 'static,
     {
         let handle = std::thread::spawn(work);
+        let mut lost = false;
         while !handle.is_finished() {
-            let _ = self.lake.heartbeat_many(job_ids);
+            match self.lake.heartbeat_many(jobs) {
+                Ok(true) => {}
+                Ok(false) => {
+                    cancel.store(true, Ordering::Relaxed);
+                    lost = true;
+                }
+                Err(_) => {}
+            }
             // Waited in small steps rather than one long sleep, so a job
             // that finishes in a millisecond is not charged five seconds of
             // latency by the thing watching it.
-            //
-            // The stop flag is watched but not obeyed here: killing a model
-            // mid-answer throws away what the owner already paid for. The
-            // process exits when this job ends, and an unfinished one comes
-            // back through its expired lease.
             let mut waited = Duration::ZERO;
             while waited < HEARTBEAT && !handle.is_finished() && !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(POLL);
                 waited += POLL;
             }
             if stop.load(Ordering::Relaxed) && !handle.is_finished() {
-                // Keep renewing until it lands; the alternative is a lease
-                // that expires while the answer is still being written.
+                // Daemon shutdown: keep renewing until it lands so a
+                // half-written answer is not thrown away. A lost lease is
+                // the opposite — another worker is about to pay again.
                 continue;
             }
         }
-        handle
+        let result = handle
             .join()
-            .map_err(|_| Failure::Refused("the worker thread stopped without answering".into()))
+            .map_err(|_| Failure::Refused("the worker thread stopped without answering".into()))?;
+        if lost {
+            return Err(Failure::LostLease);
+        }
+        Ok(result)
     }
 
     fn with_heartbeat<T, F>(
         &mut self,
-        job_id: i64,
+        job: &knowlith_lake::Job,
         stop: &AtomicBool,
+        cancel: &AtomicBool,
         work: F,
     ) -> std::result::Result<T, Failure>
     where
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        self.with_heartbeat_many(&[job_id], stop, work)
+        self.with_heartbeat_many(std::slice::from_ref(job), stop, cancel, work)
+    }
+
+    fn leashed(&self, cancel: &Arc<AtomicBool>) -> LeashedEngine {
+        LeashedEngine {
+            inner: self.job_engine(),
+            cancel: Arc::clone(cancel),
+        }
+    }
+
+    fn still_holding(&self, job: &knowlith_lake::Job) -> std::result::Result<bool, Failure> {
+        self.lake
+            .heartbeat(job)
+            .map_err(|e| Failure::Refused(e.to_string()))
     }
 
     pub fn lake(&self) -> &Lake {
@@ -944,12 +1022,33 @@ pub fn spawn_pool(
     Ok(handles)
 }
 
+/// An engine that kills its CLI child when the job lease is lost.
+struct LeashedEngine {
+    inner: Arc<dyn Engine>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Engine for LeashedEngine {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn run(&self, request: &Request) -> knowlith_engine::Result<Reply> {
+        let mut request = request.clone();
+        request.cancel = Some(Arc::clone(&self.cancel));
+        self.inner.run(&request)
+    }
+}
+
 /// Temporary failures retry, account failures hold all AI work, and invalid
 /// requests fail individually without stopping unrelated documents.
 enum Failure {
     Transport(String),
     Unavailable(String),
     Refused(String),
+    /// This worker no longer holds the job. The row must not be finished,
+    /// deferred or failed — another worker owns it.
+    LostLease,
 }
 
 impl From<knowlith_compiler::CompileError> for Failure {

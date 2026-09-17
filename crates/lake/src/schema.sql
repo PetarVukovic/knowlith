@@ -205,6 +205,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- A lease, not a flag. If the process dies the lease expires and the job
     -- returns to the queue by itself.
     lease_until      TEXT,
+    -- Bumped on every claim. A heartbeat that still knows last week's
+    -- generation is the previous holder, and must not extend the new one.
+    lease_generation INTEGER NOT NULL DEFAULT 0,
     run_after        TEXT NOT NULL,
     last_error       TEXT,
     -- What the job actually did, in words, kept so the interface can show

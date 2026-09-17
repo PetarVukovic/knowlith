@@ -13,7 +13,8 @@
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use knowlith_engine::{CliEngine, Engine, EngineError, Flavour, Request};
@@ -215,6 +216,27 @@ fn a_grandchild_holding_output_open_is_also_bounded_by_the_deadline() {
     let result = engine(&path).run(&Request::new("candidates", "x", "y").with_timeout(Duration::from_millis(200)));
     assert!(result.is_err());
     assert!(start.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
+fn a_cancelled_run_kills_the_child() {
+    let path = script("hang", "sleep 30\n");
+    let cancel = Arc::new(AtomicBool::new(false));
+    let request = Request::new("candidates", "x", "y")
+        .with_timeout(Duration::from_secs(30))
+        .with_cancel(Arc::clone(&cancel));
+    let path_for_thread = path.clone();
+    let started = Instant::now();
+    let handle = std::thread::spawn(move || engine(&path_for_thread).run(&request));
+    std::thread::sleep(Duration::from_millis(80));
+    cancel.store(true, Ordering::Relaxed);
+    let result = handle.join().expect("the wait thread must return");
+    assert!(result.is_err(), "a cancelled run must not look like a reply: {result:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the child must die on cancel, not at the timeout; took {:?}",
+        started.elapsed()
+    );
 }
 
 #[test]

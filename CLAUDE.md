@@ -129,6 +129,15 @@ bug.
 **`sqlite3` on the command line returns nothing under this session's tooling.**
 Use `python3 -c "import sqlite3; ..."`.
 
+**A live build that looks stuck is usually the CLI, not the queue.**
+`knowlith start` appends `~/Knowlith/logs/daemon.log` (spawn, lost lease,
+classify). Read that plus `jobs` + `engine_runs` and `GET /api/work`. A
+heartbeat now carries a lease generation: the previous holder cannot keep a
+stolen job alive, and it kills its CLI child. `relateAfterBuild` (default)
+waits until the build quiz exists; it no longer relates before supervise.
+Baseline of the 42 KiB Medicor demo and what is still slow:
+`docs/live-build-baseline.md`.
+
 ## Index and memory tooling
 
 Never create, rebuild or drop a zvec-grep index without being asked. claude-mem

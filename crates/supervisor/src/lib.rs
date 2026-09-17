@@ -8,6 +8,7 @@ mod session;
 use std::collections::{BTreeSet, HashMap};
 #[cfg(test)]
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use knowlith_core::{
@@ -15,7 +16,7 @@ use knowlith_core::{
 };
 use knowlith_engine::{Engine, Request};
 
-use knowlith_lake::{EntityRow, Lake, QuizEvidence, QuizQuestion};
+use knowlith_lake::{EntityRow, Job, Lake, QuizEvidence, QuizQuestion};
 #[cfg(test)]
 use regex::Regex;
 use serde::Deserialize;
@@ -173,13 +174,24 @@ impl RunError {
 }
 
 pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<RunReport, RunError> {
-    run_for_job(lake, engine, session_id, None)
+    run_for_job(lake, engine, session_id, None, None)
 }
 
 /// Keep the durable lease alive while each bounded CLI request is in flight.
-pub fn run_for_job(lake: &mut Lake, engine: &dyn Engine, session_id: &str, job_id: Option<i64>) -> Result<RunReport, RunError> {
-    let result = run_inner(lake, engine, session_id, job_id);
+pub fn run_for_job(
+    lake: &mut Lake,
+    engine: &dyn Engine,
+    session_id: &str,
+    job: Option<&Job>,
+    cancel: Option<&AtomicBool>,
+) -> Result<RunReport, RunError> {
+    let result = run_inner(lake, engine, session_id, job, cancel);
     if let Err(error) = &result {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            // Another worker owns the row. Do not rewrite the build phase
+            // out from under them.
+            return result;
+        }
         let phase = match error {
             RunError::Engine(knowlith_engine::EngineError::Unavailable(_)) => "held",
             error if error.is_retryable() => "retrying",
@@ -191,7 +203,13 @@ pub fn run_for_job(lake: &mut Lake, engine: &dyn Engine, session_id: &str, job_i
     result
 }
 
-fn run_inner(lake: &mut Lake, engine: &dyn Engine, session_id: &str, job_id: Option<i64>) -> Result<RunReport, RunError> {
+fn run_inner(
+    lake: &mut Lake,
+    engine: &dyn Engine,
+    session_id: &str,
+    job: Option<&Job>,
+    cancel: Option<&AtomicBool>,
+) -> Result<RunReport, RunError> {
     lake.set_build_phase("active").map_err(|e| e.to_string())?;
     lake.open_supervisor_session(session_id, engine.name())
         .map_err(|e| e.to_string())?;
@@ -229,10 +247,26 @@ fn run_inner(lake: &mut Lake, engine: &dyn Engine, session_id: &str, job_id: Opt
             let batch = parse_json(&reply)?;
             (reply, batch)
         } else {
+            if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                return Err(knowlith_engine::EngineError::Transport(
+                    "the job was claimed by another worker".into(),
+                )
+                .into());
+            }
             let reply = std::thread::scope(|scope| {
                 let handle = scope.spawn(|| engine.run(&request));
                 while !handle.is_finished() {
-                    if let Some(id) = job_id { let _ = lake.heartbeat(id); }
+                    if let Some(job) = job {
+                        match lake.heartbeat(job) {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                if let Some(flag) = cancel {
+                                    flag.store(true, Ordering::Relaxed);
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
                 handle.join().unwrap_or_else(|_| Err(knowlith_engine::EngineError::Transport("The AI reader stopped unexpectedly.".into())))

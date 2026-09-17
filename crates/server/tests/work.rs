@@ -277,6 +277,23 @@ async fn housekeeping_that_found_nothing_is_not_news() {
 /// A spinner over "Reading the documents" while the banner underneath
 /// says twenty-four jobs are waiting is the screen contradicting itself.
 #[tokio::test]
+async fn a_working_line_says_it_is_running_rather_than_started() {
+    let lake = lake();
+    queue(&lake, "supervise", "s", "{}");
+    let _job = lake.lease().expect("lease").expect("a job");
+
+    let out = work(lake).await;
+    let line = &out["lines"][0];
+    assert_eq!(line["state"], "working");
+    let note = line["note"].as_str().expect("a note");
+    assert!(
+        note.contains("running"),
+        "a leased job with no result yet must not say 'started': {note}"
+    );
+    assert_ne!(note, "started");
+}
+
+#[tokio::test]
 async fn nothing_is_reading_when_every_outstanding_job_is_held() {
     let lake = lake();
     for key in ["a", "b"] {

@@ -599,6 +599,9 @@ fn serve(
     open: bool,
 ) -> Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
+    knowlith_desktop::paths::log_daemon(&format!(
+        "serve on 127.0.0.1:{port} · company {company} · engine {engine_name}"
+    ));
 
     if open {
         let url = format!("http://127.0.0.1:{port}");

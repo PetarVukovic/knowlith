@@ -1449,6 +1449,9 @@ async fn work(State(state): State<AppState>) -> ApiResult<WorkDto> {
         "a document that is no longer there".into()
     };
 
+    let last_run = lake.last_engine_run().map_err(failed)?;
+    let engine_name = last_run.as_ref().map(|r| r.engine.as_str());
+
     let lines = lake
         .recent_work(LINES)
         .map_err(failed)?
@@ -1468,7 +1471,13 @@ async fn work(State(state): State<AppState>) -> ApiResult<WorkDto> {
                 .as_deref()
                 .map(name_of)
                 .unwrap_or_else(|| whole_lake(&line.kind).to_string());
-            let note = line.note.or(line.error).unwrap_or_else(|| "started".into());
+            let note = work_line_note(
+                &line.state,
+                line.note,
+                line.error,
+                line.at.as_deref(),
+                engine_name,
+            );
             // A job that finished with nothing to report is not news. The
             // hourly re-check of stored quotes says nothing when nothing
             // moved, and without this it would be the only line on an
@@ -1487,7 +1496,7 @@ async fn work(State(state): State<AppState>) -> ApiResult<WorkDto> {
 
     let spend = work_spend(
         lake.engine_spend_today().map_err(failed)?,
-        lake.last_engine_run().map_err(failed)?,
+        last_run,
     );
 
     Ok(Json(WorkDto { stage, doing, done, total, held, lines, spend }))
@@ -1607,6 +1616,69 @@ fn without_prefix<'a>(note: &'a str, subject: &str) -> &'a str {
         .unwrap_or(note)
 }
 
+/// What a leased job should say instead of "started".
+///
+/// A spinner over a static word is how a hung CLI looked the same as a
+/// thinking one. Elapsed time and the last engine that actually ran are
+/// rows we have; an ETA is not.
+fn work_line_note(
+    state: &str,
+    note: Option<String>,
+    error: Option<String>,
+    at: Option<&str>,
+    engine: Option<&str>,
+) -> String {
+    if state != "leased" {
+        return note.or(error).unwrap_or_else(|| "started".into());
+    }
+    if let Some(note) = note.filter(|n| !n.is_empty() && n != "started") {
+        return note;
+    }
+    running_note(engine, at)
+}
+
+fn running_note(engine: Option<&str>, at: Option<&str>) -> String {
+    let phrase = duration_phrase(elapsed_secs(at));
+    match (engine, phrase.as_str()) {
+        (Some(name), "") => format!("{name} is running"),
+        (Some(name), time) => format!("{name} · {time}"),
+        (None, "") => "running".into(),
+        (None, time) => format!("running for {time}"),
+    }
+}
+
+fn elapsed_secs(at: Option<&str>) -> i64 {
+    let Some(at) = at else {
+        return 0;
+    };
+    let Ok(when) = chrono::DateTime::parse_from_rfc3339(at) else {
+        return 0;
+    };
+    (chrono::Utc::now() - when.with_timezone(&chrono::Utc))
+        .num_seconds()
+        .max(0)
+}
+
+fn duration_phrase(secs: i64) -> String {
+    if secs < 60 {
+        String::new()
+    } else if secs < 3600 {
+        let minutes = secs / 60;
+        if minutes == 1 {
+            "1 min".into()
+        } else {
+            format!("{minutes} min")
+        }
+    } else {
+        let hours = secs / 3600;
+        if hours == 1 {
+            "1 h".into()
+        } else {
+            format!("{hours} h")
+        }
+    }
+}
+
 /// How many lines of history the panel gets.
 ///
 /// A log, not a feed: enough to see the last few minutes of a scan, few
@@ -1634,6 +1706,20 @@ mod tests {
         assert_eq!(figure("Komercijalist odobrava popust do 8% na cijenu."), "8%");
         assert_eq!(figure("Rok plaćanja je 15 dana od izdavanja."), "15 dana");
         assert_eq!(figure("Nema brojeva ovdje."), "");
+    }
+
+    #[test]
+    fn a_leased_job_is_not_described_as_started() {
+        assert_eq!(work_line_note("leased", None, None, None, None), "running");
+        assert_eq!(
+            work_line_note("leased", Some("started".into()), None, None, Some("Cursor Agent")),
+            "Cursor Agent is running"
+        );
+        assert_eq!(duration_phrase(0), "");
+        assert_eq!(duration_phrase(59), "");
+        assert_eq!(duration_phrase(60), "1 min");
+        assert_eq!(duration_phrase(180), "3 min");
+        assert_eq!(duration_phrase(3600), "1 h");
     }
 
     #[test]

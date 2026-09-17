@@ -32,6 +32,7 @@
 
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::{Engine, EngineError, Reply, Request, Result};
@@ -273,7 +274,12 @@ impl Engine for CliEngine {
             }))
         };
 
-        let output = wait_with_timeout(child, request.timeout, self.flavour.label())?;
+        let output = wait_with_timeout(
+            child,
+            request.timeout,
+            self.flavour.label(),
+            request.cancel.as_deref(),
+        )?;
         if let Some(writer) = writer {
             let _ = writer.join();
         }
@@ -364,6 +370,7 @@ fn wait_with_timeout(
     mut child: std::process::Child,
     timeout: Duration,
     label: &str,
+    cancel: Option<&AtomicBool>,
 ) -> Result<std::process::Output> {
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -404,6 +411,12 @@ fn wait_with_timeout(
             // Also closes stdin inherited by any lingering grandchild.
             stop_child_tree(&mut child);
             return Ok(std::process::Output { status: status.unwrap(), stdout: out.unwrap(), stderr: err.unwrap() });
+        }
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            stop_child_tree(&mut child);
+            return Err(EngineError::Transport(format!(
+                "{label} was stopped because the job was claimed by another worker"
+            )));
         }
         if Instant::now() >= deadline {
             stop_child_tree(&mut child);

@@ -248,12 +248,16 @@ impl Lake {
         }
         match self.build_phase()? {
             Some(phase) if phase == "complete" => Ok(true),
-            Some(phase) if phase == "active" || phase == "quiz_pending" => Ok(false),
-            _ => {
+            Some(_) => Ok(false),
+            None => {
                 if let Some(quiz) = self.build_quiz()? {
                     Ok(quiz.state == "confirmed")
                 } else {
-                    Ok(true)
+                    // No quiz and no phase: the build has not started. Relating
+                    // now is what `relateAfterBuild` exists to prevent — settle
+                    // would enqueue a whole-folder model pass and the
+                    // supervisor would sit behind it.
+                    Ok(false)
                 }
             }
         }
@@ -309,5 +313,19 @@ mod tests {
         .unwrap();
         lake.set_build_phase("quiz_pending").unwrap();
         assert!(lake.may_enqueue_relate().unwrap());
+    }
+
+    #[test]
+    fn relate_does_not_run_before_the_build_has_started() {
+        let lake = Lake::in_memory().unwrap();
+        lake.set_policy(&Policy {
+            relate_after_build: true,
+            ..Policy::default()
+        })
+        .unwrap();
+        assert!(
+            !lake.may_enqueue_relate().unwrap(),
+            "an unset phase and no quiz must not look like permission to relate"
+        );
     }
 }

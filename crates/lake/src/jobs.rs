@@ -58,6 +58,9 @@ pub struct Job {
     pub kind: String,
     pub payload: String,
     pub attempts: i64,
+    /// Bumped on every claim. A heartbeat must present this number or it
+    /// is the previous holder talking, and must not extend the lease.
+    pub generation: i64,
 }
 
 /// One line of work, as the owner should read it.
@@ -151,20 +154,21 @@ impl Lake {
 
         // Kind filters are tiny (track sets), so the IN list is built with
         // bound parameters rather than string-concatenated values.
-        let claimed: Option<(i64, String, String, i64)> = match kinds {
+        let claimed: Option<(i64, String, String, i64, i64)> = match kinds {
             None => self
                 .conn
                 .query_row(
-                    "UPDATE jobs SET state = 'leased', lease_until = ?2, attempts = attempts + 1
+                    "UPDATE jobs SET state = 'leased', lease_until = ?2, attempts = attempts + 1,
+                            lease_generation = COALESCE(lease_generation, 0) + 1
                      WHERE id = (
                          SELECT id FROM jobs
                          WHERE run_after <= ?1
                            AND (state = 'queued' OR (state = 'leased' AND lease_until <= ?1))
                          ORDER BY priority, run_after LIMIT 1
                      )
-                     RETURNING id, kind, payload_json, attempts",
+                     RETURNING id, kind, payload_json, attempts, lease_generation",
                     params![now, until],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
                 )
                 .optional()?,
             Some(kinds) => {
@@ -173,7 +177,8 @@ impl Lake {
                     .collect::<Vec<_>>()
                     .join(", ");
                 let sql = format!(
-                    "UPDATE jobs SET state = 'leased', lease_until = ?2, attempts = attempts + 1
+                    "UPDATE jobs SET state = 'leased', lease_until = ?2, attempts = attempts + 1,
+                            lease_generation = COALESCE(lease_generation, 0) + 1
                      WHERE id = (
                          SELECT id FROM jobs
                          WHERE run_after <= ?1
@@ -181,7 +186,7 @@ impl Lake {
                            AND kind IN ({placeholders})
                          ORDER BY priority, run_after LIMIT 1
                      )
-                     RETURNING id, kind, payload_json, attempts"
+                     RETURNING id, kind, payload_json, attempts, lease_generation"
                 );
                 let mut values: Vec<rusqlite::types::Value> =
                     Vec::with_capacity(2 + kinds.len());
@@ -194,36 +199,48 @@ impl Lake {
                     .query_row(
                         &sql,
                         rusqlite::params_from_iter(values),
-                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
                     )
                     .optional()?
             }
         };
 
-        Ok(claimed.map(|(id, kind, payload, attempts)| Job {
+        Ok(claimed.map(|(id, kind, payload, attempts, generation)| Job {
             id,
             kind,
             payload,
             attempts,
+            generation,
         }))
     }
 
-    /// Renews every lease in `job_ids` (multi-doc CLI batches hold several).
-    pub fn heartbeat_many(&self, job_ids: &[i64]) -> Result<()> {
-        for id in job_ids {
-            self.heartbeat(*id)?;
+    /// Renews every lease in `jobs` (multi-doc CLI batches hold several).
+    ///
+    /// Returns `false` if any of them is no longer this holder's. The caller
+    /// must stop the CLI child; extending a stolen lease is how two agents
+    /// ended up answering the same prompt.
+    pub fn heartbeat_many(&self, jobs: &[Job]) -> Result<bool> {
+        let mut held = true;
+        for job in jobs {
+            if !self.heartbeat(job)? {
+                held = false;
+            }
         }
-        Ok(())
+        Ok(held)
     }
 
     /// Extends a claim on work that is still running.
-    pub fn heartbeat(&self, job_id: i64) -> Result<()> {
+    ///
+    /// `false` means this holder lost the job: the lease expired and
+    /// someone else claimed it, or it was finished, failed or held.
+    pub fn heartbeat(&self, job: &Job) -> Result<bool> {
         let until = (Utc::now() + Duration::seconds(LEASE_SECONDS)).to_rfc3339();
-        self.conn.execute(
-            "UPDATE jobs SET lease_until = ?2 WHERE id = ?1 AND state = 'leased'",
-            params![job_id, until],
+        let changed = self.conn.execute(
+            "UPDATE jobs SET lease_until = ?3
+              WHERE id = ?1 AND state = 'leased' AND lease_generation = ?2",
+            params![job.id, job.generation, until],
         )?;
-        Ok(())
+        Ok(changed > 0)
     }
 
     /// Marks a job done, and keeps what it did.
@@ -521,6 +538,26 @@ mod tests {
         let again = lake.lease().unwrap().expect("an expired lease must free the job");
         assert_eq!(again.id, first.id);
         assert_eq!(again.attempts, 2);
+    }
+
+    #[test]
+    fn a_heartbeat_from_the_previous_holder_does_not_extend_a_reclaimed_job() {
+        let lake = Lake::in_memory().unwrap();
+        lake.enqueue(&job("a")).unwrap();
+        let first = lake.lease().unwrap().unwrap();
+        lake.force_lease_expiry(first.id).unwrap();
+        let again = lake.lease().unwrap().expect("an expired lease must free the job");
+
+        assert_ne!(first.generation, again.generation);
+        assert!(
+            !lake.heartbeat(&first).unwrap(),
+            "the previous holder must not keep the new lease alive"
+        );
+        assert!(lake.heartbeat(&again).unwrap());
+        assert!(
+            lake.lease().unwrap().is_none(),
+            "the current holder's heartbeat must still hold the job"
+        );
     }
 
     #[test]

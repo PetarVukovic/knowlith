@@ -101,15 +101,20 @@ lake. This is the constraint that shaped the whole of proof-of-use below.
 ### The queue is durable and the lease is not a flag
 
 Work outlives the process that started it. A worker claims a job until a
-timestamp; if it dies, the lease expires and the job returns to the queue with
-nobody having to notice the crash. Idempotency keys make a retry recognise
-itself. Transport failure defers with a growing gap; a refusal fails and is
-reported, because retrying it changes nothing.
+timestamp, and the claim carries a **generation**. If the process dies, the
+lease expires and the job returns to the queue with nobody having to notice
+the crash. A heartbeat that still presents the previous generation is ignored,
+and that holder kills its CLI child — otherwise two AI workers both extend
+the same row and two agents answer the same prompt. Idempotency keys make a
+retry recognise itself. Transport failure defers with a growing gap; a
+refusal fails and is reported, because retrying it changes nothing.
 
-Job kinds: `rescan`, `compile_document`, `settle`, `relate`, `draft_skills`,
-`recheck`. Compile jobs may be claimed in batches by AI workers (several
-documents, one CLI process). Settle still waits until the compile queue —
-including leased jobs — is empty.
+Job kinds: `rescan`, `compile_document`, `settle`, `supervise`, `relate`,
+`draft_skills`, `recheck`. Compile jobs may be claimed in batches by AI
+workers (several documents, one CLI process). Settle still waits until the
+compile queue — including leased jobs — is empty. With `relateAfterBuild`
+(the default), `relate` waits until the owner has confirmed the build quiz
+so the supervisor is not blocked behind a whole-folder model pass.
 
 The daemon runs **one I/O track** (rescan / recheck) and **N AI tracks**
 (default 2, policy-capped at 4) so a long folder walk does not starve

@@ -25,6 +25,8 @@ mod detect;
 mod replay;
 mod usage;
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 pub use breaker::Breaker;
@@ -48,6 +50,13 @@ pub struct Request {
     /// instructions, which is weaker but better than nothing.
     pub schema: Option<String>,
     pub timeout: Duration,
+    /// When set, the CLI child is killed as soon as this is true.
+    ///
+    /// Not part of the cassette key: it is a runtime leash on a process,
+    /// not a change to the question. A lost job lease sets this so the
+    /// previous holder does not keep a model answering after someone else
+    /// has claimed the same row.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Request {
@@ -60,6 +69,7 @@ impl Request {
             // Long enough for a large document on a slow local model, short
             // enough that a hung CLI frees its job within the hour.
             timeout: Duration::from_secs(600),
+            cancel: None,
         }
     }
 
@@ -70,6 +80,11 @@ impl Request {
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
+        self.cancel = Some(cancel);
         self
     }
 

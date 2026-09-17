@@ -17,7 +17,7 @@ use crate::Result;
 /// The shape this build expects. Bumped whenever a step is added, and stored
 /// so a lake written by a newer Knowlith can be recognised rather than
 /// quietly half-read by an older one.
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 pub fn run(conn: &Connection) -> Result<()> {
     // A read of what is actually there beats a version number: a lake that
@@ -187,6 +187,18 @@ pub fn run(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    if has_table(conn, "jobs")? && !has_column(conn, "jobs", "lease_generation")? {
+        // A fencing token. Heartbeat used to match on `state = 'leased'`
+        // alone, so when a lease expired and a second worker claimed the
+        // same row both holders kept extending `lease_until` and two CLI
+        // children ran the same prompt. The generation is what makes the
+        // previous holder's heartbeat a no-op.
+        conn.execute(
+            "ALTER TABLE jobs ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
     if has_table(conn, "documents")? && !has_column(conn, "documents", "gone_at")? {
         // Set when a rescan finds the file no longer on disk. The snapshot
         // stays so quotes remain checkable; the owner decides whether the
@@ -327,5 +339,35 @@ mod tests {
             .query_row("SELECT count(*) FROM schema_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(versions, 1);
+    }
+
+    #[test]
+    fn a_jobs_table_without_a_generation_still_opens() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE jobs (
+                id INTEGER PRIMARY KEY,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 0,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                lease_until TEXT,
+                run_after TEXT NOT NULL,
+                note TEXT,
+                created_at TEXT NOT NULL,
+                finished_at TEXT
+            );
+            CREATE TABLE tool_reads (id INTEGER PRIMARY KEY, object_id TEXT NOT NULL,
+                                      tool TEXT NOT NULL, read_at TEXT NOT NULL);
+            CREATE TABLE objects (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL);
+            CREATE VIRTUAL TABLE objects_fts USING fts5(title, body, object_id UNINDEXED);
+            CREATE TABLE schema_version (version INTEGER NOT NULL);",
+        )
+        .unwrap();
+
+        run(&conn).expect("a lake with an older jobs table must still open");
+        assert!(has_column(&conn, "jobs", "lease_generation").unwrap());
     }
 }

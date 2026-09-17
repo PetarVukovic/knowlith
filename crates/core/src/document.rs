@@ -29,7 +29,7 @@ impl DocumentKind {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_ascii_lowercase().as_str() {
             "md" | "markdown" => Some(Self::Markdown),
-            "txt" | "text" => Some(Self::Text),
+            "txt" | "text" | "json" => Some(Self::Text),
             "csv" | "tsv" => Some(Self::Csv),
             "xlsx" | "xlsm" => Some(Self::Xlsx),
             "docx" => Some(Self::Docx),

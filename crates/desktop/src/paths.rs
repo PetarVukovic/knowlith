@@ -60,6 +60,31 @@ pub fn log_dir() -> PathBuf {
     root().join("logs")
 }
 
+/// The daemon's own file log. `knowlith start` has no terminal when launched
+/// from the interface, and launchd's `agent.log` only exists after autostart
+/// is registered — this file is always there so a stuck lease can be read.
+pub fn daemon_log() -> PathBuf {
+    log_dir().join("daemon.log")
+}
+
+/// Appends one line to [`daemon_log`]. Failures are swallowed: a log that
+/// cannot be written must not take the queue with it.
+pub fn log_daemon(message: &str) {
+    use std::io::Write;
+    let dir = log_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(daemon_log())
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{} {message}", chrono::Utc::now().to_rfc3339());
+}
+
 /// The company's own mark, shown next to the slash command in the chat box.
 pub fn brand_dir() -> PathBuf {
     root().join("brand")

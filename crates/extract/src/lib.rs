@@ -200,6 +200,20 @@ mod tests {
     }
 
     #[test]
+    fn json_is_read_as_text() {
+        let doc = extract_bytes(
+            Path::new("/tmp/partneri-osiguravatelji.json"),
+            br#"{"ime":"Allianz","uvjeti":"cjenik usluga"}"#,
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap();
+        assert_eq!(doc.kind, DocumentKind::Text);
+        assert!(doc.text.contains("Allianz"), "company JSON must reach the lake");
+        assert!(is_secret("credentials.json"));
+        assert!(!is_secret("partneri-osiguravatelji.json"));
+    }
+
+    #[test]
     fn noise_is_recognised() {
         assert!(is_noise("~$ponuda.docx"));
         assert!(is_noise(".DS_Store"));
