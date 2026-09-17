@@ -55,32 +55,20 @@ step '6 · Policy'
 curlq GET /api/policy | python3 -m json.tool
 
 step '7 · Brain (graph)'
-curlq GET /api/brain | python3 -c '
-import json, sys
-d = json.load(sys.stdin)
-print(f"  nodes: {len(d.get(\"nodes\", []))}  edges: {len(d.get(\"edges\", []))}")
-'
+curlq GET /api/brain | python3 -c "import json,sys; d=json.load(sys.stdin); print('  nodes:', len(d.get('nodes', [])), ' edges:', len(d.get('edges', [])))"
 
 step '8 · Connected AI tools'
-curlq GET /api/tools | python3 -c '
-import json, sys
+curlq GET /api/tools | python3 -c "import json,sys
 for t in json.load(sys.stdin):
-    mark = "connected" if t.get("connected") else "not connected"
-    print(f"  {t.get(\"label\", t.get(\"slug\"))}: {mark}")
-'
+ mark='connected' if t.get('connected') else 'not connected'
+ print(' ', t.get('label', t.get('slug')), ':', mark)"
 
 step '9 · Build supervisor'
 curlq GET /api/build/status | python3 -m json.tool
 
 step '10 · Build quiz (if any)'
-curlq GET /api/build/quiz | python3 -c '
-import json, sys
-q = json.load(sys.stdin)
-if q is None:
-    print("  no quiz yet")
-else:
-    print(f"  state: {q.get(\"state\")}  questions: {len(q.get(\"questions\", []))}")
-'
+curlq GET /api/build/quiz | python3 -c "import json,sys; q=json.load(sys.stdin)
+print('  no quiz yet') if q is None else print('  state:', q.get('state'), ' questions:', len(q.get('questions', [])))"
 
 step '11 · Export approved knowledge to Markdown'
 curlq POST /api/export '{}' | python3 -m json.tool
