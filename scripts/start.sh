@@ -125,14 +125,14 @@ if [ "$WITH_DEMO" = "1" ]; then
   say "source id: $SOURCE_ID"
 
   step 'Waiting for documents to land in the lake'
-  for i in $(seq 1 90); do
+  for i in $(seq 1 24); do
     HEALTH=$(api "$BASE/api/health")
     DOCS=$(echo "$HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('documents',0))")
     WORK=$(api "$BASE/api/work")
     STAGE=$(echo "$WORK" | python3 -c "import json,sys; print(json.load(sys.stdin).get('stage',''))")
     DOING=$(echo "$WORK" | python3 -c "import json,sys; print(json.load(sys.stdin).get('doing',''))")
     say "[$i] documents=$DOCS stage=$STAGE — $DOING"
-    if [ "$DOCS" -gt 0 ] && [ "$STAGE" = "idle" ]; then
+    if [ "$DOCS" -gt 0 ]; then
       break
     fi
     if [ "$STAGE" = "idle" ] && [ "$DOCS" -eq 0 ] && [ "$i" -eq 8 ]; then
@@ -147,6 +147,7 @@ step 'Opening UI fullscreen'
 OPEN_URL="$BASE/onboarding"
 [ "$FRESH" = "1" ] || OPEN_URL="$BASE"
 open_fullscreen "$OPEN_URL"
+say "compile and the build supervisor continue in the background — watch Work or /build-quiz"
 
 printf '\n  Ctrl-C stops the daemon.\n'
 printf '  Work panel: %s\n' "$BASE"
