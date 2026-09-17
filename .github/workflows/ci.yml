@@ -1,0 +1,36 @@
+# Every push to main and every pull request — the same gate release uses.
+#
+# Release builds four binaries; this runs the tests once so a broken main
+# is caught before anyone tags.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: knowlith/package-lock.json
+
+      - run: npm ci
+        working-directory: knowlith
+      - run: npm run build
+        working-directory: knowlith
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --workspace

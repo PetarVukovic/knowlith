@@ -141,5 +141,5 @@ Honest about the prototype edges, so nobody builds on them believing otherwise:
 - `StepAccess` is a checkbox. It requests no operating-system permission.
 - Google Drive and OneDrive say "Coming soon" and are not started.
 - `install.sh` / `install.ps1` download a GitHub Release asset from
-  `PetarVukovic/knowlith`. Until a release is cut, use `scripts/dev.sh`
-  or build the binary from source.
+  `PetarVukovic/knowlith`. Tag `v*` triggers `.github/workflows/release.yml`.
+  For local work without a release, use `scripts/dev.sh` or build from source.

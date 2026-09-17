@@ -57,9 +57,9 @@ curl -fsSL https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.
 irm https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.ps1 | iex
 ```
 
-The installer downloads a single binary (UI embedded — no Node at runtime) and places it on your `PATH`.
+The installer downloads a single binary (UI embedded — no Node at runtime) and places it on your `PATH`. Binaries for macOS (Apple Silicon and Intel), Linux and Windows are on the [Releases](https://github.com/PetarVukovic/knowlith/releases) page.
 
-> Until the first GitHub Release is cut, build from source: `cargo build --release --bin knowlith` or use `sh scripts/dev.sh` for development.
+**Contributors:** build from source with `cargo build --release --bin knowlith` or use `sh scripts/dev.sh` for hot reload.
 
 ---
 

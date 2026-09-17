@@ -76,4 +76,4 @@ curlq GET /api/engine-runs | python3 -c "import json,sys; r=json.load(sys.stdin)
 step '12 · Export approved knowledge to Markdown'
 curlq POST /api/export '{}' | python3 -m json.tool
 
-printf '\n\033[1mDone.\033[0m Full setup: sh scripts/curl-onboarding.sh --demo\n\n'
+printf '\n\033[1mDone.\033[0m For MCP gateway proof: sh scripts/verify-gateway.sh\n\n'
