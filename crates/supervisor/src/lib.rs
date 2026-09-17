@@ -180,7 +180,12 @@ pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<Run
 pub fn run_for_job(lake: &mut Lake, engine: &dyn Engine, session_id: &str, job_id: Option<i64>) -> Result<RunReport, RunError> {
     let result = run_inner(lake, engine, session_id, job_id);
     if let Err(error) = &result {
-        let _ = lake.set_build_phase(if error.is_retryable() { "retrying" } else { "failed" });
+        let phase = match error {
+            RunError::Engine(knowlith_engine::EngineError::Unavailable(_)) => "held",
+            error if error.is_retryable() => "retrying",
+            _ => "failed",
+        };
+        let _ = lake.set_build_phase(phase);
         let _ = lake.finish_supervisor_session(session_id, "interrupted");
     }
     result

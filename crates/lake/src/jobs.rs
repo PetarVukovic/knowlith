@@ -300,11 +300,14 @@ impl Lake {
     /// Lets every held job run. What the owner presses when they plug in or
     /// say go.
     pub fn release_held(&self) -> Result<usize> {
-        let released = self.conn.execute(
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM settings WHERE key = 'ai_blocked_reason'", [])?;
+        let released = tx.execute(
             "UPDATE jobs SET state = 'queued', run_after = ?1, last_error = NULL
              WHERE state = 'held'",
             params![Utc::now().to_rfc3339()],
         )?;
+        tx.commit()?;
         Ok(released)
     }
 

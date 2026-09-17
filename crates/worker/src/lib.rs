@@ -194,6 +194,13 @@ impl Worker {
         // towards `dead` and a laptop left unplugged overnight would wake
         // up having thrown its own queue away.
         if needs_a_model(&jobs[0].kind) {
+            // Shared durable gate: sibling workers and daemon restarts must
+            // not spend every document's attempts on the same blocked account.
+            if let Some(reason) = self.lake.setting("ai_blocked_reason")? {
+                for job in &jobs { self.lake.hold(job.id, &reason)?; }
+                tick.outcome = Some(format!("held: {reason}"));
+                return Ok(tick);
+            }
             if let Err(held) = self.lake.policy().may_run_ai(self.on_battery()) {
                 for job in &jobs {
                     self.lake.hold(job.id, held.as_str())?;
@@ -230,6 +237,11 @@ impl Worker {
                     last = format!("deferred ({state:?}): {reason}");
                 }
                 tick.outcome = Some(last);
+            }
+            Err(Failure::Unavailable(reason)) => {
+                self.lake.set_setting("ai_blocked_reason", &reason)?;
+                for job in &jobs { self.lake.hold(job.id, &reason)?; }
+                tick.outcome = Some(format!("held: {reason}"));
             }
             // Retrying changes nothing, so it stops here and is reported.
             Err(Failure::Refused(reason)) => {
@@ -692,7 +704,10 @@ impl Worker {
         }
         let engine = self.job_engine();
         let report = knowlith_supervisor::run_for_job(&mut self.lake, &*engine, &session_id, Some(job.id))
-            .map_err(|error| if error.is_retryable() { Failure::Transport(error.to_string()) } else { Failure::Refused(error.to_string()) })?;
+            .map_err(|error| match error {
+                knowlith_supervisor::RunError::Engine(error) => Failure::from(error),
+                other => Failure::Refused(other.to_string()),
+            })?;
         let _ = self
             .lake
             .set_setting("supervised_at", &docs.len().to_string());
@@ -929,19 +944,18 @@ pub fn spawn_pool(
     Ok(handles)
 }
 
-/// The two things that can go wrong, kept apart because they ask for
-/// different things: one waits, the other tells somebody.
+/// Temporary failures retry, account failures hold all AI work, and invalid
+/// requests fail individually without stopping unrelated documents.
 enum Failure {
     Transport(String),
+    Unavailable(String),
     Refused(String),
 }
 
 impl From<knowlith_compiler::CompileError> for Failure {
     fn from(error: knowlith_compiler::CompileError) -> Self {
         match error {
-            knowlith_compiler::CompileError::Engine(e) if e.is_retryable() => {
-                Failure::Transport(e.to_string())
-            }
+            knowlith_compiler::CompileError::Engine(e) => Failure::from(e),
             other => Failure::Refused(other.to_string()),
         }
     }
@@ -949,7 +963,9 @@ impl From<knowlith_compiler::CompileError> for Failure {
 
 impl From<EngineError> for Failure {
     fn from(error: EngineError) -> Self {
-        if error.is_retryable() {
+        if matches!(&error, EngineError::Unavailable(_)) {
+            Failure::Unavailable(error.to_string())
+        } else if error.is_retryable() {
             Failure::Transport(error.to_string())
         } else {
             Failure::Refused(error.to_string())

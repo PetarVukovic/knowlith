@@ -138,6 +138,7 @@ pub fn read_one(
     // Stage 2.
     match candidates::propose(engine, document, company) {
         Ok((found, _)) => out.candidates.extend(found),
+        Err(CompileError::Engine(e)) if e.holds_all_ai_work() => return Err(e.into()),
         Err(CompileError::Engine(e)) if !e.is_retryable() => out.dropped.push(Dropped {
             document: document.name.clone(),
             title: String::new(),
@@ -204,6 +205,7 @@ pub fn read_many(
                 usage,
             })
         }
+        Err(CompileError::Engine(e)) if e.holds_all_ai_work() => return Err(e.into()),
         Err(CompileError::Engine(e)) if !e.is_retryable() => {
             for document in need_model {
                 let reading = out.entry(document.id.clone()).or_default();

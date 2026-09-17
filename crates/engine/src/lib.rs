@@ -145,6 +145,12 @@ impl EngineError {
     pub fn is_retryable(&self) -> bool {
         matches!(self, Self::Transport(_))
     }
+
+    /// Sign-in and allowance failures belong to the owner, not to one document.
+    /// The worker holds every AI job until they resume.
+    pub fn holds_all_ai_work(&self) -> bool {
+        matches!(self, Self::Unavailable(_))
+    }
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

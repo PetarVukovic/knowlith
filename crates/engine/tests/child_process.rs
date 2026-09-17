@@ -216,3 +216,17 @@ fn a_grandchild_holding_output_open_is_also_bounded_by_the_deadline() {
     assert!(result.is_err());
     assert!(start.elapsed() < Duration::from_secs(5));
 }
+
+#[test]
+fn a_success_exit_with_a_cli_error_envelope_is_not_a_model_reply() {
+    let path = script("quota-envelope", "printf '%s\n' '{\"type\":\"result\",\"is_error\":true,\"result\":\"Credit balance is too low\"}'\n");
+    let result = engine(&path).run(&Request::new("candidates", "x", "y"));
+    assert!(matches!(result, Err(EngineError::Unavailable(_))), "error envelope must pause the account: {result:?}");
+}
+
+#[test]
+fn stdout_account_error_is_not_hidden_by_stderr_progress() {
+    let path = script("quota-stdout", "echo 'starting reader' >&2\necho '429 insufficient_quota'\nexit 1\n");
+    let result = engine(&path).run(&Request::new("candidates", "x", "y"));
+    assert!(matches!(result, Err(EngineError::Unavailable(_))));
+}
