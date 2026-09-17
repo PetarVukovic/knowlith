@@ -17,7 +17,7 @@ use crate::Result;
 /// The shape this build expects. Bumped whenever a step is added, and stored
 /// so a lake written by a newer Knowlith can be recognised rather than
 /// quietly half-read by an older one.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 7;
 
 pub fn run(conn: &Connection) -> Result<()> {
     // A read of what is actually there beats a version number: a lake that
@@ -111,6 +111,79 @@ pub fn run(conn: &Connection) -> Result<()> {
             "INSERT INTO objects_fts (title, body, object_id)
              SELECT title, body, id FROM objects",
             [],
+        )?;
+    }
+
+    if !has_table(conn, "entities")? {
+        conn.execute_batch(
+            "CREATE TABLE entities (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE episode_entities (
+                document_id TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                linked_at TEXT NOT NULL,
+                PRIMARY KEY (document_id, entity_id, role)
+            );
+            CREATE TABLE communities (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                document_ids_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE supervisor_sessions (
+                id TEXT PRIMARY KEY,
+                state TEXT NOT NULL,
+                engine TEXT NOT NULL,
+                turn_count INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT NOT NULL,
+                finished_at TEXT
+            );
+            CREATE TABLE supervisor_turns (
+                session_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, ordinal)
+            );
+            CREATE TABLE build_quiz (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                questions_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                confirmed_at TEXT
+            );",
+        )?;
+    }
+
+    if has_table(conn, "documents")? && !has_column(conn, "documents", "gone_at")? {
+        // Set when a rescan finds the file no longer on disk. The snapshot
+        // stays so quotes remain checkable; the owner decides whether the
+        // knowledge that rested on it still counts.
+        conn.execute("ALTER TABLE documents ADD COLUMN gone_at TEXT", [])?;
+    }
+
+    if !has_table(conn, "document_gone_reviews")? {
+        conn.execute_batch(
+            "CREATE TABLE document_gone_reviews (
+                object_id    TEXT NOT NULL,
+                document_id  TEXT NOT NULL,
+                opened_at    TEXT NOT NULL,
+                resolved_at  TEXT,
+                resolution   TEXT CHECK(resolution IN ('keep', 'reject')),
+                PRIMARY KEY (object_id, document_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_gone_reviews_open
+                ON document_gone_reviews(resolved_at, opened_at DESC);",
         )?;
     }
 

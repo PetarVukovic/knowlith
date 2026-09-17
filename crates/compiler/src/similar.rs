@@ -139,6 +139,14 @@ pub fn hints(objects: &[ContextObject]) -> Vec<Hint> {
             if differing_figures && left_profile.title != right_profile.title {
                 continue;
             }
+            // Two invoices answering "due date for INV-012" and "due date for
+            // INV-013" stem to the same subject and look like a contradiction.
+            // They are different instances, not two live answers to one rule.
+            if differing_figures
+                && title_without_instances(&left.title) == title_without_instances(&right.title)
+            {
+                continue;
+            }
 
             let score = subject_overlap(left_profile, right_profile);
             if score < THRESHOLD {
@@ -239,6 +247,32 @@ fn content_words(text: &str) -> BTreeSet<String> {
         .filter(|word| word.chars().count() >= 4 && !STOP.contains(word))
         .map(|word| word.chars().take(STEM).collect::<String>())
         .collect()
+}
+
+/// True when a token names one document instance (invoice number, etc.).
+fn is_instance_token(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '#');
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("inv") && lower.chars().any(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    if trimmed.starts_with('#') && trimmed[1..].chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    false
+}
+
+/// Title with per-document instance tokens removed, for pairing checks.
+fn title_without_instances(title: &str) -> String {
+    title
+        .split_whitespace()
+        .filter(|token| !is_instance_token(token))
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn fold_char(c: char) -> char {
@@ -431,6 +465,30 @@ mod tests {
             ),
         ];
         assert_eq!(hints(&objects).len(), 1, "a longer title is the same subject with a qualifier");
+    }
+
+    #[test]
+    fn two_invoices_with_the_same_field_are_not_a_contradiction() {
+        let objects = vec![
+            object(
+                "fact:inv-012-due",
+                "Payment due date for INV-012",
+                "Invoice INV-012 was issued on September 1, 2025 and its amount of 2,520 is due by September 8, 2025.",
+                ObjectKind::Fact,
+                1,
+            ),
+            object(
+                "fact:inv-013-due",
+                "Payment due date for INV-013",
+                "Invoice INV-013 was issued on October 1, 2025 and its amount of 3,963 EUR is due by October 8, 2025.",
+                ObjectKind::Fact,
+                1,
+            ),
+        ];
+        assert!(
+            hints(&objects).is_empty(),
+            "each invoice is its own instance, not two answers to one question"
+        );
     }
 
     #[test]

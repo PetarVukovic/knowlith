@@ -35,6 +35,8 @@ interface AppState {
   onboarded: boolean
   completeOnboarding: () => void
   resetOnboarding: () => void
+  /** Stops reading chosen folders, then opens the setup wizard from Welcome. */
+  beginSetupAgain: (removeSourceIds: string[]) => Promise<void>
   firstRun: FirstRun
   setFirstRun: (stage: FirstRun) => void
 
@@ -283,6 +285,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     store("knowlith.onboarded", "no")
   }, [])
 
+  const beginSetupAgain = useCallback(async (removeSourceIds: string[]) => {
+    if (removeSourceIds.length > 0) {
+      const results = await Promise.all(removeSourceIds.map((id) => api.removeSource(id)))
+      const removed = removeSourceIds.filter((_, i) => results[i])
+      if (removed.length > 0) {
+        setSources((current) => current.filter((s) => !removed.includes(s.id)))
+      }
+    }
+    store("knowlith.setupFresh", "yes")
+    setFirstRunState(null)
+    store("knowlith.firstRun", "")
+    setOnboarded(false)
+    store("knowlith.onboarded", "no")
+  }, [])
+
   const approve = useCallback((itemId: string, edited: boolean) => {
     // Tell the daemon, then move the interface. The optimistic update is
     // what keeps the queue feeling immediate; a failed write shows up on the
@@ -441,6 +458,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       onboarded,
       completeOnboarding,
       resetOnboarding,
+      beginSetupAgain,
       firstRun,
       setFirstRun,
       companyName: companyName || "Your company",
@@ -479,6 +497,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       onboarded,
       completeOnboarding,
       resetOnboarding,
+      beginSetupAgain,
       firstRun,
       setFirstRun,
       companyName,

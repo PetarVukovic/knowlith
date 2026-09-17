@@ -505,6 +505,35 @@ export type Work = {
   lines: WorkLine[]
 }
 
+export type BuildQuizEvidence = {
+  documentId: string
+  documentName: string
+  quote: string
+}
+
+export type BuildQuizQuestion = {
+  id: string
+  question: string
+  agentAnswer: string
+  evidence: BuildQuizEvidence[]
+  proposedObjectId?: string | null
+}
+
+export type BuildQuiz = {
+  id: string
+  sessionId: string
+  state: string
+  questions: BuildQuizQuestion[]
+  createdAt: string
+}
+
+export type BuildStatus = {
+  phase: string
+  quizPending: boolean
+  quizId?: string | null
+  questionCount: number
+}
+
 export type WorkLine = {
   /** The document's name, never its id. */
   subject: string

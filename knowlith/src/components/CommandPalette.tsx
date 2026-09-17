@@ -9,13 +9,12 @@ import { useApp } from "@/state/AppState"
  * ("popust", "jamstvo") and lands on the object, not on a search results page.
  */
 export function CommandPalette() {
-  const { paletteOpen, setPaletteOpen, objects, skills, review, setTheme, setMode, mode, resetOnboarding, setFirstRun } =
-    useApp()
+  const { paletteOpen, setPaletteOpen, objects, skills, review, setTheme, setMode, mode } = useApp()
   const navigate = useNavigate()
 
-  const go = (path: string) => {
+  const go = (path: string, state?: { scroll?: string }) => {
     setPaletteOpen(false)
-    navigate(path)
+    navigate(path, state ? { state } : undefined)
   }
 
   return (
@@ -51,14 +50,10 @@ export function CommandPalette() {
             <PaletteItem onSelect={() => go("/settings")} icon={<Settings />} label="Settings" />
             <PaletteItem onSelect={() => go("/discovery")} icon={<RefreshCw />} label="Last discovery report" />
             <PaletteItem
-              onSelect={() => {
-                setFirstRun(null)
-                resetOnboarding()
-                go("/onboarding")
-              }}
+              onSelect={() => go("/settings", { scroll: "setup" })}
               icon={<Sparkles />}
               label="Run setup again"
-              hint="from the start"
+              hint="sources & setup"
             />
           </Command.Group>
 

@@ -1,13 +1,20 @@
-import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
-import { FolderOpen, Laptop, Moon, Plug, Sun } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
+import { ExternalLink, FolderOpen, Laptop, Moon, Plug, Sun, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input, Textarea } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Field, Panel, PanelHeader } from "@/components/ui/surface"
 import { api, background } from "@/lib/api"
-import type { AutostartState, Policy, PolicyState } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import type { AutostartState, Policy, PolicyState, Source } from "@/lib/types"
+import { cn, formatBytes, formatCount, formatRelative } from "@/lib/utils"
 import { useApp, type Theme, type UiMode } from "@/state/AppState"
 
 const THEMES: { id: Theme; label: string; Icon: typeof Sun }[] = [
@@ -37,8 +44,8 @@ const PROCESSING: { id: Policy["processing"]; label: string; hint: string }[] = 
 /**
  * Owner preferences that are not a daily job.
  *
- * Folders and AI tools stay as their own screens — Settings points at them
- * rather than swallowing those workflows.
+ * Sources and setup live here together: remove folders you no longer want read,
+ * then run the first-run wizard again in one pass. AI tools stay on Connect.
  */
 export function Settings() {
   const {
@@ -49,16 +56,24 @@ export function Settings() {
     mode,
     setMode,
     live,
-    resetOnboarding,
-    setFirstRun,
+    sources,
+    removeSource,
+    beginSetupAgain,
   } = useApp()
   const navigate = useNavigate()
+  const location = useLocation()
+  const setupRef = useRef<HTMLDivElement>(null)
 
   const [nameDraft, setNameDraft] = useState(companyName)
   const [profileDraft, setProfileDraft] = useState("")
   const [policyState, setPolicyState] = useState<PolicyState | null>(null)
   const [autostart, setAutostart] = useState<AutostartState | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
+
+  const [removeMarked, setRemoveMarked] = useState<Record<string, boolean>>({})
+  const [pendingRemoval, setPendingRemoval] = useState<Source | null>(null)
+  const [restartOpen, setRestartOpen] = useState(false)
+  const [restarting, setRestarting] = useState(false)
 
   useEffect(() => {
     setNameDraft(companyName)
@@ -83,6 +98,15 @@ export function Settings() {
     }
   }, [live])
 
+  useEffect(() => {
+    const scroll = (location.state as { scroll?: string } | null)?.scroll
+    if (scroll === "setup") {
+      setupRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }
+  }, [location.state])
+
+  const markedIds = sources.filter((s) => removeMarked[s.id]).map((s) => s.id)
+
   const saveName = () => {
     const next = nameDraft.trim()
     if (!next || next === companyName) return
@@ -98,7 +122,6 @@ export function Settings() {
   const patchPolicy = async (patch: Partial<Policy>) => {
     if (!policyState) return
     setSaving("policy")
-    // Prefer the saved engine; only default when a lake predates the field.
     const next = {
       ...policyState.policy,
       engine: policyState.policy.engine || "auto",
@@ -122,11 +145,19 @@ export function Settings() {
     setSaving(null)
   }
 
+  const runSetupAgain = async () => {
+    setRestarting(true)
+    await beginSetupAgain(markedIds)
+    setRestarting(false)
+    setRestartOpen(false)
+    navigate("/onboarding")
+  }
+
   return (
     <div className="mx-auto w-full max-w-[640px] px-4 py-8">
       <h1 className="text-[20px] font-semibold tracking-[-0.015em] text-ink">Settings</h1>
       <p className="mt-1 max-w-[54ch] text-[13px] text-muted">
-        How Knowlith looks, when it may read your folders, and who this company is.
+        How Knowlith looks, which folders it reads, and when it may read them.
       </p>
 
       <div className="mt-6 grid gap-4">
@@ -179,6 +210,83 @@ export function Settings() {
             </Field>
           </div>
         </Panel>
+
+        <div ref={setupRef} id="sources-and-setup">
+        <Panel>
+          <PanelHeader
+            title="Sources and setup"
+            description="Stop reading folders you no longer want, then walk through setup again — in one go."
+          />
+          <div className="grid gap-4 p-4">
+            {!live ? (
+              <p className="text-[13px] text-faint">Start Knowlith to change which folders are read.</p>
+            ) : sources.length === 0 ? (
+              <div className="rounded-md border border-line bg-surface-2 px-3 py-3 text-[13px] text-muted">
+                No folders yet. Run setup to add the documents Knowlith should read.
+              </div>
+            ) : (
+              <ul className="grid gap-2">
+                {sources.map((source) => (
+                  <li
+                    key={source.id}
+                    className="flex items-start gap-3 rounded-md border border-line px-3 py-2.5"
+                  >
+                    <label className="mt-0.5 flex shrink-0 cursor-pointer items-center">
+                      <input
+                        type="checkbox"
+                        checked={removeMarked[source.id] ?? false}
+                        onChange={(e) =>
+                          setRemoveMarked((current) => ({ ...current, [source.id]: e.target.checked }))
+                        }
+                        className="size-3.5 rounded border-line accent-accent"
+                        aria-label={`Stop reading ${source.name}`}
+                      />
+                    </label>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13.5px] font-medium text-ink">{source.name}</div>
+                      <div className="mt-0.5 text-[12.5px] text-muted">
+                        {formatCount(source.fileCount)} files · {formatBytes(source.bytes)}
+                        {source.lastAnalyzed ? ` · last read ${formatRelative(source.lastAnalyzed)}` : " · not read yet"}
+                      </div>
+                      {mode === "engineer" ? (
+                        <div className="mt-0.5 truncate font-mono text-[11.5px] text-faint">{source.path}</div>
+                      ) : null}
+                    </div>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={`Remove ${source.name}`}
+                      onClick={() => setPendingRemoval(source)}
+                    >
+                      <Trash2 className="size-3.5 text-faint" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <p className="text-[12.5px] leading-relaxed text-muted">
+              Checked folders stop being read. Your files on disk are untouched. Rules you already approved
+              stay in use — they just will not update from a removed folder.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="primary"
+                disabled={!live || restarting}
+                onClick={() => setRestartOpen(true)}
+              >
+                Run setup again
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => navigate("/sources")}>
+                <FolderOpen className="size-3.5" />
+                Pause, rescan, or add folders
+                <ExternalLink className="size-3 text-faint" />
+              </Button>
+            </div>
+          </div>
+        </Panel>
+        </div>
 
         <Panel>
           <PanelHeader title="Appearance" description="Light or dark. Does not change what is stored." />
@@ -477,12 +585,6 @@ export function Settings() {
           <PanelHeader title="Related" description="Managed on their own screens." />
           <div className="grid gap-1 p-2">
             <RelatedLink
-              icon={<FolderOpen className="size-3.5" />}
-              label="Sources"
-              hint="Where knowledge comes from"
-              onClick={() => navigate("/sources")}
-            />
-            <RelatedLink
               icon={<Plug className="size-3.5" />}
               label="AI assistants"
               hint="Claude, Codex, Cursor, and who has used what"
@@ -490,23 +592,76 @@ export function Settings() {
             />
           </div>
         </Panel>
+      </div>
 
-        <Panel>
-          <PanelHeader title="Setup" description="Does not delete approved knowledge." />
-          <div className="p-4">
+      <Dialog open={pendingRemoval !== null} onOpenChange={(open) => !open && setPendingRemoval(null)}>
+        <DialogContent>
+          <DialogTitle className="text-[15px] font-semibold text-ink">
+            Remove {pendingRemoval?.name}?
+          </DialogTitle>
+          <DialogDescription className="mt-1.5 text-[13px] text-muted">
+            Knowlith stops reading this folder. Your files are untouched. Context already approved from it stays in
+            use, but it will no longer update.
+          </DialogDescription>
+          <div className="mt-5 flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost">Keep it</Button>
+            </DialogClose>
             <Button
-              variant="default"
+              variant="danger"
               onClick={() => {
-                setFirstRun(null)
-                resetOnboarding()
-                navigate("/onboarding")
+                if (pendingRemoval) {
+                  removeSource(pendingRemoval.id)
+                  setRemoveMarked((current) => {
+                    const next = { ...current }
+                    delete next[pendingRemoval.id]
+                    return next
+                  })
+                }
+                setPendingRemoval(null)
               }}
             >
-              Run setup again
+              Remove source
             </Button>
           </div>
-        </Panel>
-      </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={restartOpen} onOpenChange={(open) => !restarting && setRestartOpen(open)}>
+        <DialogContent>
+          <DialogTitle className="text-[15px] font-semibold text-ink">Run setup again?</DialogTitle>
+          <DialogDescription className="mt-1.5 text-[13px] text-muted">
+            {markedIds.length > 0 ? (
+              <>
+                Knowlith will stop reading {markedIds.length}{" "}
+                {markedIds.length === 1 ? "folder" : "folders"}, then walk you through setup from the welcome
+                screen. Approved knowledge stays — only what still has a live source keeps updating.
+              </>
+            ) : sources.length > 0 ? (
+              <>
+                You will go through setup from the welcome screen. Folders Knowlith already reads stay attached;
+                check any you want removed before continuing.
+              </>
+            ) : (
+              <>You will go through setup from the welcome screen and add folders again.</>
+            )}
+          </DialogDescription>
+          <div className="mt-5 flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" disabled={restarting}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button variant="primary" disabled={restarting} onClick={() => void runSetupAgain()}>
+              {restarting
+                ? "Starting…"
+                : markedIds.length > 0
+                  ? `Remove ${markedIds.length} and continue`
+                  : "Continue to setup"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

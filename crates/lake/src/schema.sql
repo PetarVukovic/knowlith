@@ -322,3 +322,61 @@ CREATE TABLE IF NOT EXISTS cases (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cases_open ON cases(closed_at, opened_at DESC);
+
+-- -------------------------------------------------------- build supervisor --
+
+-- Recurring parties the supervisor resolved across many document instances.
+CREATE TABLE IF NOT EXISTS entities (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    summary     TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Which episode (document) mentions which entity, and in what role.
+CREATE TABLE IF NOT EXISTS episode_entities (
+    document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    entity_id    TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    role         TEXT NOT NULL,
+    linked_at    TEXT NOT NULL,
+    PRIMARY KEY (document_id, entity_id, role)
+);
+
+-- Folder- or pattern-based clusters before semantic grouping.
+CREATE TABLE IF NOT EXISTS communities (
+    id                 TEXT PRIMARY KEY,
+    label              TEXT NOT NULL,
+    document_ids_json  TEXT NOT NULL,
+    created_at         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS supervisor_sessions (
+    id          TEXT PRIMARY KEY,
+    state       TEXT NOT NULL,
+    engine      TEXT NOT NULL,
+    turn_count  INTEGER NOT NULL DEFAULT 0,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS supervisor_turns (
+    session_id  TEXT NOT NULL REFERENCES supervisor_sessions(id) ON DELETE CASCADE,
+    ordinal     INTEGER NOT NULL,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (session_id, ordinal)
+);
+
+-- Owner confirmation quiz after the build supervisor finishes synthesising.
+CREATE TABLE IF NOT EXISTS build_quiz (
+    id              TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL REFERENCES supervisor_sessions(id),
+    state           TEXT NOT NULL,
+    questions_json  TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    confirmed_at    TEXT
+);

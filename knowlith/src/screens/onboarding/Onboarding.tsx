@@ -33,6 +33,22 @@ import { StepWelcome } from "./StepWelcome"
  */
 const DECISIONS = 4
 
+function readFreshFlag(): boolean {
+  try {
+    return localStorage.getItem("knowlith.setupFresh") === "yes"
+  } catch {
+    return false
+  }
+}
+
+function clearFreshFlag() {
+  try {
+    localStorage.removeItem("knowlith.setupFresh")
+  } catch {
+    /* private window */
+  }
+}
+
 function asProcessor(value: string | undefined, fallback: Processor): Processor {
   if (value === "codex" || value === "claude-code" || value === "cursor-agent" || value === "managed") {
     return value
@@ -73,6 +89,20 @@ export function Onboarding() {
     let cancelled = false
 
     const place = async () => {
+      // Settings can send the owner here on purpose — do not resume mid-read.
+      if (readFreshFlag()) {
+        clearFreshFlag()
+        const knownName =
+          companyName.trim() && companyName !== "Your company" ? companyName.trim() : ""
+        if (knownName) setName(knownName)
+        if (companyLogo) setLogo(companyLogo)
+        if (!cancelled) {
+          setStep(0)
+          setPlaced(true)
+        }
+        return
+      }
+
       // No folder attached yet — the welcome path is the only honest one.
       if (sources.length === 0) {
         if (!cancelled) setPlaced(true)

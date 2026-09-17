@@ -181,8 +181,14 @@ export function Review() {
           <Button
             size="lg"
             variant="ghost"
-            onClick={() => setJustApproved(false)}
+            onClick={() => {
+              setFirstRun(null)
+              navigate("/home")
+            }}
           >
+            Open Home
+          </Button>
+          <Button size="lg" variant="ghost" onClick={() => setJustApproved(false)}>
             Keep reviewing
           </Button>
         </div>

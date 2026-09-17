@@ -18,6 +18,7 @@ const LINKS: {
 }[] = [
   { to: "/home", label: "Home", Icon: Building2, end: true, tour: "tour-home" },
   { to: "/review", label: "For review", Icon: ClipboardList, badge: "review", tour: "tour-review" },
+  { to: "/build-quiz", label: "Confirm build", Icon: ClipboardList },
   { to: "/browse", label: "Company knowledge", Icon: Search, tour: "tour-browse" },
   { to: "/brain", label: "Company brain", Icon: Network, tour: "tour-brain" },
   { to: "/connect", label: "AI assistants", Icon: Plug, tour: "tour-connect" },

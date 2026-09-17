@@ -10,6 +10,7 @@ import { Connect } from "@/screens/Connect"
 import { Discovery } from "@/screens/Discovery"
 import { Home } from "@/screens/Home"
 import { Onboarding } from "@/screens/onboarding/Onboarding"
+import { BuildQuiz } from "@/screens/BuildQuiz"
 import { Review } from "@/screens/Review"
 import { Settings } from "@/screens/Settings"
 import { SkillDetail } from "@/screens/SkillDetail"
@@ -31,17 +32,16 @@ function Root() {
 function GuardHome() {
   const { firstRun, setFirstRun } = useApp()
 
-  // Choosing Home ends the forced “connect an assistant” gate. Otherwise
-  // knowlith.firstRun stays "connect" forever and every Home click bounces
-  // back to AI assistants — even after the owner already uses Brain/chat.
+  // Choosing Home ends the forced first-run gates. Otherwise knowlith.firstRun
+  // stays "review" or "connect" forever and every Home click bounces back —
+  // even after the owner already approved something and wants the overview.
   useEffect(() => {
-    if (firstRun === "connect") {
+    if (firstRun === "connect" || firstRun === "review") {
       setFirstRun(null)
       scheduleProductTour()
     }
   }, [firstRun, setFirstRun])
 
-  if (firstRun === "review") return <Navigate to="/review" replace />
   return <Home />
 }
 
@@ -61,6 +61,7 @@ export function App() {
               <Route path="/workspace" element={<Navigate to="/browse" replace />} />
               <Route path="/workspace/:objectId" element={<Workspace />} />
               <Route path="/review" element={<Review />} />
+              <Route path="/build-quiz" element={<BuildQuiz />} />
               <Route path="/sources" element={<Sources />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/connect" element={<Connect />} />

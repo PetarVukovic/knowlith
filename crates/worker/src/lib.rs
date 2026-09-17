@@ -51,9 +51,10 @@ pub const KIND_SKILLS: &str = "draft_skills";
 pub const KIND_RECHECK: &str = "recheck";
 pub const KIND_RELATE: &str = "relate";
 pub const KIND_SETTLE: &str = "settle";
+pub const KIND_SUPERVISE: &str = "supervise";
 
 const IO_KINDS: &[&str] = &[KIND_RESCAN, KIND_RECHECK];
-const AI_KINDS: &[&str] = &[KIND_COMPILE, KIND_SETTLE, KIND_RELATE, KIND_SKILLS];
+const AI_KINDS: &[&str] = &[KIND_COMPILE, KIND_SETTLE, KIND_RELATE, KIND_SUPERVISE, KIND_SKILLS];
 
 /// Which slice of the queue this worker drains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -339,6 +340,23 @@ impl Worker {
             }
         }
 
+        // Build supervisor: after reading and relating, synthesise canonical
+        // knowledge and open the owner confirmation quiz.
+        if self.lake.pending_of_kind(KIND_COMPILE)? == 0
+            && self.lake.pending_of_kind(KIND_SETTLE)? == 0
+            && self.lake.pending_of_kind(KIND_RELATE)? == 0
+        {
+            let docs = self.lake.documents().map(|d| d.len()).unwrap_or(0);
+            let supervised_at: i64 = self
+                .lake
+                .setting("supervised_at")?
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(-1);
+            if docs > 0 && docs as i64 != supervised_at && enqueue_supervise(&self.lake, docs)? {
+                queued += 1;
+            }
+        }
+
         // Every hour, check that the quotes still say what they said. This
         // is what keeps `verified` a check rather than a memory: a source
         // file edited under an approved rule has to mark that rule stale
@@ -376,6 +394,7 @@ impl Worker {
             KIND_SKILLS => self.draft_skills(job, stop)?,
             KIND_RECHECK => self.recheck(job)?,
             KIND_RELATE => self.relate(job, stop)?,
+            KIND_SUPERVISE => self.supervise(job, stop)?,
             KIND_SETTLE => self.settle(job)?,
             other => {
                 return Err(Failure::Refused(format!(
@@ -472,6 +491,8 @@ impl Worker {
             &format!("source_digest:{}", payload.source_id),
             &digest.to_string(),
         );
+
+        let _ = self.lake.reconcile_missing_files(&payload.source_id);
 
         let mut note = format!(
             "{} · {changed} changed · {unchanged} unchanged · {unreadable} not readable",
@@ -639,6 +660,31 @@ impl Worker {
             "{stored} skills drafted from {} approved processes · {} not kept",
             run.processes_considered,
             run.dropped.len()
+        ))
+    }
+
+    // -------------------------------------------------------- supervisor --
+
+    fn supervise(
+        &mut self,
+        job: &knowlith_lake::Job,
+        stop: &AtomicBool,
+    ) -> std::result::Result<String, Failure> {
+        let docs = self.lake.documents().map_err(|e| Failure::Refused(e.to_string()))?;
+        let session_id = format!("build:{}", job.id);
+        let _ = self.lake.heartbeat(job.id);
+        if stop.load(Ordering::Relaxed) {
+            return Ok("stopped before supervisor started".into());
+        }
+        let report = knowlith_supervisor::run(&mut self.lake, &*self.engine, &session_id)
+            .map_err(Failure::Refused)?;
+        let _ = self
+            .lake
+            .set_setting("supervised_at", &docs.len().to_string());
+
+        Ok(format!(
+            "{} entities · {} canonical · {} quiz questions · {} communities",
+            report.entities, report.canonical, report.quiz_questions, report.communities
         ))
     }
 
@@ -984,6 +1030,15 @@ pub fn enqueue_relating(lake: &Lake) -> Result<bool> {
     })?)
 }
 
+pub fn enqueue_supervise(lake: &Lake, document_count: usize) -> Result<bool> {
+    Ok(lake.enqueue(&NewJob {
+        kind: KIND_SUPERVISE.into(),
+        payload: "{}".into(),
+        idempotency_key: format!("{KIND_SUPERVISE}:{document_count}"),
+        priority: PRIORITY_NORMAL,
+    })?)
+}
+
 pub fn enqueue_recheck(lake: &Lake) -> Result<bool> {
     let window = Utc::now().timestamp() / 3600;
     Ok(lake.enqueue(&NewJob {
@@ -1002,7 +1057,7 @@ pub fn enqueue_recheck(lake: &Lake) -> Result<bool> {
 /// whatever the owner has chosen; the three that ask an engine are the ones
 /// that cost money.
 pub fn needs_a_model(kind: &str) -> bool {
-    matches!(kind, KIND_COMPILE | KIND_SKILLS | KIND_RELATE)
+    matches!(kind, KIND_COMPILE | KIND_SKILLS | KIND_RELATE | KIND_SUPERVISE)
 }
 
 #[cfg(test)]
@@ -1014,6 +1069,7 @@ mod policy_tests {
         assert!(needs_a_model(KIND_COMPILE));
         assert!(needs_a_model(KIND_SKILLS));
         assert!(needs_a_model(KIND_RELATE));
+        assert!(needs_a_model(KIND_SUPERVISE));
 
         // These cost nothing and must keep running on battery, or a laptop
         // on a train stops noticing that its own files changed.

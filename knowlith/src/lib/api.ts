@@ -22,6 +22,8 @@ import { sleep } from "./utils"
 import type {
   AiTool,
   AutostartState,
+  BuildQuiz,
+  BuildStatus,
   Browsed,
   CompanyBrain,
   CompilerRun,
@@ -393,6 +395,22 @@ export const folders = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, name, processor }),
     })
+  },
+
+  async getBuildStatus(): Promise<BuildStatus> {
+    return get<BuildStatus>("/api/build/status", { phase: "idle", quizPending: false, questionCount: 0 }, {
+      phase: "idle",
+      quizPending: false,
+      questionCount: 0,
+    })
+  },
+
+  async getBuildQuiz(): Promise<BuildQuiz | null> {
+    return get<BuildQuiz | null>("/api/build/quiz", null, null)
+  },
+
+  async confirmBuildQuiz(quizId: string, approvedObjectIds: string[]): Promise<void> {
+    await post("/api/build/quiz/confirm", { quizId, approvedObjectIds })
   },
 }
 

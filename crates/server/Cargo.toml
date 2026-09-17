@@ -15,6 +15,7 @@ knowlith-extract.workspace = true
 knowlith-mcp.workspace = true
 knowlith-lake.workspace = true
 knowlith-worker.workspace = true
+knowlith-supervisor.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true

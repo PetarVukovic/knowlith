@@ -20,6 +20,7 @@ mod merge;
 mod migrate;
 mod policy;
 mod serve;
+mod supervisor;
 
 pub use export::{export_approved, ExportReport};
 
@@ -41,6 +42,9 @@ pub use policy::{
     MAX_COMPILE_WORKERS, Policy, Processing,
 };
 pub use serve::{Case, Row};
+pub use supervisor::{
+    BuildQuiz, CommunityRow, EntityRow, QuizEvidence, QuizQuestion,
+};
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -75,6 +79,33 @@ pub enum LakeError {
     NoEvidence,
     #[error("an approved object must say something — the text was empty")]
     NoBody,
+}
+
+#[derive(Debug, Clone)]
+pub struct DocumentIndexRow {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub path: String,
+    pub modified: String,
+    pub gone_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuotingObject {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GoneReview {
+    pub object_id: String,
+    pub document_id: String,
+    pub opened_at: String,
+    pub document_name: String,
+    pub document_path: String,
 }
 
 type Result<T> = std::result::Result<T, LakeError>;
@@ -256,7 +287,8 @@ impl Lake {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                path = ?3, name = ?4, text = ?8, text_sha256 = ?9,
-               verbatim = ?10, modified = ?11, columns_json = ?12, read_at = ?13",
+               verbatim = ?10, modified = ?11, columns_json = ?12, read_at = ?13,
+               gone_at = NULL",
             params![
                 doc.id,
                 source_id,
@@ -701,6 +733,153 @@ impl Lake {
             |r| r.get(0),
         )?;
         Ok(n as usize)
+    }
+
+    /// Lightweight rows for one source — no block bodies.
+    pub fn document_index_for_source(&self, source_id: &str) -> Result<Vec<DocumentIndexRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, kind, path, modified, gone_at FROM documents
+             WHERE source_id = ?1 ORDER BY name",
+        )?;
+        let rows = stmt
+            .query_map(params![source_id], |r| {
+                Ok(DocumentIndexRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    kind: r.get(2)?,
+                    path: r.get(3)?,
+                    modified: r.get(4)?,
+                    gone_at: r.get(5)?,
+                })
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Approved or proposed objects that cite this document.
+    pub fn objects_quoting_document(&self, document_id: &str) -> Result<Vec<QuotingObject>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT o.id, o.title, o.kind, o.status
+             FROM objects o
+             JOIN evidence e ON e.object_id = o.id
+             WHERE e.document_id = ?1
+               AND o.status IN ('approved', 'proposed', 'conflicted')
+             ORDER BY o.title",
+        )?;
+        let rows = stmt
+            .query_map(params![document_id], |r| {
+                Ok(QuotingObject {
+                    id: r.get(0)?,
+                    title: r.get(1)?,
+                    kind: r.get(2)?,
+                    status: r.get(3)?,
+                })
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Marks a snapshot whose file is no longer on disk.
+    pub fn mark_document_gone(&self, document_id: &str) -> Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE documents SET gone_at = ?2 WHERE id = ?1 AND gone_at IS NULL",
+            params![document_id, now()],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// After a rescan, compare stored paths with what is still on disk.
+    pub fn reconcile_missing_files(&self, source_id: &str) -> Result<usize> {
+        let docs = self.document_index_for_source(source_id)?;
+        let mut newly_gone = 0usize;
+        for doc in docs {
+            if std::path::Path::new(&doc.path).exists() {
+                continue;
+            }
+            if self.mark_document_gone(&doc.id)? {
+                newly_gone += self.open_gone_reviews_for_document(&doc.id)?;
+            }
+        }
+        Ok(newly_gone)
+    }
+
+    /// One review row per approved object that rested on a gone file.
+    pub fn open_gone_reviews_for_document(&self, document_id: &str) -> Result<usize> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT o.id FROM objects o
+             JOIN evidence e ON e.object_id = o.id
+             WHERE e.document_id = ?1 AND o.status = 'approved'",
+        )?;
+        let object_ids: Vec<String> = stmt
+            .query_map(params![document_id], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        let stamp = now();
+        let mut opened = 0usize;
+        for object_id in object_ids {
+            let resolved: Option<Option<String>> = self
+                .conn
+                .query_row(
+                    "SELECT resolved_at FROM document_gone_reviews
+                     WHERE object_id = ?1 AND document_id = ?2",
+                    params![object_id, document_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match resolved {
+                None => {
+                    self.conn.execute(
+                        "INSERT INTO document_gone_reviews (object_id, document_id, opened_at)
+                         VALUES (?1, ?2, ?3)",
+                        params![object_id, document_id, stamp],
+                    )?;
+                    opened += 1;
+                }
+                Some(None) => {}
+                Some(Some(_)) => {
+                    self.conn.execute(
+                        "UPDATE document_gone_reviews
+                         SET opened_at = ?3, resolved_at = NULL, resolution = NULL
+                         WHERE object_id = ?1 AND document_id = ?2",
+                        params![object_id, document_id, stamp],
+                    )?;
+                    opened += 1;
+                }
+            }
+        }
+        Ok(opened)
+    }
+
+    pub fn pending_gone_reviews(&self) -> Result<Vec<GoneReview>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT g.object_id, g.document_id, g.opened_at, d.name, d.path
+             FROM document_gone_reviews g
+             JOIN documents d ON d.id = g.document_id
+             WHERE g.resolved_at IS NULL
+             ORDER BY g.opened_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(GoneReview {
+                    object_id: r.get(0)?,
+                    document_id: r.get(1)?,
+                    opened_at: r.get(2)?,
+                    document_name: r.get(3)?,
+                    document_path: r.get(4)?,
+                })
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Owner chose to keep knowledge that rested on a file no longer on disk.
+    pub fn keep_gone_review(&self, object_id: &str, document_id: &str) -> Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE document_gone_reviews
+             SET resolved_at = ?3, resolution = 'keep'
+             WHERE object_id = ?1 AND document_id = ?2 AND resolved_at IS NULL",
+            params![object_id, document_id, now()],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn sources(&self) -> Result<Vec<(String, String, String, String, String, Option<String>)>> {

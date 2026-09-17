@@ -29,7 +29,7 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use knowlith_core::{ContextObject, Document, ObjectStatus};
 use knowlith_lake::Lake;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use dto::*;
 
@@ -144,6 +144,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tools/{app}/preview", get(preview_app))
         .route("/api/bundle", post(build_bundle))
         .route("/api/export", post(export_knowledge))
+        .route("/api/build/status", get(build_status))
+        .route("/api/build/quiz", get(build_quiz_route))
+        .route("/api/build/quiz/confirm", post(confirm_build_quiz_route))
+        .route("/api/build/entities", get(build_entities))
         .route("/api/policy", get(read_policy).put(write_policy))
         .route("/api/engines", get(list_engines))
         .route("/api/work/release", post(release_work))
@@ -1274,6 +1278,8 @@ async fn work(State(state): State<AppState>) -> ApiResult<WorkDto> {
         ("reading", "Reading the documents")
     } else if waiting("settle") {
         ("thinking", "Working out what agrees and what does not")
+    } else if waiting("supervise") {
+        ("thinking", "Building company knowledge from your folder")
     } else if waiting("relate") || waiting("draft_skills") {
         ("preparing", "Preparing skills and connections")
     } else {
@@ -1382,6 +1388,7 @@ fn whole_lake(kind: &str) -> &'static str {
     match kind {
         "settle" => "Everything read so far",
         "relate" => "Connections between everything",
+        "supervise" => "Company knowledge build",
         "draft_skills" => "Skills",
         "recheck" => "Quotes already approved",
         _ => "Your company",
@@ -1733,6 +1740,52 @@ async fn build_bundle(State(state): State<AppState>) -> ApiResult<serde_json::Va
 
 fn text_of(value: &serde_json::Value, key: &str) -> String {
     value.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+}
+
+async fn build_status(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let phase = lake.build_phase().map_err(failed)?.unwrap_or_else(|| "idle".into());
+    let quiz = lake.build_quiz().map_err(failed)?;
+    Ok(Json(serde_json::json!({
+        "phase": phase,
+        "quizPending": quiz.as_ref().map(|q| q.state == "pending").unwrap_or(false),
+        "quizId": quiz.as_ref().map(|q| q.id.clone()),
+        "questionCount": quiz.as_ref().map(|q| q.questions.len()).unwrap_or(0),
+    })))
+}
+
+async fn build_quiz_route(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let quiz = lake.build_quiz().map_err(failed)?;
+    Ok(Json(serde_json::to_value(quiz).unwrap_or(serde_json::Value::Null)))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfirmQuizBody {
+    quiz_id: String,
+    #[serde(default)]
+    approved_object_ids: Vec<String>,
+}
+
+async fn confirm_build_quiz_route(
+    State(state): State<AppState>,
+    Json(body): Json<ConfirmQuizBody>,
+) -> ApiResult<serde_json::Value> {
+    let mut lake = state.lake.lock().map_err(failed)?;
+    knowlith_supervisor::confirm_quiz(&mut lake, &body.quiz_id, &body.approved_object_ids)
+        .map_err(failed)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn build_entities(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let entities = lake.entities().map_err(failed)?;
+    let communities = lake.communities().map_err(failed)?;
+    Ok(Json(serde_json::json!({
+        "entities": entities,
+        "communities": communities,
+    })))
 }
 
 /// Writes approved objects to portable Markdown under ~/Knowlith/knowledge/.
