@@ -735,6 +735,15 @@ impl Lake {
         Ok(n as usize)
     }
 
+    /// When each snapshot was last seen missing from disk.
+    pub fn document_gone_map(&self) -> Result<std::collections::HashMap<String, String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, gone_at FROM documents WHERE gone_at IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
+    }
+
     /// Lightweight rows for one source — no block bodies.
     pub fn document_index_for_source(&self, source_id: &str) -> Result<Vec<DocumentIndexRow>> {
         let mut stmt = self.conn.prepare(
@@ -880,6 +889,16 @@ impl Lake {
             params![object_id, document_id, now()],
         )?;
         Ok(changed > 0)
+    }
+
+    pub fn resolve_gone_reviews_for_object(&self, object_id: &str, resolution: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE document_gone_reviews
+             SET resolved_at = ?2, resolution = ?3
+             WHERE object_id = ?1 AND resolved_at IS NULL",
+            params![object_id, now(), resolution],
+        )?;
+        Ok(())
     }
 
     pub fn sources(&self) -> Result<Vec<(String, String, String, String, String, Option<String>)>> {

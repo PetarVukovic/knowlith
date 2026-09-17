@@ -120,7 +120,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/objects/{id}/suggest", post(suggest_change))
         .route("/api/sources", get(sources).post(add_source))
         .route("/api/sources/{id}/rescan", post(rescan_source))
+        .route("/api/sources/{id}/documents", get(source_documents))
         .route("/api/sources/{id}", delete(remove_source))
+        .route("/api/review/gone/{object_id}/keep", post(keep_gone_review))
         .route("/api/sources/{id}/status", put(set_source_status))
         .route("/api/sources/browse", post(browse))
         .route("/api/sources/preview", get(preview_source))
@@ -355,16 +357,37 @@ async fn review(State(state): State<AppState>) -> ApiResult<Vec<ReviewItemDto>> 
     let documents = lake.documents().map_err(failed)?;
     let all = lake.objects().map_err(failed)?;
 
-    let items = all
+    let mut items: Vec<ReviewItemDto> = all
         .iter()
         .filter(|o| matches!(o.status, ObjectStatus::Proposed | ObjectStatus::Conflicted))
-        .map(|object| review_item(object, &all, &documents))
+        .map(|object| review_item(object, &all, &documents, None))
         .collect();
+
+    for gone in lake.pending_gone_reviews().map_err(failed)? {
+        let Some(object) = all.iter().find(|o| o.id == gone.object_id) else {
+            continue;
+        };
+        items.push(review_item(
+            object,
+            &all,
+            &documents,
+            Some(SourceGoneDto {
+                document_id: gone.document_id,
+                document_name: gone.document_name,
+                document_path: gone.document_path,
+            }),
+        ));
+    }
 
     Ok(Json(items))
 }
 
-fn review_item(object: &ContextObject, all: &[ContextObject], documents: &[Document]) -> ReviewItemDto {
+fn review_item(
+    object: &ContextObject,
+    all: &[ContextObject],
+    documents: &[Document],
+    source_gone: Option<SourceGoneDto>,
+) -> ReviewItemDto {
     let find_doc = |id: &str| documents.iter().find(|d| d.id == id);
 
     // What this would change: everything that names it.
@@ -482,6 +505,7 @@ fn review_item(object: &ContextObject, all: &[ContextObject], documents: &[Docum
         affects,
         conflict,
         coverage,
+        source_gone,
         compiled_at: object.updated_at.clone(),
     }
 }
@@ -572,9 +596,10 @@ async fn approve(
 }
 
 async fn reject(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Approved> {
-    let object_id = id.strip_prefix("rev-").unwrap_or(&id);
+    let object_id = id.strip_prefix("rev-").unwrap_or(&id).to_string();
     let lake = state.lake.lock().map_err(failed)?;
-    lake.reject(object_id).map_err(failed)?;
+    lake.reject(&object_id).map_err(failed)?;
+    let _ = lake.resolve_gone_reviews_for_object(&object_id, "reject");
     Ok(Json(Approved { affected: Vec::new() }))
 }
 
@@ -1173,9 +1198,65 @@ async fn discovery(State(state): State<AppState>) -> ApiResult<DiscoveryDto> {
 
 async fn documents(State(state): State<AppState>) -> ApiResult<Vec<SourceDocumentDto>> {
     let lake = state.lake.lock().map_err(failed)?;
+    let gone = lake.document_gone_map().map_err(failed)?;
     Ok(Json(
-        lake.documents().map_err(failed)?.iter().map(document_dto).collect(),
+        lake.documents()
+            .map_err(failed)?
+            .iter()
+            .map(|document| document_dto(document, gone.get(&document.id).cloned()))
+            .collect(),
     ))
+}
+
+async fn source_documents(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<SourceDocumentIndexDto>> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let exists = lake
+        .sources()
+        .map_err(failed)?
+        .into_iter()
+        .any(|(source_id, _, _, _, status, _)| source_id == id && status != "removed");
+    if !exists {
+        return Err((StatusCode::NOT_FOUND, format!("no source {id}")));
+    }
+
+    let mut out = Vec::new();
+    for row in lake.document_index_for_source(&id).map_err(failed)? {
+        let quoted = lake
+            .objects_quoting_document(&row.id)
+            .map_err(failed)?
+            .iter()
+            .map(quoting_object_dto)
+            .collect();
+        out.push(document_index_dto(&row, quoted));
+    }
+    Ok(Json(out))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeepGoneBody {
+    document_id: String,
+}
+
+async fn keep_gone_review(
+    State(state): State<AppState>,
+    Path(object_id): Path<String>,
+    Json(body): Json<KeepGoneBody>,
+) -> ApiResult<serde_json::Value> {
+    let mut lake = state.lake.lock().map_err(failed)?;
+    if !lake
+        .keep_gone_review(&object_id, &body.document_id)
+        .map_err(failed)?
+    {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "no open review for this object and document".into(),
+        ));
+    }
+    Ok(Json(serde_json::json!({ "kept": true })))
 }
 
 async fn tool_reads(
