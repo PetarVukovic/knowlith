@@ -362,3 +362,35 @@ fn an_owner_who_picked_cursor_reads_with_agent_not_the_daemon_binding() {
         .unwrap();
     assert_eq!(worker.reader_name(), "Claude Code");
 }
+
+#[test]
+fn unavailable_account_holds_ai_work_until_explicit_resume() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Account { calls: AtomicUsize, restored: AtomicBool }
+    impl Engine for Account {
+        fn name(&self) -> &str { "Account" }
+        fn run(&self, _: &Request) -> knowlith_engine::Result<Reply> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.restored.load(Ordering::SeqCst) {
+                Ok(Reply::new("Account", FOUND))
+            } else {
+                Err(EngineError::Unavailable("Reader usage limit reached. Resume after restoring access.".into()))
+            }
+        }
+    }
+    let folder = Folder::new("account-blocked");
+    folder.write("terms.md", "Rok placanja je 15 dana od izdavanja racuna.");
+    let engine = Arc::new(Account { calls: AtomicUsize::new(0), restored: AtomicBool::new(false) });
+    let mut worker = worker(engine.clone());
+    worker.lake().put_source("account", "Terms", &folder.path(), "folder", "codex").unwrap();
+    let stop = AtomicBool::new(false);
+    for _ in 0..12 { worker.tick(&stop).unwrap(); }
+    assert_eq!(engine.calls.load(Ordering::SeqCst), 1, "a blocked account must stop new AI calls");
+    assert!(!worker.lake().held().unwrap().is_empty(), "work must be held, not failed");
+    assert!(!worker.lake().job_counts().unwrap().iter().any(|(state, _)| state == "failed" || state == "dead"));
+    engine.restored.store(true, Ordering::SeqCst);
+    worker.lake().release_held().unwrap();
+    for _ in 0..12 { worker.tick(&stop).unwrap(); }
+    assert!(engine.calls.load(Ordering::SeqCst) > 1);
+    assert!(!worker.lake().object_ids(None).unwrap().is_empty(), "saved work must resume");
+}

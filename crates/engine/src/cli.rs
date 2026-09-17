@@ -283,12 +283,7 @@ impl Engine for CliEngine {
         if !output.status.success() {
             // Some failures are reported on stdout, and an error with no
             // message is the least useful thing this can return.
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let said = if stderr.is_empty() {
-                String::from_utf8_lossy(&output.stdout).trim().to_string()
-            } else {
-                stderr
-            };
+            let said = format!("{}\n{}", String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout)).trim().to_string();
             let said = if said.is_empty() {
                 "it gave no reason".to_string()
             } else {
@@ -302,6 +297,9 @@ impl Engine for CliEngine {
         // Cursor were asked for JSON so the bill comes back with the text.
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(error) = cli_error_envelope(&stdout) {
+            return Err(classify(self.flavour, output.status.code(), &error));
+        }
         let (text, usage) = match self.flavour {
             Flavour::Codex => {
                 let text = reply_file
@@ -425,8 +423,29 @@ const POLL: Duration = Duration::from_millis(25);
 /// The distinction is read out of what the CLI actually said, because the
 /// exit code alone does not carry it: both CLIs exit 1 for "rate limited" and
 /// for "that prompt is invalid", and those need opposite responses.
+fn cli_error_envelope(stdout: &str) -> Option<String> {
+    fn extract(value: serde_json::Value) -> Option<String> {
+        let kind = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let failed = (kind == "result" && value.get("is_error").and_then(|v| v.as_bool()) == Some(true))
+            || kind == "error" || kind == "turn.failed";
+        failed.then(|| value.to_string())
+    }
+    if let Ok(value) = serde_json::from_str(stdout.trim()) {
+        if let Some(error) = extract(value) { return Some(error); }
+    }
+    stdout.lines().filter_map(|line| serde_json::from_str(line).ok()).find_map(extract)
+}
+
 fn classify(flavour: Flavour, code: Option<i32>, stderr: &str) -> EngineError {
     let lower = stderr.to_lowercase();
+    // Account limits need the owner's action, not a short network retry loop.
+    let exhausted = ["insufficient_quota", "exceeded your current quota", "usage limit", "out of credits", "insufficient credits", "credit balance", "hit your limit", "reached your limit", "quota exceeded"];
+    if exhausted.iter().any(|needle| lower.contains(needle)) {
+        return EngineError::Unavailable(format!(
+            "{} has reached its account allowance. Restore credits or wait for the limit to reset, then resume the build. {}",
+            flavour.label(), trim(stderr)
+        ));
+    }
     let transport = [
         "rate limit",
         "429",
@@ -439,9 +458,8 @@ fn classify(flavour: Flavour, code: Option<i32>, stderr: &str) -> EngineError {
         "503",
         "502",
         "overloaded",
-        "usage limit",
     ];
-    let unavailable = ["not logged in", "sign in", "login", "unauthorized", "401", "no credentials"];
+    let unavailable = ["not logged in", "sign in", "login", "unauthorized", "401", "no credentials", "expired token", "authentication failed", "authentication_error", "please log in"];
 
     if unavailable.iter().any(|needle| lower.contains(needle)) {
         return EngineError::Unavailable(format!(
@@ -659,6 +677,15 @@ mod tests {
     fn a_rate_limit_is_waited_out_and_a_bad_prompt_is_not() {
         assert!(classify(Flavour::Codex, Some(1), "Error: 429 rate limit exceeded").is_retryable());
         assert!(!classify(Flavour::Codex, Some(1), "Error: invalid model name").is_retryable());
+    }
+
+    #[test]
+    fn exhausted_allowance_requires_attention_even_when_reported_as_429() {
+        for message in ["429 insufficient_quota", "You have hit your usage limit", "Credit balance is too low", "You have hit your limit"] {
+            let error = classify(Flavour::Codex, Some(1), message);
+            assert!(matches!(error, EngineError::Unavailable(_)), "{message}: {error}");
+            assert!(!error.is_retryable());
+        }
     }
 
     #[test]

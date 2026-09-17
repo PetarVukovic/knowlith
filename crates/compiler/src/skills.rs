@@ -163,6 +163,7 @@ pub fn draft_all(engine: &dyn Engine, objects: &[ContextObject]) -> Result<Skill
                 out.usage = EngineUsage::fold_invoke(out.usage.take(), usage);
                 out.skills.push(object);
             }
+            Err(CompileError::Engine(e)) if e.holds_all_ai_work() => return Err(e.into()),
             Err(CompileError::Engine(e)) if !e.is_retryable() => out.dropped.push(crate::Dropped {
                 document: skill_id,
                 title: process.title.clone(),
@@ -533,11 +534,13 @@ mod tests {
     }
 
     #[test]
-    fn an_unavailable_engine_is_reported_per_process_and_does_not_stop_the_run() {
+    fn an_unavailable_engine_stops_the_run_so_the_queue_can_hold() {
         let objects = process_with_rule();
-        let run = draft_all(&Silent, &objects).unwrap();
-        assert!(run.skills.is_empty());
-        assert!(run.dropped[0].reason.contains("signed in"));
+        let err = draft_all(&Silent, &objects).unwrap_err();
+        assert!(
+            format!("{err}").contains("signed in"),
+            "the owner has to see why work stopped: {err}"
+        );
     }
 
     #[test]
