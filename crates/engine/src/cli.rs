@@ -381,11 +381,16 @@ fn hold_exclusive(flavour: Flavour) -> Option<std::sync::MutexGuard<'static, ()>
 /// `kill_on_drop`; we learned it as two workers billing the same job.
 struct ChildGuard {
     child: Option<std::process::Child>,
+    /// Process group created by `process_group(0)`. Kept after the leader
+    /// is reaped, because `sh -c 'sleep 300 &'` exits while `sleep` still
+    /// holds stdout — Linux CI then never finished `cargo test`.
+    pgid: u32,
 }
 
 impl ChildGuard {
     fn new(child: std::process::Child) -> Self {
-        Self { child: Some(child) }
+        let pgid = child.id();
+        Self { child: Some(child), pgid }
     }
 
     fn as_mut(&mut self) -> &mut std::process::Child {
@@ -393,11 +398,10 @@ impl ChildGuard {
     }
 
     fn reap(&mut self) {
+        kill_process_group(self.pgid);
         if let Some(mut child) = self.child.take() {
-            match child.try_wait() {
-                Ok(Some(_)) => {}
-                _ => stop_child_tree(&mut child),
-            }
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
@@ -408,20 +412,25 @@ impl Drop for ChildGuard {
     }
 }
 
-fn stop_child_tree(child: &mut std::process::Child) {
+fn kill_process_group(pgid: u32) {
     #[cfg(unix)]
     {
-        // All CLI descendants inherit our dedicated process group.
-        let _ = Command::new("/bin/kill").args(["-9", &format!("-{}", child.id())])
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        // `--` so the negative pgid is never parsed as a flag. `/bin/kill -9 -PID`
+        // is how Linux CI used to lose the grandchild and hang the suite.
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{pgid}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill").args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pgid.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 fn open_journal(path: &Path) -> Result<std::fs::File> {
@@ -492,36 +501,66 @@ fn wait_with_timeout(
     let mut status = None;
     let mut out = None;
     let mut err = None;
+    let mut drain_error = None;
     loop {
         while let Ok((is_stdout, result)) = rx.try_recv() {
             match result {
                 Ok(bytes) => { if is_stdout { out = Some(bytes); } else { err = Some(bytes); } }
-                Err(error) => { child.reap(); return Err(error); }
+                Err(error) => drain_error = Some(error),
             }
+        }
+        if let Some(error) = drain_error.take() {
+            child.reap();
+            wait_for_drains(&rx, &mut out, &mut err, DRAIN_JOIN);
+            return Err(error);
         }
         if status.is_none() {
             match child.as_mut().try_wait() {
                 Ok(result) => status = result,
                 Err(error) => {
                     child.reap();
+                    wait_for_drains(&rx, &mut out, &mut err, DRAIN_JOIN);
                     return Err(EngineError::Transport(format!("{label} could not be waited on: {error}")));
                 }
             }
         }
         if status.is_some() && out.is_some() && err.is_some() {
-            // Also closes stdin inherited by any lingering grandchild.
             child.reap();
             return Ok(std::process::Output { status: status.unwrap(), stdout: out.unwrap(), stderr: err.unwrap() });
         }
         if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
             child.reap();
+            wait_for_drains(&rx, &mut out, &mut err, DRAIN_JOIN);
             return Err(EngineError::Transport(format!(
                 "{label} was stopped because the job was claimed by another worker"
             )));
         }
         if Instant::now() >= deadline {
             child.reap();
+            wait_for_drains(&rx, &mut out, &mut err, DRAIN_JOIN);
             return Err(EngineError::Transport(format!("{label} did not answer within {} ms, and was stopped", timeout.as_millis())));
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// After SIGKILL, drain threads must see EOF. If they do not, `cargo test`
+/// waits for them forever — that is how Linux CI sat silent for 45 minutes.
+fn wait_for_drains(
+    rx: &std::sync::mpsc::Receiver<(bool, Result<Vec<u8>>)>,
+    out: &mut Option<Vec<u8>>,
+    err: &mut Option<Vec<u8>>,
+    budget: Duration,
+) {
+    let until = Instant::now() + budget;
+    while Instant::now() < until && (out.is_none() || err.is_none()) {
+        while let Ok((is_stdout, result)) = rx.try_recv() {
+            if let Ok(bytes) = result {
+                if is_stdout { *out = Some(bytes); } else { *err = Some(bytes); }
+            }
+        }
+        if out.is_some() && err.is_some() {
+            return;
         }
         std::thread::sleep(POLL);
     }
@@ -531,6 +570,7 @@ fn wait_with_timeout(
 /// that a fast reply is not delayed, long enough that a ten-minute run costs
 /// nothing to watch.
 const POLL: Duration = Duration::from_millis(25);
+const DRAIN_JOIN: Duration = Duration::from_millis(400);
 
 /// Decides whether the queue waits or a person is asked.
 ///
@@ -748,7 +788,7 @@ mod tests {
 
     #[test]
     fn dropping_the_child_kills_the_process() {
-        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = Command::new("sleep").arg("8").spawn().unwrap();
         let pid = child.id();
         drop(ChildGuard::new(child));
         std::thread::sleep(Duration::from_millis(50));

@@ -51,6 +51,9 @@ jobs:
     name: test
     needs: interface
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -61,7 +64,7 @@ jobs:
           path: knowlith/dist
       - run: sh -n install.sh
       - run: python3 scripts/test_installer.py
-      - run: cargo test --workspace --locked
+      - run: cargo test --workspace --locked -- --test-threads=2
 
   build:
     name: ${{ matrix.target }}

@@ -54,6 +54,167 @@ Eleven, in a Cargo workspace. Edition 2024, resolver 3.
 The interface is React and Vite under `knowlith/`, compiled into the binary at
 build time by `crates/server/build.rs`.
 
+## Diagrams
+
+GitHub renders these as Mermaid. They are the same facts as the prose, not a
+second product.
+
+### End-to-end flowchart
+
+```mermaid
+flowchart TD
+  folder["Folder on disk"] --> extract["extract\nbytes → blocks + offsets"]
+  extract --> documents["documents\ncontent hash decides what is new"]
+  documents --> compile["compile stage 2\none engine call"]
+  compile --> candidates["candidates"]
+  candidates --> gate["evidence gate\nquote must be those bytes"]
+  gate -->|ok| objects["objects"]
+  gate -->|refused| drop["not stored"]
+  objects --> person["owner approves"]
+  person --> approved["approved objects"]
+  approved --> mcp["MCP gateway"]
+  mcp --> tools["Claude / Codex / Cursor"]
+  mcp --> reads["tool_reads\nwho asked, which object"]
+  approved --> ui["interface\nwhat is known, from where,\nwho approved, who used it"]
+  reads --> ui
+```
+
+### Crate map — UML components
+
+```mermaid
+flowchart LR
+  subgraph interface["knowlith/ React"]
+    ui[screens]
+  end
+  subgraph process["knowlith binary"]
+    cli[cli]
+    server[server]
+    worker[worker]
+    supervisor[supervisor]
+    compiler[compiler]
+    engine[engine]
+    extract[extract]
+    lake[lake]
+    core[core]
+    graph[graph]
+    desktop[desktop]
+  end
+  subgraph other["separate process"]
+    mcp[mcp gateway]
+  end
+  ui -->|"HTTP + token\n127.0.0.1"| server
+  cli --> server
+  cli --> worker
+  server --> lake
+  worker --> lake
+  worker --> compiler
+  worker --> supervisor
+  compiler --> engine
+  compiler --> core
+  supervisor --> engine
+  extract --> core
+  lake --> core
+  engine -->|"child: claude / agent / codex\nor --replay"| cliChild["owner CLI"]
+  mcp --> lake
+  tools2[AI tool] -->|"stdio JSON-RPC"| mcp
+  desktop --> server
+```
+
+### Job queue — state chart
+
+A heartbeat that only checks `state = leased` is not a fence. The generation
+is. Losing the lease kills the CLI child.
+
+```mermaid
+stateDiagram-v2
+  [*] --> queued: enqueue
+  queued --> leased: claim + generation++
+  leased --> leased: heartbeat\nsame generation
+  leased --> queued: lease expired\ngeneration stays
+  leased --> done: finish
+  leased --> deferred: transport error\ngrowing gap
+  leased --> failed: refusal
+  leased --> held: battery / account limit
+  held --> queued: owner resumes
+  deferred --> queued: due
+  leased --> queued: lost lease\nprevious holder ignored
+  done --> [*]
+  failed --> [*]
+```
+
+Kinds, in the order the work panel names them: `rescan` → `compile_document`
+→ `settle` → `supervise` → `relate` / `draft_skills`. `recheck` is I/O.
+`relateAfterBuild` keeps `relate` queued until the build quiz exists.
+
+### Worker tracks
+
+```mermaid
+flowchart TB
+  lake[(lake.sqlite WAL)]
+  io["I/O track\nrescan, recheck"]
+  ai1["AI track 1"]
+  ai2["AI track N ≤ 4"]
+  watch["folder watch\nwrite-settle then rescan"]
+  io --> lake
+  ai1 --> lake
+  ai2 --> lake
+  watch --> lake
+  ai1 --> cli1["one CLI child"]
+  ai2 --> cli2["one CLI child"]
+  noteClaude["Claude Code children are serialised.\nCursor and Codex may overlap."]
+  ai1 -.-> noteClaude
+```
+
+### CLI child — state chart
+
+The session is the journal under `data/runs/{job}/`, not the process.
+
+```mermaid
+stateDiagram-v2
+  [*] --> spawn: lock if Claude
+  spawn --> running: pipes + journal
+  running --> running: stdout flushed to disk
+  running --> killed: Drop / cancel / timeout / lost lease
+  running --> exited: CLI exit
+  killed --> reaped: SIGKILL process group\nincluding grandchildren
+  exited --> reaped: SIGKILL group anyway
+  reaped --> [*]: drain threads see EOF
+```
+
+### Build supervisor — state chart
+
+```mermaid
+stateDiagram-v2
+  [*] --> spawned: supervise job
+  spawned --> reading: engine batches
+  reading --> reading: checkpoint by cassette key
+  reading --> quiz: questions stored
+  quiz --> confirmed: owner answers
+  confirmed --> related: relate + skills
+  related --> [*]
+  reading --> failed: engine refused
+  quiz --> waiting: relateAfterBuild holds relate
+```
+
+### MCP serve vs daemon — sequence
+
+```mermaid
+sequenceDiagram
+  participant Tool as AI tool
+  participant GW as mcp process
+  participant Lake as lake.sqlite
+  participant UI as interface
+  participant D as serve daemon
+  Tool->>GW: initialize clientInfo.name
+  Tool->>GW: get_task_context
+  GW->>Lake: approved objects + evidence
+  GW->>Lake: INSERT tool_reads
+  Tool-->>GW: answer from quotes
+  UI->>D: GET /api/activity
+  D->>Lake: SELECT tool_reads
+  Note over D,GW: not the same process.\nThe UI never sees a live MCP session.
+```
+
 ## Decisions worth understanding before changing anything
 
 ### Four compiler stages, not ten

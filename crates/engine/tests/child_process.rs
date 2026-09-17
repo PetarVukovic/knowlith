@@ -44,6 +44,16 @@ fn script(name: &str, body: &str) -> PathBuf {
     path
 }
 
+fn pid_is_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn engine(path: &PathBuf) -> CliEngine {
     CliEngine::new(Flavour::ClaudeCode).with_program(path.to_string_lossy().into_owned())
 }
@@ -81,7 +91,7 @@ fn a_document_larger_than_a_pipe_buffer_does_not_deadlock() {
 
 #[test]
 fn a_child_that_never_answers_is_stopped() {
-    let path = script("hang", "sleep 300\n");
+    let path = script("hang", "sleep 8\n");
     let request = Request::new("candidates", "x", "y").with_timeout(Duration::from_millis(400));
 
     let started = Instant::now();
@@ -211,16 +221,52 @@ fn excessive_child_output_is_refused_without_unbounded_allocation() {
 
 #[test]
 fn a_grandchild_holding_output_open_is_also_bounded_by_the_deadline() {
-    let path = script("inherited-pipe", "sleep 300 &\nexit 0\n");
+    let pid_file = std::env::temp_dir().join(format!(
+        "knowlith-grandchild-{}-{}",
+        std::process::id(),
+        SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let path = script(
+        "inherited-pipe",
+        &format!(
+            "sleep 8 &\nprintf '%s\\n' \"$!\" > '{}'\nexit 0\n",
+            pid_file.display()
+        ),
+    );
+    let path_for_thread = path.clone();
     let start = Instant::now();
-    let result = engine(&path).run(&Request::new("candidates", "x", "y").with_timeout(Duration::from_millis(200)));
-    assert!(result.is_err());
+    let handle = std::thread::spawn(move || {
+        engine(&path_for_thread)
+            .run(&Request::new("candidates", "x", "y").with_timeout(Duration::from_secs(2)))
+    });
+    let pid = loop {
+        if let Ok(text) = std::fs::read_to_string(&pid_file) {
+            if let Ok(pid) = text.trim().parse::<u32>() {
+                break pid;
+            }
+        }
+        if start.elapsed() > Duration::from_secs(2) {
+            let result = handle.join();
+            panic!(
+                "grandchild pid was never written to {}; engine={result:?}",
+                pid_file.display()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let result = handle.join().expect("the wait thread must return");
+    assert!(result.is_err(), "expected a timeout, got {result:?}");
     assert!(start.elapsed() < Duration::from_secs(5));
+    std::thread::sleep(Duration::from_millis(80));
+    assert!(
+        !pid_is_alive(pid),
+        "grandchild {pid} must die with the process group, or cargo test hangs on Linux"
+    );
 }
 
 #[test]
 fn a_cancelled_run_kills_the_child() {
-    let path = script("hang", "sleep 30\n");
+    let path = script("hang", "sleep 8\n");
     let cancel = Arc::new(AtomicBool::new(false));
     let request = Request::new("candidates", "x", "y")
         .with_timeout(Duration::from_secs(30))
@@ -344,7 +390,7 @@ printf '%s\n' '{{"type":"result","result":"ok"}}'
 
 #[test]
 fn killing_the_child_leaves_what_it_already_said_on_disk() {
-    let path = script("partial", "printf 'PARTIAL-ANSWER\\n'; sleep 30\n");
+    let path = script("partial", "printf 'PARTIAL-ANSWER\\n'; sleep 8\n");
     let journal = std::env::temp_dir().join(format!(
         "knowlith-journal-{}-{}",
         std::process::id(),
