@@ -50,17 +50,22 @@ fn object(id: &str, title: &str, status: ObjectStatus, evidence: Vec<Evidence>) 
 }
 
 async fn brain(lake: Lake) -> Value {
+    projection(lake, "/api/brain").await
+}
+
+async fn projection(lake: Lake, uri: &str) -> Value {
     let app = router(AppState::with_token(lake, "Test Company", Token::from_value(SECRET)));
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/api/brain")
+                .uri(uri)
                 .header(knowlith_server::auth::HEADER, SECRET)
                 .body(Body::empty())
                 .expect("a request"),
         )
         .await
         .expect("a response");
+    assert_eq!(response.status(), 200);
     let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
         .await
         .expect("a body");
@@ -174,4 +179,35 @@ async fn an_edge_between_two_rules_carries_the_owners_word_for_it() {
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0]["type"], "depends_on");
     assert_eq!(edges[0]["label"], "needs");
+}
+
+#[tokio::test]
+async fn build_projection_shows_real_discoveries_without_approving_them() {
+    let mut lake = lake();
+    lake.put_source("s", "Company", "/tmp", "folder", "codex").unwrap();
+    let doc = knowlith_extract::extract_bytes(std::path::Path::new("/tmp/terms.md"), b"Payment terms.", "2026-09-17T00:00:00Z").unwrap();
+    lake.put_document("s", &doc).unwrap();
+    let span = Evidence { document_id: doc.id.clone(), locator: "terms".into(), start_byte: 0, end_byte: 14, quote: "Payment terms.".into() };
+    lake.put_object(&object("rule:new", "New rule", ObjectStatus::Proposed, vec![span.clone()])).unwrap();
+    lake.put_object(&object("rule:no", "Rejected rule", ObjectStatus::Rejected, vec![span])).unwrap();
+    let result = projection(lake, "/api/brain/build").await;
+    let nodes = result["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2);
+    assert!(nodes.iter().any(|n| n["id"] == "rule:new" && n["status"] == "draft"));
+    assert!(nodes.iter().any(|n| n["id"] == doc.id && n["status"] == "extracted"));
+    assert_eq!(result["edges"].as_array().unwrap().len(), 1);
+    assert_eq!(result["counts"]["approved"], 0);
+    assert_eq!(result["counts"]["discoveries"], 1);
+    assert_eq!(result["counts"]["documents"], 1);
+}
+
+#[tokio::test]
+async fn build_projection_includes_documents_before_any_claim_exists() {
+    let mut lake = lake();
+    lake.put_source("s", "Company", "/tmp", "folder", "codex").unwrap();
+    let doc = knowlith_extract::extract_bytes(std::path::Path::new("/tmp/read.md"), b"First file.", "2026-09-17T00:00:00Z").unwrap();
+    lake.put_document("s", &doc).unwrap();
+    let result = projection(lake, "/api/brain/build").await;
+    assert_eq!(result["nodes"].as_array().unwrap().len(), 1);
+    assert!(result["edges"].as_array().unwrap().is_empty());
 }

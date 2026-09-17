@@ -32,6 +32,7 @@ use knowlith_lake::Lake;
 use serde::{Deserialize, Serialize};
 
 use dto::*;
+mod build_brain;
 
 /// The state the interface shows for one AI application.
 ///
@@ -139,6 +140,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/work", get(work))
         .route("/api/engine-runs", get(engine_runs))
         .route("/api/brain", get(brain))
+        .route("/api/brain/build", get(build_brain::snapshot))
         .route("/api/tools", get(tools))
         .route("/api/tools/{app}/connect", post(connect_app))
         .route("/api/tools/{app}/disconnect", post(disconnect_app))
