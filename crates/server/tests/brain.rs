@@ -113,9 +113,42 @@ async fn only_documents_something_approved_quotes_are_drawn_and_by_name() {
     let edges = out["edges"].as_array().expect("edges");
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0]["from"], "rule:discount");
-    assert_eq!(edges[0]["to"], format!("doc:{}", quoted.id));
+    assert_eq!(edges[0]["to"], quoted.id);
     assert_eq!(edges[0]["type"], "quoted_in");
     assert_eq!(edges[0]["label"], "quoted in");
+}
+
+/// Evidence ids already carry `doc:`. Doubling the prefix broke document nodes.
+#[tokio::test]
+async fn a_document_id_that_already_starts_with_doc_is_not_doubled() {
+    let mut lake = lake();
+    let quoted = knowlith_extract::extract_bytes(
+        std::path::Path::new("/tmp/inv.md"),
+        b"# Invoice\n\nAmount: 100 EUR.\n",
+        "2026-01-15T09:00:00Z",
+    )
+    .expect("a document");
+    lake.put_source("s1", "Invoices", "/tmp", "folder", "codex")
+        .expect("a source");
+    lake.put_document("s1", &quoted).expect("stored");
+
+    let quote = "Amount: 100 EUR.";
+    let start = quoted.text.find(quote).expect("the quote");
+    let span = Evidence {
+        document_id: quoted.id.clone(),
+        locator: "§1".into(),
+        start_byte: start,
+        end_byte: start + quote.len(),
+        quote: quote.into(),
+    };
+    lake.put_object(&object("fact:amount", "Amount", ObjectStatus::Approved, vec![span]))
+        .expect("stored");
+
+    let out = brain(lake).await;
+    let nodes = out["nodes"].as_array().expect("nodes");
+    let doc = nodes.iter().find(|n| n["kind"] == "document").expect("a document node");
+    assert_eq!(doc["id"], quoted.id);
+    assert_eq!(out["edges"][0]["to"], quoted.id);
 }
 
 /// `depends_on` is the relation's name in the code. On the map the owner

@@ -6,6 +6,7 @@ import { DocumentPreview } from "@/components/SourcePreview"
 import { ResizeHandle, usePanelSize } from "@/components/Resizable"
 import { Button } from "@/components/ui/button"
 import { brain as brainApi } from "@/lib/api"
+import { brainDocumentLakeId, brainKindMatches } from "@/lib/brainGraph"
 import type { BrainNode, CompanyBrain } from "@/lib/types"
 import { useApp } from "@/state/AppState"
 import { cn } from "@/lib/utils"
@@ -42,6 +43,12 @@ export function Brain() {
   }, [load])
 
   useEffect(() => {
+    if (!selectedId || !data) return
+    const node = data.nodes.find((n) => n.id === selectedId)
+    if (node && !brainKindMatches(kindFilter, node.kind)) setSelectedId(null)
+  }, [kindFilter, data, selectedId])
+
+  useEffect(() => {
     if (!fullscreen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setFullscreen(false)
@@ -64,7 +71,7 @@ export function Brain() {
   const open = useCallback(
     (node: BrainNode) => {
       if (node.kind === "document") {
-        setDocPreviewId(node.id.startsWith("doc:") ? node.id.slice(4) : node.id)
+        setDocPreviewId(brainDocumentLakeId(node.id))
         return
       }
       navigate(

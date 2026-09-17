@@ -271,6 +271,29 @@ fn validate(group: &Group, documents: &HashMap<&str, &Document>) -> std::result:
         });
     }
 
+    // A conflicted object must carry the losing document's quote as well.
+    // Without it the review screen had nothing honest to put beside the
+    // current one and fell back to duplicating the winner.
+    for (document_id, quote) in &group.disagreeing {
+        let Some(document) = documents.get(document_id.as_str()) else {
+            continue;
+        };
+        let Some((start, end)) = knowlith_core::locate(document, quote) else {
+            continue;
+        };
+        let locator = document
+            .block_at(start)
+            .map(|b| b.locator.clone())
+            .unwrap_or_else(|| "unknown".into());
+        evidence.push(Evidence {
+            document_id: document_id.clone(),
+            locator,
+            start_byte: start,
+            end_byte: end,
+            quote: quote.clone(),
+        });
+    }
+
     if evidence.is_empty() {
         return Err("no source sentence was given".into());
     }
@@ -533,6 +556,12 @@ mod tests {
         assert!(out.objects[0].body.contains("5%"), "the newer document is the current one");
         assert_eq!(out.objects[0].status, ObjectStatus::Conflicted);
         assert!(out.objects[0].supersedes.is_some());
+        let docs: std::collections::HashSet<_> = out.objects[0]
+            .evidence
+            .iter()
+            .map(|e| e.document_id.as_str())
+            .collect();
+        assert_eq!(docs.len(), 2, "both documents' quotes must be on the object");
     }
 
     #[test]

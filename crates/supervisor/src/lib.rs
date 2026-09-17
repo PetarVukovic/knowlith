@@ -373,7 +373,7 @@ fn parse_json(text: &str) -> Result<Output, String> {
     serde_json::from_str(&trimmed[start..=end]).map_err(|e| format!("invalid supervisor JSON: {e}"))
 }
 
-/// Confirms the quiz and approves linked canonical objects.
+/// Confirms the quiz and approves only what the owner marked correct.
 pub fn confirm_quiz(lake: &mut Lake, quiz_id: &str, approved_object_ids: &[String]) -> Result<(), String> {
     let quiz = lake
         .build_quiz()
@@ -382,21 +382,47 @@ pub fn confirm_quiz(lake: &mut Lake, quiz_id: &str, approved_object_ids: &[Strin
     if quiz.id != quiz_id {
         return Err("quiz id mismatch".into());
     }
-    let mut ids: BTreeSet<String> = approved_object_ids.iter().cloned().collect();
-    for q in &quiz.questions {
-        if let Some(id) = &q.proposed_object_id {
-            ids.insert(id.clone());
-        }
+    if quiz.state == "confirmed" {
+        return Ok(());
     }
+
+    let approved: BTreeSet<&str> = approved_object_ids.iter().map(String::as_str).collect();
     let all = lake.objects().map_err(|e| e.to_string())?;
-    for id in ids {
-        let Some(mut object) = all.iter().find(|o| o.id == id).cloned() else {
+
+    for id in &approved {
+        if id.starts_with("entity:") {
+            lake.approve_entity(id).map_err(|e| e.to_string())?;
+            continue;
+        }
+        let Some(mut object) = all.iter().find(|o| o.id == *id).cloned() else {
             continue;
         };
         object.status = ObjectStatus::Approved;
         object.decided_by = Some("owner:quiz".into());
-        let _ = lake.put_object(&object);
+        lake.put_object(&object).map_err(|e| e.to_string())?;
     }
+
+    for q in &quiz.questions {
+        let Some(id) = q.proposed_object_id.as_deref() else {
+            continue;
+        };
+        if approved.contains(id) {
+            continue;
+        }
+        if id.starts_with("entity:") {
+            let _ = lake.reject_entity(id);
+            continue;
+        }
+        let Some(mut object) = all.iter().find(|o| o.id == id).cloned() else {
+            continue;
+        };
+        if object.status == ObjectStatus::Proposed {
+            object.status = ObjectStatus::Rejected;
+            object.decided_by = Some("owner:quiz".into());
+            let _ = lake.put_object(&object);
+        }
+    }
+
     lake.confirm_build_quiz(quiz_id).map_err(|e| e.to_string())
 }
 
@@ -404,6 +430,71 @@ pub fn confirm_quiz(lake: &mut Lake, quiz_id: &str, approved_object_ids: &[Strin
 mod tests {
     use super::*;
     use knowlith_core::{Document, DocumentKind};
+
+    #[test]
+    fn confirm_quiz_approves_only_what_the_owner_marked_correct() {
+        let dir = std::env::temp_dir().join(format!(
+            "knowlith-quiz-confirm-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut lake = Lake::open(&dir.join("lake.sqlite")).unwrap();
+
+        lake.open_supervisor_session("build:1", "test").unwrap();
+
+        lake.put_entity(&EntityRow {
+            id: "entity:a".into(),
+            title: "A".into(),
+            kind: "party".into(),
+            summary: "Issuer".into(),
+            status: "proposed".into(),
+        })
+        .unwrap();
+        lake.put_entity(&EntityRow {
+            id: "entity:b".into(),
+            title: "B".into(),
+            kind: "party".into(),
+            summary: "Customer".into(),
+            status: "proposed".into(),
+        })
+        .unwrap();
+
+        let quiz = knowlith_lake::BuildQuiz {
+            id: "quiz:test".into(),
+            session_id: "build:1".into(),
+            state: "pending".into(),
+            questions: vec![
+                QuizQuestion {
+                    id: "q1".into(),
+                    question: "Who?".into(),
+                    agent_answer: "A".into(),
+                    evidence: vec![],
+                    proposed_object_id: Some("entity:a".into()),
+                },
+                QuizQuestion {
+                    id: "q2".into(),
+                    question: "Whom?".into(),
+                    agent_answer: "B".into(),
+                    evidence: vec![],
+                    proposed_object_id: Some("entity:b".into()),
+                },
+            ],
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        lake.put_build_quiz(&quiz).unwrap();
+
+        confirm_quiz(&mut lake, "quiz:test", &["entity:a".into()]).unwrap();
+
+        let entities = lake.entities().unwrap();
+        let a = entities.iter().find(|e| e.id == "entity:a").unwrap();
+        let b = entities.iter().find(|e| e.id == "entity:b").unwrap();
+        assert_eq!(a.status, "approved");
+        assert_eq!(b.status, "rejected");
+        assert_eq!(lake.build_quiz().unwrap().unwrap().state, "confirmed");
+    }
 
     #[test]
     fn deterministic_entities_find_repeated_parties() {

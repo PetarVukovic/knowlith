@@ -7,6 +7,7 @@ import ForceGraph3D, {
 } from "3d-force-graph"
 import * as THREE from "three"
 import SpriteText from "three-spritetext"
+import { brainKindMatches, brainVisibleNodeIds } from "@/lib/brainGraph"
 import type { BrainEdge, BrainNode } from "@/lib/types"
 
 type GNode = NodeObject & BrainNode
@@ -134,10 +135,7 @@ export function BrainGraph3D({
         if (e.to === focus) neighbours.add(e.from)
       }
     }
-    const matches = (n: BrainNode) =>
-      kindFilter === "all" ||
-      n.kind === kindFilter ||
-      (kindFilter === "fact" && (n.kind === "term" || n.kind === "fact"))
+    const matches = (n: BrainNode) => brainKindMatches(kindFilter, n.kind)
     const small = nodes.filter((n) => n.kind !== "document").length <= 80
 
     for (const n of nodes) {
@@ -304,8 +302,15 @@ export function BrainGraph3D({
     for (const id of [...built.current.keys()]) {
       if (!next.has(id)) built.current.delete(id)
     }
+    const visible = brainVisibleNodeIds(nodes, edges, kindFilter)
+    const nodeList =
+      visible == null ? [...next.values()] : [...next.values()].filter((n) => visible.has(n.id))
     const links: GLink[] = edges
-      .filter((e) => next.has(e.from) && next.has(e.to))
+      .filter((e) => {
+        if (!next.has(e.from) || !next.has(e.to)) return false
+        if (visible == null) return true
+        return visible.has(e.from) && visible.has(e.to)
+      })
       .map((e) => ({ source: e.from, target: e.to, type: e.type, label: e.label }))
     const refit = !same || !fitted.current
     g.onEngineStop(() => {
@@ -314,11 +319,11 @@ export function BrainGraph3D({
       fitted.current = true
       g.onEngineStop(() => {})
     })
-    g.graphData({ nodes: [...next.values()], links })
+    g.graphData({ nodes: nodeList, links })
     const timers = [window.setTimeout(restyle, 120), window.setTimeout(restyle, 600)]
     return () => timers.forEach((id) => window.clearTimeout(id))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, edges])
+  }, [nodes, edges, kindFilter])
 
   useEffect(() => {
     restyle()

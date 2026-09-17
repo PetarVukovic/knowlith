@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AppWindow, ExternalLink, FileText, Loader2, Terminal } from "lucide-react"
+import { AppWindow, ExternalLink, FileText, Loader2, Plug, Terminal } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { failed, tools as toolsApi } from "@/lib/api"
 import { objectTryPrompt } from "@/lib/askAi"
-import type { BrainAssistant, BrainEdge, BrainNode, ObjectKind } from "@/lib/types"
+import { brainDocumentLakeId } from "@/lib/brainGraph"
+import type { AiTool, BrainAssistant, BrainEdge, BrainNode, ObjectKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const LEGEND = [
@@ -53,6 +54,20 @@ export function BrainInspector({
   const navigate = useNavigate()
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  const [tools, setTools] = useState<AiTool[] | null>(null)
+
+  useEffect(() => {
+    void toolsApi.list().then(setTools)
+  }, [])
+
+  const kindCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: nodes.length }
+    for (const n of nodes) {
+      const key = n.kind === "term" ? "fact" : n.kind
+      counts[key] = (counts[key] ?? 0) + 1
+    }
+    return counts
+  }, [nodes])
 
   const titleOf = (id: string) => nodes.find((n) => n.id === id)?.title ?? id
 
@@ -67,8 +82,12 @@ export function BrainInspector({
               : { key: `${e.from}|${e.to}|${e.type}`, text: `${titleOf(e.from)} ${e.label} this`, id: e.from, label: e.label },
           )
 
-  const ask = async (slug: string) => {
+  const launch = async (slug: string, connected: boolean) => {
     if (!selected || selected.kind === "document") return
+    if (!connected) {
+      navigate("/connect")
+      return
+    }
     const prompt = objectTryPrompt(asObjectKind(selected.kind), selected.title, companyName)
     setNote(null)
     setBusy(slug)
@@ -76,10 +95,34 @@ export function BrainInspector({
     setBusy(null)
     if (failed(result)) {
       setNote(result.error)
+      if (result.error.includes("not connected") || result.error.includes("Repair")) {
+        navigate("/connect")
+      }
       return
     }
     setNote(result.message)
   }
+
+  const toolRows = useMemo(() => {
+    if (tools) {
+      return tools
+        .filter((t) => t.installed && t.launchSurface !== "missing")
+        .map((t) => ({
+          slug: t.slug,
+          label: t.label,
+          connected: t.connected,
+          launchSurface: t.launchSurface,
+        }))
+    }
+    return assistants
+      .filter((a) => a.surface !== "missing")
+      .map((a) => ({
+        slug: a.slug,
+        label: a.label,
+        connected: a.connected,
+        launchSurface: a.surface,
+      }))
+  }, [tools, assistants])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -87,6 +130,7 @@ export function BrainInspector({
         <ul className="flex flex-wrap gap-1">
           {LEGEND.map(([id, label, color]) => {
             const active = kindFilter === id
+            const count = kindCounts[id] ?? 0
             return (
               <li key={id}>
                 <button
@@ -101,6 +145,9 @@ export function BrainInspector({
                 >
                   <span className="size-1.5 rounded-full" style={{ background: color }} aria-hidden />
                   {label}
+                  {id !== "all" && count > 0 ? (
+                    <span className="tabular text-[10.5px] text-faint">{count}</span>
+                  ) : null}
                 </button>
               </li>
             )
@@ -135,8 +182,7 @@ export function BrainInspector({
                 size="sm"
                 variant="subtle"
                 onClick={() => {
-                  const id = selected.id.startsWith("doc:") ? selected.id.slice(4) : selected.id
-                  onOpenDocument?.(id)
+                  onOpenDocument?.(brainDocumentLakeId(selected.id))
                   onOpen(selected)
                 }}
               >
@@ -174,46 +220,63 @@ export function BrainInspector({
 
           {selected.kind !== "document" ? (
             <div className="mt-3 border-t border-line pt-3">
-              <p className="text-[11.5px] font-medium text-ink">Ask in your AI</p>
+              <p className="text-[11.5px] font-medium text-ink">Continue in your AI</p>
               <p className="mt-0.5 text-[11.5px] leading-snug text-muted">
-                Opens Claude Desktop, Codex or Terminal with this question ready — your MCP plugin reads Knowlith.
+                Desktop apps open in their own window. CLIs open a small separate terminal on your Mac or PC — not
+                inside Knowlith. MCP must be connected first.
               </p>
-              {assistants.length === 0 ? (
+              {toolRows.length === 0 ? (
                 <Button className="mt-2 w-full" size="sm" variant="primary" onClick={() => navigate("/connect")}>
-                  Connect an assistant
+                  <Plug className="size-3.5" />
+                  Set up AI assistants
                 </Button>
               ) : (
                 <ul className="mt-2 grid gap-1.5">
-                  {assistants.map((tool) => {
-                    const Icon = tool.surface === "terminal" ? Terminal : AppWindow
+                  {toolRows.map((tool) => {
+                    const Icon = tool.launchSurface === "terminal" ? Terminal : AppWindow
+                    const connected = tool.connected
                     return (
                       <li key={tool.slug}>
                         <Button
                           className="w-full justify-start"
                           size="sm"
-                          variant="default"
+                          variant={connected ? "default" : "subtle"}
                           disabled={busy !== null}
-                          onClick={() => void ask(tool.slug)}
+                          onClick={() => void launch(tool.slug, connected)}
                         >
                           {busy === tool.slug ? (
                             <Loader2 className="size-3.5 animate-spin" />
-                          ) : (
+                          ) : connected ? (
                             <Icon className="size-3.5" />
+                          ) : (
+                            <Plug className="size-3.5" />
                           )}
-                          {tool.label}
+                          {connected ? `Open in ${tool.label}` : `Connect ${tool.label} first`}
                         </Button>
                       </li>
                     )
                   })}
                 </ul>
               )}
-              {note ? <p className="mt-2 text-[11.5px] leading-snug text-muted">{note}</p> : null}
+              {note ? (
+                <p className={cn("mt-2 text-[11.5px] leading-snug", note.includes("Opened") ? "text-confirmed" : "text-muted")}>
+                  {note}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>
       ) : (
         <div className="shrink-0 border-b border-line px-3 py-4 text-[12.5px] leading-relaxed text-muted">
-          Click a node to see what it connects to. Double-click to open the full entry.
+          {kindFilter === "all" ? (
+            <>Click a node to see what it connects to. Double-click to open the full entry.</>
+          ) : (
+            <>
+              Showing {kindCounts[kindFilter] ?? 0}{" "}
+              {LEGEND.find(([id]) => id === kindFilter)?.[1]?.toLowerCase() ?? "nodes"}. Click one to inspect it or
+              continue in your AI.
+            </>
+          )}
         </div>
       )}
 

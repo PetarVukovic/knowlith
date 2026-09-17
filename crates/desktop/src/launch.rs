@@ -57,7 +57,7 @@ impl Outcome {
             }
             Outcome::NotInstalled => format!("{} is not installed on this computer.", app.label()),
             Outcome::OpenedInTerminal => format!(
-                "Opened a Terminal session with {}. Send the question there if it is not already filled.",
+                "Opened a small terminal window with {}. Send the question there, then come back when it has read Knowlith.",
                 app.label()
             ),
         }
@@ -341,22 +341,34 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// Opens the system Terminal with `command` already typed and running.
+/// Opens a compact, separate terminal window — never inside the browser.
 fn open_in_terminal(command: &str) {
     #[cfg(target_os = "macos")]
     {
-        // AppleScript's `quoted form` would be ideal; we already shell-quoted
-        // the prompt. Wrap the whole line once more for `do script`.
+        // `do script` always creates its own Terminal.app window. Bounds keep
+        // it postcard-sized so it reads as a popup beside Knowlith.
         let script = format!(
-            "tell application \"Terminal\" to do script {}",
+            "tell application \"Terminal\"
+  activate
+  set win to do script {}
+  delay 0.25
+  try
+    set bounds of front window to {{460, 140, 960, 400}}
+    set custom title of front window to \"Knowlith\"
+  end try
+end tell",
             apple_script_string(command)
         );
         detach("osascript", &["-e", &script]);
     }
     #[cfg(windows)]
     {
-        // `start` opens a new console window running the command.
-        detach("cmd", &["/C", "start", "cmd", "/K", command]);
+        if open_in_windows_terminal(command) {
+            return;
+        }
+        // Classic console: new window, fixed column/row count inside the session.
+        let inner = format!("mode con: cols=92 lines=22 & {command}");
+        detach("cmd", &["/C", "start", "Knowlith", "cmd", "/K", &inner]);
     }
     #[cfg(all(not(target_os = "macos"), not(windows)))]
     {
@@ -364,6 +376,35 @@ fn open_in_terminal(command: &str) {
         // Failure is silent — the UI still shows the command to paste.
         detach("x-terminal-emulator", &["-e", "sh", "-c", command]);
     }
+}
+
+/// Windows Terminal when installed — small floating tab, separate from the browser.
+#[cfg(windows)]
+fn open_in_windows_terminal(command: &str) -> bool {
+    let Ok(output) = std::process::Command::new("where")
+        .arg("wt")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    detach(
+        "wt",
+        &[
+            "--pos",
+            "460,140",
+            "--size",
+            "92,22",
+            "cmd",
+            "/K",
+            command,
+        ],
+    );
+    true
 }
 
 fn apple_script_string(value: &str) -> String {

@@ -630,8 +630,8 @@ Popust veći od 10% odobrava isključivo direktor, uz pisani trag u ponudi.`,
       summary:
         "Two documents state a different self-approval limit. The older one is still circulating in the Prodaja folder.",
       sides: [
-        { label: "Pravilnik-prodaja-2023.pdf", value: "8%", evidence: evidence.discountOld },
-        { label: "Popusti-2026.docx", value: "5%", evidence: evidence.discount5 },
+        { label: "Popusti-2026.docx", value: "5%", evidence: evidence.discount5, current: true },
+        { label: "Pravilnik-prodaja-2023.pdf", value: "8%", evidence: evidence.discountOld, current: false },
       ],
     },
     compiledAt: "2026-09-15T07:28:00Z",

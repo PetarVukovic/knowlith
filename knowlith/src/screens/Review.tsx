@@ -132,7 +132,8 @@ export function Review() {
   const { review, approve, reject, keepGone, mode, firstRun, setFirstRun } = useApp()
   const navigate = useNavigate()
   const guided = firstRun === "review"
-  const [justApproved, setJustApproved] = useState(false)
+  /** Shown inline after the first approval during onboarding — not a full-page gate. */
+  const [firstApprovalNote, setFirstApprovalNote] = useState(false)
   const queue = usePanelSize("review-queue", 280, 200, 460)
   const [pickedId, setPickedId] = useState<string | null>(null)
   /** Keyed by item id so switching items drops the edit without an effect. */
@@ -164,49 +165,6 @@ export function Review() {
     setPickedId(next?.id ?? null)
   }
 
-  if (guided && justApproved) {
-    return (
-      <div className="mx-auto w-full max-w-[560px] px-5 py-16 text-center">
-        <span className="mx-auto grid size-12 place-items-center rounded-xl bg-confirmed-soft text-confirmed">
-          <PartyPopper className="size-5" />
-        </span>
-        <h1 className="mt-5 text-[24px] font-semibold leading-tight tracking-[-0.022em] text-ink">
-          Your first company rule is now live.
-        </h1>
-        <p className="mx-auto mt-3 max-w-[42ch] text-[14px] leading-relaxed text-muted">
-          Every AI tool you connect will answer from it, and will say which document it came from. The source
-          file was not touched.
-        </p>
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Button
-            size="lg"
-            variant="primary"
-            onClick={() => {
-              setFirstRun("connect")
-              navigate("/connect")
-            }}
-          >
-            Connect an AI tool
-            <ArrowRight />
-          </Button>
-          <Button
-            size="lg"
-            variant="ghost"
-            onClick={() => {
-              setFirstRun(null)
-              navigate("/home")
-            }}
-          >
-            Open Home
-          </Button>
-          <Button size="lg" variant="ghost" onClick={() => setJustApproved(false)}>
-            Keep reviewing
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
   if (review.length === 0) {
     return (
       <div className="grid min-h-full place-items-center px-4 py-16">
@@ -216,6 +174,17 @@ export function Review() {
           <p className="mt-1.5 text-[13px] text-muted">
             Knowlith will put new findings here when it reads your sources.
           </p>
+          {firstApprovalNote ? (
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              <Button size="sm" variant="primary" onClick={() => navigate("/connect")}>
+                Connect an AI tool
+                <ArrowRight />
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => navigate("/home")}>
+                Open Home
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
     )
@@ -278,6 +247,19 @@ export function Review() {
 
             <MergeHints />
 
+            {firstApprovalNote ? (
+              <Panel className="mb-4 flex flex-wrap items-center gap-3 border-confirmed/30 bg-confirmed-soft px-3.5 py-2.5">
+                <Check className="size-4 shrink-0 text-confirmed" />
+                <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-ink">
+                  Approved — it is live in Knowlith. Connected AI tools can read it; your source files were not
+                  touched.
+                </p>
+                <Button size="sm" variant="ghost" onClick={() => setFirstApprovalNote(false)}>
+                  Dismiss
+                </Button>
+              </Panel>
+            ) : null}
+
             <div className="flex flex-wrap items-center gap-2">
               <KindIcon kind={item.kind} />
               <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">{item.title}</h1>
@@ -325,10 +307,13 @@ export function Review() {
                   <p className="text-[12.5px] text-muted">{item.conflict.summary}</p>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     {item.conflict.sides.map((side) => (
-                      <div key={side.label} className="rounded-md border border-line bg-surface-2 p-2.5">
+                      <div key={`${side.label}-${side.evidence.id}`} className="rounded-md border border-line bg-surface-2 p-2.5">
                         <div className="flex items-baseline justify-between gap-2">
                           <span className="truncate text-[12px] text-muted">{side.label}</span>
                           <span className="tabular shrink-0 text-[15px] font-semibold text-ink">{side.value}</span>
+                          {side.current ? (
+                            <span className="shrink-0 text-[11px] text-confirmed">in use</span>
+                          ) : null}
                         </div>
                         <p className="mt-1.5 border-l-2 border-line pl-2 text-[12px] leading-relaxed text-muted">
                           {side.evidence.quote}
@@ -432,10 +417,15 @@ export function Review() {
                 <h2 className="mb-2 text-[13px] font-semibold text-ink">Where it comes from</h2>
                 <EvidenceList items={item.evidence} />
                 {item.conflict ? (
-                  <div className="mt-3">
-                    <div className="mb-1.5 label-xs">Out of circulation</div>
-                    <EvidenceCard evidence={item.conflict.sides[0].evidence} />
-                  </div>
+                  (() => {
+                    const retired = item.conflict.sides.find((side) => !side.current)
+                    return retired ? (
+                      <div className="mt-3">
+                        <div className="mb-1.5 label-xs">Out of circulation</div>
+                        <EvidenceCard evidence={retired.evidence} />
+                      </div>
+                    ) : null
+                  })()
                 ) : null}
                 {mode === "engineer" ? (
                   <p className="mt-3 font-mono text-[11px] text-faint">
@@ -488,7 +478,13 @@ export function Review() {
                     variant="primary"
                     onClick={() => {
                       decide((id) => approve(id, draft !== null))
-                      if (guided) setJustApproved(true)
+                      // First-run coachmarks end after one approval; the queue
+                      // may still have dozens of items and must not be replaced
+                      // by a connect screen mid-way through.
+                      if (guided) {
+                        setFirstRun(null)
+                        setFirstApprovalNote(true)
+                      }
                     }}
                   >
                     <Check />

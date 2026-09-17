@@ -55,7 +55,7 @@ export function AskAiPicker({
     }
   }, [open])
 
-  const choices = (tools ?? []).filter((t) => t.connected && t.launchSurface !== "missing")
+  const installed = (tools ?? []).filter((t) => t.installed && t.launchSurface !== "missing")
 
   const pick = async (tool: AiTool) => {
     setBusy(tool.slug)
@@ -102,9 +102,9 @@ export function AskAiPicker({
             <Loader2 className="size-3.5 animate-spin" />
             Checking what is connected…
           </p>
-        ) : choices.length === 0 ? (
+        ) : installed.length === 0 ? (
           <div className="mt-4 grid gap-3">
-            <p className="text-[13px] text-muted">No AI assistant is connected yet.</p>
+            <p className="text-[13px] text-muted">No AI assistant is installed on this Mac.</p>
             <Button
               variant="primary"
               onClick={() => {
@@ -112,22 +112,31 @@ export function AskAiPicker({
                 onNeedsConnect()
               }}
             >
-              Connect an assistant
+              See AI assistants
             </Button>
           </div>
         ) : (
           <ul className="mt-4 grid gap-2">
-            {choices.map((tool) => {
+            {installed.map((tool) => {
               const Icon = tool.launchSurface === "terminal" ? Terminal : AppWindow
+              const ready = tool.connected
               return (
                 <li key={tool.slug}>
                   <button
                     type="button"
                     disabled={busy !== null}
-                    onClick={() => void pick(tool)}
+                    onClick={() => {
+                      if (!ready) {
+                        onOpenChange(false)
+                        onNeedsConnect()
+                        return
+                      }
+                      void pick(tool)
+                    }}
                     className={cn(
                       "flex w-full items-center gap-3 rounded-lg border border-line bg-surface px-3 py-3 text-left transition-colors",
-                      "hover:border-accent/40 hover:bg-accent-soft/40",
+                      ready && "hover:border-accent/40 hover:bg-accent-soft/40",
+                      !ready && "opacity-90",
                       busy === tool.slug && "opacity-70",
                     )}
                   >
@@ -136,7 +145,9 @@ export function AskAiPicker({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[13.5px] font-medium text-ink">{tool.label}</span>
-                      <span className="block text-[12px] text-muted">{describe(tool)}</span>
+                      <span className="block text-[12px] text-muted">
+                        {ready ? describe(tool) : "Connect MCP in AI assistants first"}
+                      </span>
                     </span>
                     {busy === tool.slug ? (
                       <Loader2 className="size-4 shrink-0 animate-spin text-faint" />

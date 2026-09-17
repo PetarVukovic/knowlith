@@ -236,4 +236,23 @@ impl Lake {
         self.set_build_phase("complete")?;
         Ok(())
     }
+
+    /// Marks an entity row as owner-confirmed from the build quiz.
+    pub fn approve_entity(&self, id: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE entities SET status = 'approved', updated_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn reject_entity(&self, id: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE entities SET status = 'rejected', updated_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, now],
+        )?;
+        Ok(())
+    }
 }

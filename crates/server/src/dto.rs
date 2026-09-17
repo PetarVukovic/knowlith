@@ -86,6 +86,8 @@ pub struct ConflictSideDto {
     pub label: String,
     pub value: String,
     pub evidence: EvidenceDto,
+    /// The version Knowlith is keeping — the newest document's figure.
+    pub current: bool,
 }
 
 #[derive(Serialize)]

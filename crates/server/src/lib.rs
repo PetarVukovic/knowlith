@@ -385,6 +385,48 @@ async fn review(State(state): State<AppState>) -> ApiResult<Vec<ReviewItemDto>> 
     Ok(Json(items))
 }
 
+/// Side-by-side figures for a conflicted object — one row per document, newest first.
+///
+/// Taking the first two evidence spans duplicated the winner when the losing
+/// quote was not stored on the object, which made two panels show the same file.
+fn conflict_dto(object: &ContextObject, documents: &[Document]) -> ConflictDto {
+    let find_doc = |id: &str| documents.iter().find(|d| d.id == id);
+    let mut seen = std::collections::HashSet::new();
+    let mut spans: Vec<_> = object
+        .evidence
+        .iter()
+        .filter(|e| seen.insert(e.document_id.clone()))
+        .collect();
+    spans.sort_by(|a, b| {
+        let left = find_doc(&a.document_id)
+            .map(|d| d.modified.as_str())
+            .unwrap_or("");
+        let right = find_doc(&b.document_id)
+            .map(|d| d.modified.as_str())
+            .unwrap_or("");
+        right.cmp(left)
+    });
+    let sides: Vec<ConflictSideDto> = spans
+        .iter()
+        .enumerate()
+        .map(|(index, e)| ConflictSideDto {
+            label: find_doc(&e.document_id)
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| e.document_id.clone()),
+            value: figure(&e.quote),
+            evidence: evidence_dto(e, find_doc(&e.document_id)),
+            current: index == 0,
+        })
+        .collect();
+    ConflictDto {
+        summary: format!(
+            "Two documents state something different about {}.",
+            object.title.to_lowercase()
+        ),
+        sides,
+    }
+}
+
 fn review_item(
     object: &ContextObject,
     all: &[ContextObject],
@@ -419,27 +461,8 @@ fn review_item(
         .and_then(|id| all.iter().find(|o| o.id == *id || o.path == *id))
         .map(|o| o.body.clone());
 
-    let conflict = (object.status == ObjectStatus::Conflicted).then(|| {
-        let sides = object
-            .evidence
-            .iter()
-            .take(2)
-            .map(|e| ConflictSideDto {
-                label: find_doc(&e.document_id)
-                    .map(|d| d.name.clone())
-                    .unwrap_or_else(|| e.document_id.clone()),
-                value: figure(&e.quote),
-                evidence: evidence_dto(e, find_doc(&e.document_id)),
-            })
-            .collect();
-        ConflictDto {
-            summary: format!(
-                "Two documents state something different about {}.",
-                object.title.to_lowercase()
-            ),
-            sides,
-        }
-    });
+    let conflict =
+        (object.status == ObjectStatus::Conflicted).then(|| conflict_dto(object, documents));
 
     // Two documents covering one subject, with no figures to disagree about.
     //
@@ -1068,6 +1091,16 @@ async fn dismiss(
     Ok(Json(Approved { affected: Vec::new() }))
 }
 
+/// Node id for a document on the brain graph. Evidence already stores
+/// `doc:…`; prefixing again produced `doc:doc:…` and broke document filters.
+fn doc_graph_id(document_id: &str) -> String {
+    if document_id.starts_with("doc:") {
+        document_id.to_string()
+    } else {
+        format!("doc:{document_id}")
+    }
+}
+
 /// The live company brain: approved objects and the edges between them.
 ///
 /// Rebuilt from the lake on every call — there is no second store. The
@@ -1137,7 +1170,7 @@ async fn brain(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
             quoted.insert(evidence.document_id.as_str());
             links.push(serde_json::json!({
                 "from": object.id,
-                "to": format!("doc:{}", evidence.document_id),
+                "to": doc_graph_id(evidence.document_id.as_str()),
                 "type": "quoted_in",
                 "label": "quoted in",
             }));
@@ -1145,20 +1178,23 @@ async fn brain(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
     }
     for document_id in quoted {
         nodes.push(serde_json::json!({
-            "id": format!("doc:{document_id}"),
+            "id": doc_graph_id(document_id),
             "title": names.get(document_id).cloned().unwrap_or_else(|| document_id.to_string()),
             "kind": "document",
             "status": "approved",
         }));
     }
 
+    // Every installed assistant, with whether MCP is wired — the brain panel
+    // shows all of them and names which still need connecting.
     let assistants: Vec<serde_json::Value> = knowlith_desktop::status_all()
         .into_iter()
-        .filter(|s| s.connected)
+        .filter(|s| s.installed && s.app.launch_surface() != knowlith_desktop::LaunchSurface::Missing)
         .map(|s| {
             serde_json::json!({
                 "slug": s.slug,
                 "label": s.label,
+                "connected": s.connected,
                 "surface": match s.app.launch_surface() {
                     knowlith_desktop::LaunchSurface::Desktop => "desktop",
                     knowlith_desktop::LaunchSurface::Terminal => "terminal",
@@ -1746,6 +1782,31 @@ async fn try_in_app(
     if prompt.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "the prompt is empty.".into()));
     }
+    let status = knowlith_desktop::status(app);
+    if !status.installed {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("{} is not installed on this computer.", app.label()),
+        ));
+    }
+    if !status.connected {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "{} is not connected to Knowlith yet. Open AI assistants, connect it, then try again.",
+                app.label()
+            ),
+        ));
+    }
+    if status.stale_command.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "{} is pointing at a different Knowlith. Repair the connection in AI assistants first.",
+                app.label()
+            ),
+        ));
+    }
     let outcome = knowlith_desktop::open_with_prompt(app, prompt);
     let message = match outcome.outcome {
         knowlith_desktop::Outcome::Opened => format!(
@@ -1753,7 +1814,7 @@ async fn try_in_app(
             app.label()
         ),
         knowlith_desktop::Outcome::OpenedInTerminal => format!(
-            "Opened Terminal with {}. The question is in that session — come back when it has read Knowlith.",
+            "Opened a small terminal window with {}. Send the question there, then come back when it has read Knowlith.",
             app.label()
         ),
         knowlith_desktop::Outcome::NotInstalled => {

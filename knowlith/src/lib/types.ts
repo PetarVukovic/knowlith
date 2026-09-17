@@ -191,6 +191,8 @@ export interface ConflictDetail {
     label: string
     value: string
     evidence: Evidence
+    /** The version Knowlith is keeping — the newest document's figure. */
+    current: boolean
   }[]
 }
 
@@ -380,6 +382,7 @@ export interface BrainEdge {
 export interface BrainAssistant {
   slug: string
   label: string
+  connected: boolean
   surface: "desktop" | "terminal" | "missing"
 }
 

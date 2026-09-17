@@ -29,6 +29,8 @@ pub struct Group {
     /// confidence signal available without a model.
     pub agreeing_documents: usize,
     pub conflicted: bool,
+    /// Quotes from documents that state a different figure for the same subject.
+    pub disagreeing: Vec<(String, String)>,
     /// The document whose version this replaces.
     pub supersedes: Option<String>,
     /// Other objects this one names.
@@ -52,6 +54,7 @@ impl Group {
             quotes: vec!["Test.".into()],
             agreeing_documents: 1,
             conflicted: false,
+            disagreeing: Vec::new(),
             supersedes: None,
             uses: Vec::new(),
         }
@@ -202,6 +205,15 @@ pub fn group(
             quotes,
             agreeing_documents: agreeing,
             conflicted,
+            disagreeing: disagreeing
+                .iter()
+                .filter_map(|(document_id, candidate)| {
+                    candidate
+                        .quotes
+                        .first()
+                        .map(|quote| (document_id.to_string(), quote.clone()))
+                })
+                .collect(),
             supersedes: disagreeing
                 .first()
                 .map(|(document_id, _)| (*document_id).to_string()),

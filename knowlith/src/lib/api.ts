@@ -361,6 +361,26 @@ export const api = {
       ],
     }
   },
+
+  async getBuildStatus(): Promise<BuildStatus> {
+    return get<BuildStatus>("/api/build/status", { phase: "idle", quizPending: false, questionCount: 0 }, {
+      phase: "idle",
+      quizPending: false,
+      questionCount: 0,
+    })
+  },
+
+  async getBuildQuiz(): Promise<BuildQuiz | null> {
+    return get<BuildQuiz | null>("/api/build/quiz", null, null)
+  },
+
+  async confirmBuildQuiz(quizId: string, approvedObjectIds: string[]): Promise<boolean> {
+    const result = await post<{ ok: boolean }>("/api/build/quiz/confirm", {
+      quizId,
+      approvedObjectIds,
+    })
+    return result?.ok === true
+  },
 }
 
 export type ScanResult = Awaited<ReturnType<typeof api.scanFolder>>
@@ -406,22 +426,6 @@ export const folders = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, name, processor }),
     })
-  },
-
-  async getBuildStatus(): Promise<BuildStatus> {
-    return get<BuildStatus>("/api/build/status", { phase: "idle", quizPending: false, questionCount: 0 }, {
-      phase: "idle",
-      quizPending: false,
-      questionCount: 0,
-    })
-  },
-
-  async getBuildQuiz(): Promise<BuildQuiz | null> {
-    return get<BuildQuiz | null>("/api/build/quiz", null, null)
-  },
-
-  async confirmBuildQuiz(quizId: string, approvedObjectIds: string[]): Promise<void> {
-    await post("/api/build/quiz/confirm", { quizId, approvedObjectIds })
   },
 }
 
