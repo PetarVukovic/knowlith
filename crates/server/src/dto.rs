@@ -111,6 +111,8 @@ pub struct ReviewItemDto {
     pub conflict: Option<ConflictDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage: Option<CoverageDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_gone: Option<SourceGoneDto>,
     pub compiled_at: String,
 }
 
@@ -168,13 +170,46 @@ pub struct SourceBlockDto {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceDocumentDto {
+    pub id: String,
     pub name: String,
     pub kind: &'static str,
     pub path: String,
     pub modified: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub gone_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub columns: Option<Vec<String>>,
     pub blocks: Vec<SourceBlockDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotingObjectDto {
+    pub id: String,
+    pub title: String,
+    pub kind: &'static str,
+    pub status: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceDocumentIndexDto {
+    pub id: String,
+    pub name: String,
+    pub kind: &'static str,
+    pub path: String,
+    pub modified: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gone_at: Option<String>,
+    pub quoted_by: Vec<QuotingObjectDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceGoneDto {
+    pub document_id: String,
+    pub document_name: String,
+    pub document_path: String,
 }
 
 #[derive(Serialize)]
@@ -350,14 +385,65 @@ pub fn block_dto(block: &Block) -> SourceBlockDto {
     }
 }
 
-pub fn document_dto(document: &Document) -> SourceDocumentDto {
+pub fn document_dto(document: &Document, gone_at: Option<String>) -> SourceDocumentDto {
     SourceDocumentDto {
+        id: document.id.clone(),
         name: document.name.clone(),
         kind: document_kind_str(document.kind),
         path: document.path.clone(),
         modified: document.modified.clone(),
+        gone_at,
         columns: document.columns.clone(),
         blocks: document.blocks.iter().map(block_dto).collect(),
+    }
+}
+
+pub fn document_index_dto(row: &knowlith_lake::DocumentIndexRow, quoted_by: Vec<QuotingObjectDto>) -> SourceDocumentIndexDto {
+    SourceDocumentIndexDto {
+        id: row.id.clone(),
+        name: row.name.clone(),
+        kind: document_kind_from_str(&row.kind),
+        path: row.path.clone(),
+        modified: row.modified.clone(),
+        gone_at: row.gone_at.clone(),
+        quoted_by,
+    }
+}
+
+fn document_kind_from_str(kind: &str) -> &'static str {
+    match kind {
+        "xlsx" => "xlsx",
+        "pdf" => "pdf",
+        _ => "docx",
+    }
+}
+
+pub fn quoting_object_dto(object: &knowlith_lake::QuotingObject) -> QuotingObjectDto {
+    QuotingObjectDto {
+        id: object.id.clone(),
+        title: object.title.clone(),
+        kind: kind_from_str(&object.kind),
+        status: status_from_str(&object.status),
+    }
+}
+
+fn kind_from_str(kind: &str) -> &'static str {
+    match kind {
+        "process" => "process",
+        "term" => "term",
+        "fact" => "fact",
+        "skill" => "skill",
+        _ => "rule",
+    }
+}
+
+fn status_from_str(status: &str) -> &'static str {
+    match status {
+        "approved" => "approved",
+        "conflicted" => "conflict",
+        "superseded" => "superseded",
+        "rejected" => "rejected",
+        _ => "draft",
     }
 }
 
