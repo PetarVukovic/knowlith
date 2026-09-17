@@ -1,6 +1,6 @@
 import type { BrainNode } from "@/lib/types"
 
-/** World size of the cortex mesh. Camera framing is derived from this. */
+/** Default span of the knowledge graph. */
 export const BRAIN_SCALE = 72
 
 export type Vec3 = { x: number; y: number; z: number }
@@ -77,106 +77,32 @@ export function unitHash(id: string, salt = 0): number {
     h ^= id.charCodeAt(i)
     h = Math.imul(h, 16777619)
   }
-  return (h >>> 0) / 4294967296
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b)
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+}
+
+const KIND_ANCHOR: Record<string, Vec3> = {
+  rule: { x: -48, y: 26, z: 12 },
+  process: { x: 48, y: 15, z: -12 },
+  skill: { x: 20, y: 52, z: 30 },
+  term: { x: -12, y: -38, z: 20 },
+  fact: { x: -12, y: -38, z: 20 },
+  document: { x: 0, y: -8, z: -35 },
+}
+
+function placeBrainNode(id: string, kind: string): Vec3 {
+  const anchor = KIND_ANCHOR[kind] ?? KIND_ANCHOR.fact
+  return {
+    x: anchor.x + (unitHash(id, 1) - 0.5) * 72,
+    y: anchor.y + (unitHash(id, 2) - 0.5) * 72,
+    z: anchor.z + (unitHash(id, 3) - 0.5) * 90,
+  }
 }
 
 /**
- * One cerebral hemisphere from a unit-sphere vertex.
- *
- * +Z is anterior, +Y dorsal, +X right. The two lobes are shifted off the
- * midline so a fissure reads; a temporal drop and a flattened belly stop
- * the silhouette looking like a sphere. Kind patches are a scanability
- * device — not a claim that a rule lives in a frontal lobe.
- */
-export function hemispherePoint(side: 1 | -1, x: number, y: number, z: number, depth = 1): Vec3 {
-  const r = Math.hypot(x, y, z) || 1
-  x /= r
-  y /= r
-  z /= r
-
-  let px = x * 0.68
-  let py = y * 0.62
-  let pz = z * 0.94
-
-  const lateral = Math.abs(x)
-  const ventral = Math.max(0, -y)
-  py -= ventral * lateral * 0.28
-  px += Math.sign(x || side) * ventral * lateral * 0.12
-  pz += ventral * lateral * 0.08
-
-  if (z > 0.22) pz += 0.06 * z
-  if (z < -0.18) pz -= 0.04
-  if (py < -0.28) py = -0.28 + (py + 0.28) * 0.5
-
-  const split = 0.125 + 0.05 * ventral
-  const inner = x * side < 0
-  px += side * split
-  if (inner) {
-    px = side * (0.035 + 0.02 * Math.abs(y))
-  }
-
-  if (!inner) {
-    const g =
-      0.032 * Math.sin(pz * 17 + py * 4) * (0.45 + 0.55 * lateral) +
-      0.018 * Math.sin(py * 15 + pz * 7) +
-      0.012 * Math.sin(pz * 28) * lateral
-    const nlen = Math.hypot(px, py, pz) || 1
-    px += (px / nlen) * g
-    py += (py / nlen) * g
-    pz += (pz / nlen) * g
-  }
-
-  const s = BRAIN_SCALE * depth
-  return { x: px * s, y: py * s, z: pz * s }
-}
-
-/** Smaller posterior-ventral pair. Visual mass only — no nodes sit here. */
-export function cerebellumPoint(x: number, y: number, z: number): Vec3 {
-  const r = Math.hypot(x, y, z) || 1
-  x /= r
-  y /= r
-  z /= r
-  let px = x * 0.3
-  let py = y * 0.22 - 0.4
-  let pz = z * 0.26 - 0.58
-  if (Math.abs(px) < 0.04) py -= 0.02
-  const s = BRAIN_SCALE
-  return { x: px * s, y: py * s, z: pz * s }
-}
-
-type Patch = { side: 1 | -1 | 0; theta: [number, number]; phi: [number, number]; depth: number }
-
-const KIND_PATCH: Record<string, Patch> = {
-  rule: { side: -1, theta: [0.45, 1.25], phi: [-0.85, 0.85], depth: 1.04 },
-  process: { side: 1, theta: [0.45, 1.25], phi: [-0.85, 0.85], depth: 1.04 },
-  skill: { side: 0, theta: [0.18, 0.7], phi: [-2.2, 2.2], depth: 1.05 },
-  term: { side: 0, theta: [0.5, 1.4], phi: [-2.05, 2.05], depth: 1.03 },
-  fact: { side: 0, theta: [0.5, 1.4], phi: [-2.05, 2.05], depth: 1.03 },
-  document: { side: 0, theta: [0.5, 1.6], phi: [-2.4, 2.4], depth: 0.72 },
-}
-
-function placeBrainNode(id: string, kind: string, index: number, ofKind: number): Vec3 {
-  const patch = KIND_PATCH[kind] ?? KIND_PATCH.term
-  const j = unitHash(id, 1)
-  const j2 = unitHash(id, 2)
-  const t = ofKind <= 1 ? 0.5 : (index + 0.5) / ofKind
-  const theta =
-    patch.theta[0] + (patch.theta[1] - patch.theta[0]) * Math.min(0.97, Math.max(0.03, t * 0.82 + j * 0.18))
-  const span = patch.phi[1] - patch.phi[0]
-  const phi = patch.phi[0] + span * ((index * 0.6180339887 + j2) % 1)
-  const side: 1 | -1 = patch.side === 0 ? (index % 2 === 0 ? -1 : 1) : patch.side
-  const st = Math.sin(theta)
-  const x = st * Math.abs(Math.sin(phi)) * side
-  const y = Math.cos(theta)
-  const z = st * Math.cos(phi)
-  const depth = patch.depth + (j - 0.5) * 0.03
-  return hemispherePoint(side, x, y, z, depth)
-}
-
-/**
- * Stable cortex coordinates for every node. Objects sit on the surface in
- * kind patches; a document sits inward of the objects that quote it, so the
- * owner sees evidence under the claim rather than a second cloud.
+ * Stable, spatial kind clusters. Evidence sits near the claims quoting it.
+ * Coordinates depend on identity, not the number or order of discoveries.
  */
 export function layoutBrainNodes(
   nodes: BrainNode[],
@@ -194,18 +120,23 @@ export function layoutBrainNodes(
   const pos = new Map<string, Vec3>()
   for (const [kind, list] of byKind) {
     if (kind === "document") continue
-    list.forEach((n, i) => pos.set(n.id, placeBrainNode(n.id, n.kind, i, list.length)))
+    list.forEach((n) => pos.set(n.id, placeBrainNode(n.id, n.kind)))
   }
 
   const docs = byKind.get("document") ?? []
-  docs.forEach((doc, i) => {
-    const parentPos: Vec3[] = []
-    for (const e of edges) {
-      const other = e.to === doc.id ? e.from : e.from === doc.id ? e.to : null
-      if (other == null) continue
+  const neighbours = new Map<string, Vec3[]>()
+  for (const e of edges) {
+    for (const [id, other] of [[e.from, e.to], [e.to, e.from]]) {
       const p = pos.get(other)
-      if (p) parentPos.push(p)
+      if (p) {
+        const list = neighbours.get(id) ?? []
+        list.push(p)
+        neighbours.set(id, list)
+      }
     }
+  }
+  docs.forEach((doc) => {
+    const parentPos = neighbours.get(doc.id) ?? []
     if (parentPos.length > 0) {
       const avg = {
         x: parentPos.reduce((s, p) => s + p.x, 0) / parentPos.length,
@@ -214,7 +145,7 @@ export function layoutBrainNodes(
       }
       pos.set(doc.id, { x: avg.x * 0.64, y: avg.y * 0.64, z: avg.z * 0.64 })
     } else {
-      pos.set(doc.id, placeBrainNode(doc.id, "document", i, docs.length))
+      pos.set(doc.id, placeBrainNode(doc.id, "document"))
     }
   })
   return pos
@@ -223,7 +154,7 @@ export function layoutBrainNodes(
 export function brainCameraHome(): { position: Vec3; lookAt: Vec3 } {
   const dist = BRAIN_SCALE * 2.85
   return {
-    position: { x: dist * 0.62, y: dist * 0.22, z: dist * 0.58 },
-    lookAt: { x: 0, y: -BRAIN_SCALE * 0.08, z: -BRAIN_SCALE * 0.06 },
+    position: { x: dist * 0.12, y: dist * 0.08, z: dist * 1.25 },
+    lookAt: { x: 0, y: 0, z: 0 },
   }
 }

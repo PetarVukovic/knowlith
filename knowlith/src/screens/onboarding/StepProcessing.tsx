@@ -26,7 +26,7 @@ const OPTIONS: {
 }[] = [
   {
     id: "codex",
-    title: "Use Codex on this Mac",
+    title: "Use Codex on this computer",
     subtitle: "Your own Codex account does the reading.",
     Icon: Terminal,
     leaves:
@@ -66,11 +66,13 @@ export function StepProcessing({
   onChange,
   allowStart,
   onAllowStart,
+  onReady,
 }: {
   value: Processor
   onChange: (p: Processor) => void
   allowStart: boolean
   onAllowStart: (v: boolean) => void
+  onReady: (ready: boolean) => void
 }) {
   const [engines, setEngines] = useState<DetectedEngine[] | null>(null)
 
@@ -83,6 +85,8 @@ export function StepProcessing({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => { onReady(engines?.some((e) => e.id === value && e.installed) ?? false) }, [engines, value, onReady])
 
   const selected = OPTIONS.find((o) => o.id === value)!
   const local = value !== "managed"
@@ -102,14 +106,14 @@ export function StepProcessing({
   return (
     <div>
       <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.022em] text-ink">
-        Choose who reads them
+        Choose your AI reader
       </h1>
       <p className="mt-2.5 max-w-[48ch] text-[14px] leading-relaxed text-muted">
         {engines === null
-          ? "Checking which AI tools are on this Mac…"
+          ? "Checking which AI tools are on this computer…"
           : installedCount > 0
-            ? `Knowlith found ${installedCount === 1 ? "an AI tool" : `${installedCount} AI tools`} already installed on this Mac. Using one of them means your existing subscription pays and Knowlith never sees your documents.`
-            : "No AI tool was found on this Mac yet. Knowlith reads through Claude Code, Codex or Cursor Agent — install one, sign in to it, and come back to this step."}
+            ? `Knowlith found ${installedCount === 1 ? "an AI tool" : `${installedCount} AI tools`} already installed on this computer. It reads through your signed-in account. Your provider’s plan and usage limits apply.`
+            : "No AI tool was found on this computer yet. Knowlith reads through Claude Code, Codex or Cursor Agent — install one, sign in to it, and come back to this step."}
       </p>
 
       <div className="mt-8 grid gap-2.5">
@@ -164,10 +168,10 @@ export function StepProcessing({
             className="mt-0.5 size-[18px] shrink-0 accent-[var(--k-accent)]"
           />
           <span className="text-[13px] leading-relaxed text-ink">
-            Allow Knowlith to start {selected.title.replace("Use ", "").replace(" on this Mac", "")}{" "}
-            for approved analysis jobs.
+            Allow Knowlith to start {selected.title.replace("Use ", "").replace(" on this computer", "")}{" "}
+            to read the files I choose.
             <span className="mt-1 block text-[12px] text-muted">
-              It runs only while reading your files, and stops when the work is done.
+              Document text is sent through this tool to its AI provider. Installed does not mean signed in; use the tool’s normal sign-in first.
             </span>
           </span>
         </label>

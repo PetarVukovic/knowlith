@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { ArrowLeft, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { background, getWorkFeed } from "@/lib/api"
+import { api, background, failed } from "@/lib/api"
 import type { Inventory, Processor, SourceKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
@@ -73,6 +73,10 @@ export function Onboarding() {
 
   const [step, setStep] = useState(0)
   const [name, setName] = useState("")
+  const [profile, setProfile] = useState("")
+  const [starting, setStarting] = useState(false)
+  const startLock = useRef(false)
+  const [readerAvailable, setReaderAvailable] = useState(false)
   const [logo, setLogo] = useState<string | null>(null)
   const [kind, setKind] = useState<SourceKind | null>(null)
   const [path, setPath] = useState("")
@@ -83,6 +87,12 @@ export function Onboarding() {
   const [addError, setAddError] = useState<string | null>(null)
   /** False until we know whether to resume mid-read or start at Welcome. */
   const [placed, setPlaced] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void api.getCompany().then((c) => { if (!cancelled) setProfile(c.profile) })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!ready || placed) return
@@ -109,7 +119,7 @@ export function Onboarding() {
         return
       }
 
-      const [feed, policy] = await Promise.all([getWorkFeed(), background.policy()])
+      const policy = await background.policy()
       if (cancelled) return
 
       const knownName = companyName.trim() && companyName !== "Your company" ? companyName.trim() : ""
@@ -117,15 +127,9 @@ export function Onboarding() {
       if (companyLogo) setLogo(companyLogo)
       setProcessor(asProcessor(policy?.policy.engine ?? sources[0]?.processor, "codex"))
 
-      const knowledge =
-        (discovery?.rules ?? 0) +
-        (discovery?.processes ?? 0) +
-        (discovery?.terms ?? 0) +
-        (discovery?.skills ?? 0)
-      const busy = feed !== null && feed.stage !== "idle"
       // Still reading, held, or finished with nothing to show yet → Building.
       // Idle with findings → Discovery. Never Welcome once a source exists.
-      setStep(busy || (knowledge === 0 && objects.length === 0) ? 5 : 6)
+      setStep(5)
       setPlaced(true)
     }
 
@@ -139,7 +143,7 @@ export function Onboarding() {
     (step === 0 && name.trim().length > 1) ||
     (step === 1 && inventory !== null) ||
     (step === 2 && granted) ||
-    (step === 3 && (processor === "managed" || allowStart))
+    (step === 3 && readerAvailable && (processor === "managed" || allowStart))
 
   /** Enter the real app only after the first read has produced something. */
   const enterApp = (next: "review") => {
@@ -157,24 +161,25 @@ export function Onboarding() {
    * this button and still walk away having had nothing opened.
    */
   const build = async () => {
+    if (startLock.current) return
+    startLock.current = true
+    setStarting(true)
     setAddError(null)
-    // The company is named now rather than at the end, so the daemon has it
-    // before the first document is read and the status bar stops saying
-    // "Your company" while the work is already running.
-    setCompany(name.trim(), logo)
-    // Persist who should read — the worker binds this at daemon start.
-    // First read runs even on battery. pauseOnBattery:true here used to hold
-    // every compile job, so the building screen hit 100% with nothing found
-    // and spun on "Preparing review" until the laptop was plugged in.
-    await background.setPolicy({
-      processing: "automatic",
-      pauseOnBattery: false,
-      largeScan: 500,
-      engine: processor,
-    })
-    const result = await addSource(path, undefined, processor)
-    if (typeof result === "string") return setAddError(result)
-    setStep(5)
+    try {
+      const saved = await api.saveCompany(name.trim(), profile.trim())
+      if (failed(saved)) throw new Error(saved.error)
+      setCompany(name.trim(), logo)
+      const previous = await background.policy()
+      if (!previous) throw new Error("Could not read your settings. Please try again.")
+      const policy = await background.setPolicy({
+        ...previous.policy, processing: "automatic", pauseOnBattery: false, engine: processor,
+      })
+      if (!policy) throw new Error("Could not save your AI reader. Please try again.")
+      const result = await addSource(path, undefined, processor)
+      if (typeof result === "string") throw new Error(result)
+      setStep(5)
+    } catch (e) { setAddError(e instanceof Error ? e.message : "Could not start the build.") }
+    finally { startLock.current = false; setStarting(false) }
   }
 
   const wide = step >= 4
@@ -189,7 +194,7 @@ export function Onboarding() {
       <div
         className={cn(
           "mx-auto w-full px-5 py-12 sm:py-16",
-          step >= 5 ? "max-w-[860px]" : wide ? "max-w-[720px]" : "max-w-[600px]",
+          step >= 5 ? "max-w-[1000px]" : wide ? "max-w-[720px]" : "max-w-[600px]",
         )}
       >
         {step < DECISIONS ? (
@@ -207,7 +212,7 @@ export function Onboarding() {
         ) : null}
 
         {step === 0 ? (
-          <StepWelcome name={name} onName={setName} logo={logo} onLogo={setLogo} />
+          <StepWelcome name={name} onName={setName} logo={logo} onLogo={setLogo} profile={profile} onProfile={setProfile} />
         ) : null}
 
         {step === 1 ? (
@@ -234,6 +239,7 @@ export function Onboarding() {
         {step === 3 ? (
           <StepProcessing
             value={processor}
+            onReady={setReaderAvailable}
             onChange={setProcessor}
             allowStart={allowStart}
             onAllowStart={setAllowStart}
@@ -242,7 +248,7 @@ export function Onboarding() {
 
         {step === 4 && inventory ? (
           <>
-            <StepPreview inventory={inventory} path={path} onBuild={() => void build()} />
+            <StepPreview inventory={inventory} path={path} starting={starting} onBuild={() => void build()} />
             {addError ? <p className="mt-4 text-[13px] text-conflict">{addError}</p> : null}
           </>
         ) : null}

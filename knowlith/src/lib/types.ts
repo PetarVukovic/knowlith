@@ -364,6 +364,10 @@ export interface CompanyBrain {
   assistants: BrainAssistant[]
 }
 
+export interface BuildBrain extends CompanyBrain {
+  counts: { documents: number; discoveries: number; approved: number }
+}
+
 export interface BrainNode {
   id: string
   title: string

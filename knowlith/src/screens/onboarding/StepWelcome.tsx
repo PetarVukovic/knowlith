@@ -16,11 +16,15 @@ export function StepWelcome({
   onName,
   logo,
   onLogo,
+  profile,
+  onProfile,
 }: {
   name: string
   onName: (v: string) => void
   logo: string | null
   onLogo: (v: string | null) => void
+  profile: string
+  onProfile: (v: string) => void
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const initials = initialsOf(name || "Knowlith")
@@ -38,8 +42,7 @@ export function StepWelcome({
         Turn your company files into shared AI knowledge.
       </h1>
       <p className="mt-3 max-w-[46ch] text-[14px] leading-relaxed text-muted">
-        Knowlith reads the documents your team already works from and turns them into one answer every AI tool
-        gives. You approve everything before it counts.
+        Knowlith reads the documents your team already works from and helps your connected AI tools use your own company knowledge. You approve everything before it counts.
       </p>
 
       <ol className="mt-6 grid gap-2 rounded-xl border border-line bg-surface-2 p-4 text-[13px]">
@@ -75,6 +78,11 @@ export function StepWelcome({
           />
         </div>
 
+        <div>
+          <label htmlFor="company-profile" className="mb-1.5 block text-[12.5px] font-medium text-ink">What does your business do? <span className="font-normal text-faint">Optional</span></label>
+          <textarea id="company-profile" value={profile} onChange={(e) => onProfile(e.target.value)} maxLength={1500} rows={3} placeholder="For example: We install and service heating systems for homes and small offices." className="w-full resize-y rounded-lg border border-line bg-surface px-3 py-2.5 text-[14px] text-ink outline-none focus:border-accent" />
+          <p className="mt-1.5 text-xs text-muted">This helps your AI understand which rules and processes matter to your business.</p>
+        </div>
         <div className="flex items-center gap-4">
           <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-xl bg-accent text-[17px] font-semibold text-on-accent">
             {logo ? (

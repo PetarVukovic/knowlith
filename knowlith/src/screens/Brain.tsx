@@ -17,7 +17,7 @@ const BrainGraph3D = lazy(() =>
 
 /**
  * The company brain: confirmed knowledge and the documents it quotes, laid
- * out on a cortex so the graph reads as a brain rather than a blob. Click a
+ * out as an interactive 3D knowledge graph. Click a
  * node to highlight its connections; ask about it in Claude Desktop, Codex
  * or a Terminal session the owner already connected.
  */
@@ -216,7 +216,7 @@ export function Brain() {
           "scroll-thin flex w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-bg md:border-l md:border-t-0",
           fullscreen ? "max-h-[36vh]" : "max-h-[40vh] md:max-h-none",
         )}
-        style={{ width: fullscreen ? undefined : side.width }}
+        style={{ width: fullscreen ? undefined : `min(100%, ${side.width}px)` }}
       >
         {data ? (
           <BrainInspector

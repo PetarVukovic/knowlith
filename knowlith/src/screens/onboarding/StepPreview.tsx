@@ -14,10 +14,12 @@ export function StepPreview({
   inventory,
   path,
   onBuild,
+  starting = false,
 }: {
   inventory: Inventory
   path: string
   onBuild: () => void
+  starting?: boolean
 }) {
   const unsupported = inventory.skipped.reduce((sum, s) => sum + s.count, 0)
 
@@ -98,11 +100,11 @@ export function StepPreview({
       ) : null}
 
       <div className="mt-9">
-        <Button size="lg" variant="primary" onClick={onBuild} disabled={inventory.readable === 0}>
-          Build company context
+        <Button size="lg" variant="primary" onClick={onBuild} disabled={starting || inventory.readable === 0}>
+          {starting ? "Starting your build…" : "Build my company brain"}
         </Button>
         <p className="mt-2.5 text-[12px] text-faint">
-          You can stop this at any time. Nothing becomes usable until you approve it.
+          Your AI reads these files through your chosen account. You review discoveries before your AI tools can use them.
         </p>
       </div>
     </div>

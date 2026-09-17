@@ -23,6 +23,7 @@ import type {
   AiTool,
   AutostartState,
   BuildQuiz,
+  BuildBrain,
   BuildStatus,
   Browsed,
   CompanyBrain,
@@ -193,6 +194,12 @@ async function mutate<T>(method: "POST" | "PUT" | "DELETE", path: string, body?:
 }
 
 export const api = {
+  async saveCompany(name: string, profile: string) {
+    return send<{ name: string; profile: string }>("/api/company", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, profile }),
+    })
+  },
   /** Names the company in the lake. */
   setCompanyName: (name: string) => putCompanyName(name),
 
@@ -524,6 +531,15 @@ export const tools = {
 }
 
 export const brain = {
+  async build(signal?: AbortSignal): Promise<{ graph: BuildBrain; work: Work }> {
+    const responses = await Promise.all([
+      ask("/api/brain/build", { signal }),
+      ask("/api/work", { signal }),
+    ])
+    if (responses.some((r) => !r.ok)) throw new Error("Cannot read build progress. Reconnecting…")
+    const [graph, work] = await Promise.all(responses.map((r) => r.json()))
+    return { graph, work }
+  },
   async get(): Promise<CompanyBrain> {
     return get<CompanyBrain>(
       "/api/brain",

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { Component, useEffect, useRef, type ReactNode } from "react"
 import ForceGraph3D, {
   type ConfigOptions,
   type ForceGraph3DInstance,
@@ -13,10 +13,7 @@ import {
   brainCameraHome,
   brainKindMatches,
   brainVisibleNodeIds,
-  cerebellumPoint,
-  hemispherePoint,
   layoutBrainNodes,
-  unitHash,
 } from "@/lib/brainGraph"
 import type { BrainEdge, BrainNode } from "@/lib/types"
 
@@ -29,88 +26,8 @@ const ACCENT = "#0e6e6e"
 const CONFLICT = "#e3776d"
 
 type Built = {
-  core: THREE.Mesh<THREE.SphereGeometry, THREE.MeshPhongMaterial>
-  halo: THREE.Mesh<THREE.SphereGeometry, THREE.MeshPhongMaterial>
+  core: THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhongMaterial>
   label: SpriteText
-}
-
-type Cortex = {
-  group: THREE.Group
-  paint: (dark: boolean) => void
-  dispose: () => void
-}
-
-function deformSphere(
-  geo: THREE.SphereGeometry,
-  map: (x: number, y: number, z: number) => { x: number; y: number; z: number },
-) {
-  const pos = geo.attributes.position
-  for (let i = 0; i < pos.count; i++) {
-    const p = map(pos.getX(i), pos.getY(i), pos.getZ(i))
-    pos.setXYZ(i, p.x, p.y, p.z)
-  }
-  geo.computeVertexNormals()
-}
-
-function buildCortex(): Cortex {
-  const leftGeo = new THREE.SphereGeometry(1, 64, 48)
-  const rightGeo = new THREE.SphereGeometry(1, 64, 48)
-  const cereGeo = new THREE.SphereGeometry(1, 32, 24)
-  deformSphere(leftGeo, (x, y, z) => hemispherePoint(-1, x, y, z, 1))
-  deformSphere(rightGeo, (x, y, z) => hemispherePoint(1, x, y, z, 1))
-  deformSphere(cereGeo, (x, y, z) => cerebellumPoint(x, y, z))
-
-  const solidMat = new THREE.MeshPhongMaterial({
-    color: "#b7c9c9",
-    transparent: true,
-    opacity: 0.32,
-    depthWrite: false,
-    shininess: 28,
-    specular: new THREE.Color("#6a8888"),
-    side: THREE.FrontSide,
-  })
-  const cereMat = new THREE.MeshPhongMaterial({
-    color: "#a9bdbd",
-    transparent: true,
-    opacity: 0.26,
-    depthWrite: false,
-    shininess: 16,
-    specular: new THREE.Color("#5a7777"),
-    side: THREE.FrontSide,
-  })
-
-  const left = new THREE.Mesh(leftGeo, solidMat)
-  const right = new THREE.Mesh(rightGeo, solidMat)
-  const cere = new THREE.Mesh(cereGeo, cereMat)
-  left.renderOrder = 0
-  right.renderOrder = 0
-  cere.renderOrder = 0
-
-  const group = new THREE.Group()
-  group.add(left)
-  group.add(right)
-  group.add(cere)
-
-  const paint = (dark: boolean) => {
-    solidMat.color.set(dark ? "#1a3c3c" : "#b7c9c9")
-    solidMat.opacity = dark ? 0.45 : 0.34
-    solidMat.emissive.set("#0e6e6e")
-    solidMat.emissiveIntensity = dark ? 0.1 : 0.04
-    cereMat.color.set(dark ? "#152f2f" : "#a9bdbd")
-    cereMat.opacity = dark ? 0.38 : 0.26
-    cereMat.emissive.set("#0e6e6e")
-    cereMat.emissiveIntensity = dark ? 0.06 : 0.02
-  }
-
-  const dispose = () => {
-    leftGeo.dispose()
-    rightGeo.dispose()
-    cereGeo.dispose()
-    solidMat.dispose()
-    cereMat.dispose()
-  }
-
-  return { group, paint, dispose }
 }
 
 function graphLights(dark: boolean): THREE.Light[] {
@@ -124,12 +41,34 @@ function graphLights(dark: boolean): THREE.Light[] {
   return [ambient, key, fill, rim]
 }
 
-export function BrainGraph3D({
+class GraphBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  render() {
+    return this.state.failed
+      ? <div className="grid h-full place-items-center p-8 text-center text-sm text-muted">3D is unavailable on this device. Your knowledge is available in the list.</div>
+      : this.props.children
+  }
+}
+
+export function BrainGraph3D(props: Parameters<typeof BrainScene>[0]) {
+  return <GraphBoundary><BrainScene {...props} /></GraphBoundary>
+}
+
+function disposeNode(node: Built) {
+  node.core.material.dispose()
+  node.label.material.map?.dispose()
+  node.label.material.dispose()
+  node.label.geometry.dispose()
+}
+
+function BrainScene({
   nodes,
   edges,
   selectedId,
   kindFilter,
   resetSignal = 0,
+  growing = false,
   onSelect,
   onOpen,
 }: {
@@ -138,17 +77,20 @@ export function BrainGraph3D({
   selectedId: string | null
   kindFilter: string
   resetSignal?: number
+  growing?: boolean
   onSelect: (node: BrainNode | null) => void
   onOpen: (node: BrainNode) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
+  const motion = useRef(false)
+  const signature = useRef("")
   const graph = useRef<Graph | null>(null)
   const cache = useRef(new Map<string, GNode>())
   const built = useRef(new Map<string, Built>())
   const hovered = useRef<string | null>(null)
   const framed = useRef(false)
-  const cortex = useRef<Cortex | null>(null)
-  const geos = useRef<{ core: THREE.SphereGeometry; halo: THREE.SphereGeometry } | null>(null)
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
   const edgesRef = useRef(edges)
   edgesRef.current = edges
   const state = useRef({ selectedId, kindFilter, onSelect, onOpen })
@@ -178,15 +120,15 @@ export function BrainGraph3D({
         }
         return dark ? "#1c2c2f" : "#e4eaeb"
       }
-      return l.type === "quoted_in" ? (dark ? "#2a3c40" : "#d5dedf") : dark ? "#4d656c" : "#8aa0a6"
+      return l.type === "quoted_in" ? (dark ? "#63858a" : "#9dabad") : dark ? "#4d656c" : "#8aa0a6"
     })
       .linkWidth((l) => {
         if (focus && linkTouches(l, focus)) return l.type === "quoted_in" ? 0.9 : 1.8
         return l.type === "quoted_in" ? 0.25 : 0.55
       })
-      .linkOpacity(focus ? 0.9 : 0.42)
+      .linkOpacity(focus ? 0.9 : 0.65)
       .linkDirectionalParticles((l) => {
-        if (!focus || !linkTouches(l, focus)) return 0
+        if (motion.current || !focus || !linkTouches(l, focus)) return 0
         return l.type === "quoted_in" ? 2 : 3
       })
       .linkDirectionalParticleWidth(1.4)
@@ -207,7 +149,7 @@ export function BrainGraph3D({
     }
     const matches = (n: BrainNode) => brainKindMatches(kindFilter, n.kind)
 
-    for (const n of nodes) {
+    for (const n of nodesRef.current) {
       const b = built.current.get(n.id)
       if (!b) continue
       const isFocus = n.id === focus
@@ -220,12 +162,15 @@ export function BrainGraph3D({
       b.core.material.emissive.set(isFocus ? color : near ? color : "#000000")
       b.core.material.emissiveIntensity = isFocus ? 0.55 : near ? 0.22 : 0.08
       b.core.material.opacity = opacity
-      b.halo.material.color.set(color)
-      b.halo.material.opacity = opacity * (isFocus ? 0.28 : near ? 0.18 : 0.1)
       const scale = isFocus ? 1.4 : near ? 1.18 : 1
-      b.core.scale.setScalar(scale)
-      b.halo.scale.setScalar(scale)
-      b.label.visible = isFocus || near
+      const radius = BRAIN_KIND_RADIUS[n.kind] ?? 3
+      b.core.scale.setScalar(radius * scale)
+      b.label.visible = isFocus || (near && neighbours.size <= 8) || (!focus && nodesRef.current.length <= 10)
+      b.label.text = n.title.length > 34 ? `${n.title.slice(0, 33)}…` : n.title
+      b.core.material.wireframe = false
+      if (n.status === "draft" || n.status === "conflict") {
+        b.core.material.wireframe = true
+      }
       b.label.material.opacity = opacity
     }
 
@@ -235,13 +180,33 @@ export function BrainGraph3D({
   const frameBrain = (ms: number) => {
     const g = graph.current
     if (!g) return
-    const home = brainCameraHome()
-    g.cameraPosition(home.position, home.lookAt, ms)
+    const visible = g.graphData().nodes
+    if (visible.length) {
+      // Library fit includes hidden label textures in its bounding box,
+      // making a small graph almost invisible. Frame node coordinates only.
+      const xs = visible.map((n) => n.x ?? 0)
+      const ys = visible.map((n) => n.y ?? 0)
+      const zs = visible.map((n) => n.z ?? 0)
+      const range = (values: number[]) => values.reduce(([lo, hi], v) => [Math.min(lo, v), Math.max(hi, v)], [Infinity, -Infinity])
+      const [xmin, xmax] = range(xs), [ymin, ymax] = range(ys), [zmin, zmax] = range(zs)
+      const center = { x: (xmin + xmax) / 2, y: (ymin + ymax) / 2, z: (zmin + zmax) / 2 }
+      const camera = g.camera() as THREE.PerspectiveCamera
+      const halfFov = Math.tan(camera.fov * Math.PI / 360)
+      const distance = Math.max(Math.max(80, xmax - xmin) / (2 * halfFov * camera.aspect * 0.65), Math.max(80, ymax - ymin) / (2 * halfFov * 0.65)) + (zmax - zmin) / 2
+      g.cameraPosition({ x: center.x, y: center.y, z: center.z + distance }, center, motion.current ? 0 : ms)
+    } else {
+      const home = brainCameraHome()
+      g.cameraPosition(home.position, home.lookAt, motion.current ? 0 : ms)
+    }
   }
 
   useEffect(() => {
     const el = host.current
     if (!el) return
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)")
+    motion.current = media.matches
+    const motionChanged = () => { motion.current = media.matches; applyLinkStyle() }
+    media.addEventListener("change", motionChanged)
     const builtMap = built.current
     const cacheMap = cache.current
 
@@ -253,10 +218,9 @@ export function BrainGraph3D({
     g.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
 
     const shared = {
-      core: new THREE.SphereGeometry(1, 24, 16),
-      halo: new THREE.SphereGeometry(1, 16, 12),
+      core: new THREE.SphereGeometry(1, 16, 12),
+      draft: new THREE.OctahedronGeometry(1),
     }
-    geos.current = shared
 
     const tone = () => {
       const css = getComputedStyle(document.documentElement)
@@ -268,10 +232,6 @@ export function BrainGraph3D({
     }
     let t = tone()
 
-    const cortexBuilt = buildCortex()
-    cortexBuilt.paint(t.dark)
-    cortex.current = cortexBuilt
-    g.scene().add(cortexBuilt.group)
     g.lights(graphLights(t.dark))
 
     g.backgroundColor(t.bg)
@@ -279,49 +239,39 @@ export function BrainGraph3D({
       .width(el.clientWidth)
       .height(el.clientHeight)
       .nodeThreeObject((n) => {
+        const existing = built.current.get(n.id)
+        if (existing?.core.parent) return existing.core.parent
         const r = BRAIN_KIND_RADIUS[n.kind] ?? 3
         const color = BRAIN_KIND_COLOR[n.kind] ?? BRAIN_KIND_COLOR.document
         const core = new THREE.Mesh(
-          shared.core,
+          n.status === "draft" || n.status === "conflict" ? shared.draft : shared.core,
           new THREE.MeshPhongMaterial({
             color,
             transparent: true,
             opacity: 1,
-            shininess: 36,
+            shininess: 8,
             specular: new THREE.Color("#ffffff"),
             emissive: color,
             emissiveIntensity: 0.08,
           }),
         )
         core.scale.setScalar(r)
-        const halo = new THREE.Mesh(
-          shared.halo,
-          new THREE.MeshPhongMaterial({
-            color,
-            transparent: true,
-            opacity: 0.12,
-            depthWrite: false,
-            shininess: 4,
-            emissive: color,
-            emissiveIntensity: 0.15,
-          }),
-        )
-        halo.scale.setScalar(r * 1.75)
         const label = new SpriteText(n.title.length > 34 ? `${n.title.slice(0, 33)}…` : n.title)
         label.material.depthWrite = false
+        label.material.depthTest = false
+        label.fontSize = 80
         label.material.transparent = true
         label.color = t.ink
         label.backgroundColor = t.dark ? "rgba(13,19,21,0.78)" : "rgba(255,255,255,0.88)"
         label.padding = 1.4
         label.borderRadius = 2.5
-        label.textHeight = n.kind === "document" ? 3.2 : 4.2
+        label.textHeight = n.kind === "document" ? 5 : 6
         label.position.y = -(r + 7)
         label.visible = false
         const group = new THREE.Group()
-        group.add(halo)
         group.add(core)
         group.add(label)
-        built.current.set(n.id, { core, halo, label })
+        built.current.set(n.id, { core, label })
         return group
       })
       .nodeLabel(() => "")
@@ -330,12 +280,7 @@ export function BrainGraph3D({
         const d = l.target as GNode
         return `${s.title} ${l.label} ${d.title}`
       })
-      .linkCurvature((l) => (l.type === "quoted_in" ? 0.18 : 0.32))
-      .linkCurveRotation((l) => {
-        const a = String((l.source as GNode).id)
-        const b = String((l.target as GNode).id)
-        return unitHash(`${a}|${b}`, 3) * Math.PI * 2
-      })
+      .linkCurvature(0)
       .linkDirectionalArrowLength((l) => (l.type === "quoted_in" ? 0 : 2.2))
       .linkDirectionalArrowRelPos(1)
       .onNodeHover((n) => {
@@ -358,6 +303,9 @@ export function BrainGraph3D({
     applyLinkStyle()
     frameBrain(0)
 
+    const visibility = () => { if (document.hidden) g.pauseAnimation(); else g.resumeAnimation() }
+    document.addEventListener("visibilitychange", visibility)
+    visibility()
     const ro = new ResizeObserver(() => {
       g.width(el.clientWidth).height(el.clientHeight)
     })
@@ -367,7 +315,6 @@ export function BrainGraph3D({
       t = tone()
       g.backgroundColor(t.bg)
       g.lights(graphLights(t.dark))
-      cortex.current?.paint(t.dark)
       for (const b of built.current.values()) {
         b.label.color = t.ink
         b.label.backgroundColor = t.dark ? "rgba(13,19,21,0.78)" : "rgba(255,255,255,0.88)"
@@ -377,16 +324,17 @@ export function BrainGraph3D({
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
 
     return () => {
+      media.removeEventListener("change", motionChanged)
+      document.removeEventListener("visibilitychange", visibility)
+      for (const node of builtMap.values()) disposeNode(node)
       ro.disconnect()
       mo.disconnect()
-      g.scene().remove(cortexBuilt.group)
-      cortexBuilt.dispose()
-      cortex.current = null
       shared.core.dispose()
-      shared.halo.dispose()
-      geos.current = null
+      shared.draft.dispose()
       g._destructor()
       graph.current = null
+      signature.current = ""
+      framed.current = false
       builtMap.clear()
       cacheMap.clear()
     }
@@ -396,6 +344,9 @@ export function BrainGraph3D({
   useEffect(() => {
     const g = graph.current
     if (!g) return
+    const nextSignature = JSON.stringify([nodes, edges, kindFilter])
+    if (nextSignature === signature.current) return
+    signature.current = nextSignature
     const layout = layoutBrainNodes(nodes, edges)
     const next = new Map<string, GNode>()
     for (const n of nodes) {
@@ -405,12 +356,9 @@ export function BrainGraph3D({
         prev.title = n.title
         prev.kind = n.kind
         prev.status = n.status
-        prev.x = p.x
-        prev.y = p.y
-        prev.z = p.z
-        prev.fx = p.x
-        prev.fy = p.y
-        prev.fz = p.z
+        // Existing nodes keep their place while new evidence arrives.
+        const mesh = built.current.get(n.id)
+        if (mesh) mesh.label.text = n.title.length > 34 ? `${n.title.slice(0, 33)}…` : n.title
         next.set(n.id, prev)
       } else {
         next.set(n.id, { ...n, x: p.x, y: p.y, z: p.z, fx: p.x, fy: p.y, fz: p.z })
@@ -418,7 +366,11 @@ export function BrainGraph3D({
     }
     cache.current = next
     for (const id of [...built.current.keys()]) {
-      if (!next.has(id)) built.current.delete(id)
+      if (!next.has(id)) {
+        const mesh = built.current.get(id)
+        if (mesh) disposeNode(mesh)
+        built.current.delete(id)
+      }
     }
     const visible = brainVisibleNodeIds(nodes, edges, kindFilter)
     const nodeList =
@@ -431,11 +383,12 @@ export function BrainGraph3D({
       })
       .map((e) => ({ source: e.from, target: e.to, type: e.type, label: e.label }))
     g.graphData({ nodes: nodeList, links })
-    if (!framed.current) {
-      frameBrain(0)
-      framed.current = true
-    }
-    const timers = [window.setTimeout(restyle, 40), window.setTimeout(restyle, 240)]
+    const firstFrame = !framed.current && nodeList.length > 0
+    if (firstFrame) framed.current = true
+    const timers = [window.setTimeout(restyle, 40), window.setTimeout(() => {
+      restyle()
+      if (firstFrame) frameBrain(0)
+    }, 240)]
     return () => timers.forEach((id) => window.clearTimeout(id))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, edges, kindFilter])
@@ -454,7 +407,7 @@ export function BrainGraph3D({
     <div
       ref={host}
       className="brain-graph h-full w-full"
-      aria-label="Interactive company knowledge graph shaped as a brain"
+      aria-label={growing ? "Company brain forming from extracted documents and discoveries" : "Interactive 3D company knowledge graph"}
       role="img"
     />
   )
