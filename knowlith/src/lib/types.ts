@@ -345,6 +345,8 @@ export interface BrainEdge {
   from: string
   to: string
   type: string
+  /** The owner's word for the arrow ("needs", "quoted in"), chosen on the server. */
+  label: string
 }
 
 export interface BrainAssistant {

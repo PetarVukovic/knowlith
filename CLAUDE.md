@@ -81,7 +81,7 @@ is the only copy of what somebody approved.
 Ctrl-C stops both. A Rust change needs a restart; a React change does not.
 
 ```sh
-cargo test --workspace         # 368 tests
+cargo test --workspace         # 370 tests
 cargo clippy --workspace       # 5 pre-existing warnings in lake and compiler
 cd knowlith && npx tsc --noEmit -p tsconfig.app.json && npx oxlint src
 ```

@@ -1097,12 +1097,16 @@ async fn brain(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
     // `pgrep` once per assistant and took a third of a second, during which
     // every other request — the work panel polling once a second among
     // them — waited on the mutex for a list of processes.
-    let (objects, edges) = {
+    let (objects, edges, names) = {
         let lake = state.lake.lock().map_err(failed)?;
-        (lake.objects().map_err(failed)?, lake.edges().map_err(failed)?)
+        (
+            lake.objects().map_err(failed)?,
+            lake.edges().map_err(failed)?,
+            lake.document_names().map_err(failed)?,
+        )
     };
 
-    let nodes: Vec<serde_json::Value> = objects
+    let mut nodes: Vec<serde_json::Value> = objects
         .iter()
         .filter(|o| o.status == ObjectStatus::Approved)
         .map(|o| {
@@ -1121,22 +1125,51 @@ async fn brain(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
         .map(|o| o.id.as_str())
         .collect();
 
-    let links: Vec<serde_json::Value> = edges
+    // The label is the sentence the owner reads on the edge. It is chosen
+    // here, once, so the map and the object page cannot disagree about
+    // what an arrow means.
+    let mut links: Vec<serde_json::Value> = edges
         .iter()
         .filter(|e| approved.contains(e.from_id.as_str()) && approved.contains(e.to_id.as_str()))
         .map(|e| {
-            serde_json::json!({
-                "from": e.from_id,
-                "to": e.to_id,
-                "type": match e.kind {
-                    knowlith_core::RelationType::DependsOn => "depends_on",
-                    knowlith_core::RelationType::DerivedFrom => "derived_from",
-                    knowlith_core::RelationType::UsedBy => "used_by",
-                    knowlith_core::RelationType::ConflictsWith => "conflicts_with",
-                },
-            })
+            let (kind, label) = match e.kind {
+                knowlith_core::RelationType::DependsOn => ("depends_on", "needs"),
+                knowlith_core::RelationType::DerivedFrom => ("derived_from", "comes from"),
+                knowlith_core::RelationType::UsedBy => ("used_by", "used by"),
+                knowlith_core::RelationType::ConflictsWith => ("conflicts_with", "disagrees with"),
+            };
+            serde_json::json!({ "from": e.from_id, "to": e.to_id, "type": kind, "label": label })
         })
         .collect();
+
+    // Documents appear only where something approved quotes them. A file
+    // nothing rests on is not part of what the company knows yet, and
+    // drawing it would show the owner a brain larger than the one that
+    // answers.
+    let mut quoted: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for object in objects.iter().filter(|o| o.status == ObjectStatus::Approved) {
+        let mut seen = std::collections::HashSet::new();
+        for evidence in &object.evidence {
+            if !seen.insert(evidence.document_id.as_str()) {
+                continue;
+            }
+            quoted.insert(evidence.document_id.as_str());
+            links.push(serde_json::json!({
+                "from": object.id,
+                "to": format!("doc:{}", evidence.document_id),
+                "type": "quoted_in",
+                "label": "quoted in",
+            }));
+        }
+    }
+    for document_id in quoted {
+        nodes.push(serde_json::json!({
+            "id": format!("doc:{document_id}"),
+            "title": names.get(document_id).cloned().unwrap_or_else(|| document_id.to_string()),
+            "kind": "document",
+            "status": "approved",
+        }));
+    }
 
     let assistants: Vec<serde_json::Value> = knowlith_desktop::status_all()
         .into_iter()

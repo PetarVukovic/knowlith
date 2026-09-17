@@ -15,3 +15,7 @@
 
 # The daemon API secret, written per machine.
 api.token
+
+# Local tooling artifacts — not part of the product.
+.codegraph/
+knowlith/.playwright-mcp/

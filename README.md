@@ -83,7 +83,8 @@ nothing.
 ## What you get
 
 **A company brain you can open.** Rules, prices, procedures and vocabulary,
-each with the passage they rest on.
+each with the passage they rest on — and a 3D map of how they hang together
+that lights up, node by node, as your assistant reads them.
 
 **A review queue only you can clear.** Duplicates, conflicts and open questions
 are named and held back. An undecided subject is never silently answered.

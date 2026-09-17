@@ -197,6 +197,44 @@ A job that finished with nothing to report says nothing. The hourly `recheck`
 would otherwise be the only line on an idle machine's panel, renewed every
 hour.
 
+## The company brain is a view, not a store
+
+`GET /api/brain` is rebuilt from the lake on every call. It has no table of
+its own, so it cannot drift from what the owner approved.
+
+What it contains is exactly what answers questions, and nothing wider:
+
+- **Approved objects only.** A candidate is not part of what the company knows
+  yet, so it is not drawn.
+- **Edges between two approved objects**, each carrying the sentence the owner
+  reads on the arrow — `needs`, `used by`, `comes from`, `disagrees with`. The
+  label is chosen once, on the server, so the map and the object page cannot
+  disagree about what an arrow means.
+- **Documents only where something approved quotes them**, joined by a
+  `quoted in` edge per object. A folder of two hundred files that produced
+  three rules shows three documents. Drawing the rest would show the owner a
+  brain larger than the one that answers.
+- The connected assistants, so a node can be opened in the tool the owner
+  already uses.
+
+The interface renders it with `3d-force-graph` on plain three.js — no React
+wrapper, because the wrappers lag React majors and the graph is a mutable
+scene, not a tree of components. The component mounts once and mutates: node
+objects are reused by id across polls so positions survive a refresh, and a
+highlight changes a material rather than rebuilding a mesh. Dragging nodes is
+off; the library's drag controls fire a synthetic `pointerup` without a
+pointer id that three's orbit controls cannot handle, and the owner's
+interactions are click and hover.
+
+**What lights up is what was read.** The chat beside the graph runs the
+owner's own CLI in print mode over a WebSocket. While a session is live the
+interface polls `GET /api/usage` and lights the objects the gateway recorded
+under that session's `tool_reads`. The glow is proof of use drawn on the map:
+it comes from the same rows as the Activity screen, never from the answer's
+text. There is one path for asking inside Knowlith — the print-mode chat —
+not a second interactive terminal doing the same job with a different failure
+mode.
+
 ## What updates by itself, and what the owner has to do
 
 Three different answers, because three different things can change.

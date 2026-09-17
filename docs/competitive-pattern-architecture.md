@@ -204,10 +204,10 @@ We do **not** invert day-one storage: queue, leases, evidence verification, and 
 ```text
 approved objects + relations (lake)
     → GET /api/brain  (rebuild each call; no second store)
-    → Company brain UI (nodes / edges)
+    → Company brain UI (3d-force-graph; documents only where something quotes them)
     → Ask AI on a node:
          desktop surface → Claude Desktop / ChatGPT / Cursor.app (outside)
-         terminal surface → Claude Code / Codex CLI / Cursor Agent (Terminal)
+         CLI surface     → print-mode chat over the WebSocket (Claude Code / Codex / Cursor Agent)
 ```
 
 The graph is derived, never authored by hand. Simple-mode Home stays claim-
@@ -218,7 +218,7 @@ opening a connected assistant against a node.
 
 ```text
 Home CTA → pick connected assistant by launch surface
-    → deep link (desktop) or Terminal session (CLI)
+    → deep link (desktop) or print-mode chat (CLI)
     → prompt: get_relevant_context + check_coverage
     → History proves reads; the model’s claim alone does not
 ```

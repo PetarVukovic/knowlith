@@ -1,80 +1,51 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
-import { Maximize2, Minimize2, Network, RefreshCw } from "lucide-react"
-import { CompanyChat, edgeKeysAmong, type ChatLit } from "@/components/CompanyChat"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
+import { ExternalLink, Loader2, Maximize2, Minimize2, Network, RefreshCw } from "lucide-react"
+import { CompanyChat, type ChatLit } from "@/components/CompanyChat"
 import { ResizeHandle, usePanelSize } from "@/components/Resizable"
 import { Button } from "@/components/ui/button"
 import { brain as brainApi } from "@/lib/api"
-import type { BrainNode, CompanyBrain, ObjectKind } from "@/lib/types"
+import type { BrainNode, CompanyBrain } from "@/lib/types"
 import { useApp } from "@/state/AppState"
 import { cn } from "@/lib/utils"
 
-type Pos = { x: number; y: number }
-type Selection =
-  | { kind: "node"; id: string }
-  | { kind: "edge"; from: string; to: string; type: string }
-  | null
+// three.js is the heaviest thing in the bundle and only this screen wants it.
+const BrainGraph3D = lazy(() =>
+  import("@/components/BrainGraph3D").then((m) => ({ default: m.BrainGraph3D })),
+)
 
-const VIEW_W = 1200
-const VIEW_H = 800
+const LEGEND = [
+  ["all", "All", "#94a3b8"],
+  ["rule", "Rules", "#3b82f6"],
+  ["process", "Processes", "#10b981"],
+  ["skill", "Skills", "#f59e0b"],
+  ["fact", "Terms", "#8b5cf6"],
+  ["document", "Documents", "#8b979c"],
+] as const
 
 /**
- * Interactive company brain: drag nodes freely, click edges. Ask AI is a
- * chat beside the map powered by the owner's local CLI (never a Knowlith→API
- * call). While the agent reads, those nodes and paths light up on the map.
+ * The company brain: every confirmed rule, process, term and skill, the
+ * documents they quote, and the arrows between them, in three dimensions.
+ * The chat beside it runs the owner's own CLI; what that assistant reads
+ * lights up on the map while it answers.
  */
 export function Brain() {
   const { companyName } = useApp()
   const navigate = useNavigate()
-  // Narrower default so the map keeps most of the viewport; drag to grow.
+  const [params, setParams] = useSearchParams()
   const side = usePanelSize("brain-side-v2", 340, 260, 640)
   const [data, setData] = useState<CompanyBrain | null>(null)
-  const [positions, setPositions] = useState<Map<string, Pos>>(new Map())
-  const [selection, setSelection] = useState<Selection>(null)
-  const [hoverId, setHoverId] = useState<string | null>(null)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
+  const [selectedId, setSelectedId] = useState<string | null>(params.get("focus"))
+  const [kindFilter, setKindFilter] = useState<string>("all")
   const [fullscreen, setFullscreen] = useState(false)
-
-  const drag = useRef<{
-    mode: "node" | "pan"
-    id?: string
-    /** Client pixels for pan; SVG world for node. */
-    startX: number
-    startY: number
-    origX: number
-    origY: number
-    moved: boolean
-  } | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-
-  const [kindFilter, setKindFilter] = useState<ObjectKind | "all">("all")
   const [litIds, setLitIds] = useState<string[]>([])
-  const [litEdges, setLitEdges] = useState<string[]>([])
+  const [resetSignal, setResetSignal] = useState(0)
+  const preferredAgent = params.get("agent")
 
-  const onChatLit = useCallback(
-    (lit: ChatLit) => {
-      setLitIds(lit.nodeIds)
-      if (data) {
-        setLitEdges(edgeKeysAmong(lit.nodeIds, data.edges))
-      } else {
-        setLitEdges([])
-      }
-    },
-    [data],
-  )
+  const onChatLit = useCallback((lit: ChatLit) => setLitIds(lit.nodeIds), [])
 
   const load = useCallback(async () => {
-    const next = await brainApi.get()
-    setData(next)
-    setPositions((prev) => {
-      const layout = layoutNodes(next.nodes)
-      const merged = new Map(layout)
-      for (const [id, pos] of prev) {
-        if (merged.has(id)) merged.set(id, pos)
-      }
-      return merged
-    })
+    setData(await brainApi.get())
   }, [])
 
   useEffect(() => {
@@ -92,78 +63,66 @@ export function Brain() {
     return () => window.removeEventListener("keydown", onKey)
   }, [fullscreen])
 
-  /** Screen → graph world (accounts for pan + zoom on the inner group). */
-  const clientToWorld = (clientX: number, clientY: number): Pos => {
-    const svg = svgRef.current
-    if (!svg) return { x: 0, y: 0 }
-    const rect = svg.getBoundingClientRect()
-    const viewX = ((clientX - rect.left) / rect.width) * VIEW_W
-    const viewY = ((clientY - rect.top) / rect.height) * VIEW_H
-    return {
-      x: (viewX - pan.x) / zoom,
-      y: (viewY - pan.y) / zoom,
+  const select = useCallback(
+    (node: BrainNode | null) => {
+      setSelectedId(node?.id ?? null)
+      // `?focus=` came from another screen; once the owner picks something
+      // else the address should not keep pointing at the old thing.
+      if (params.has("focus")) {
+        params.delete("focus")
+        setParams(params, { replace: true })
+      }
+    },
+    [params, setParams],
+  )
+
+  const open = useCallback(
+    (node: BrainNode) => {
+      if (node.kind === "document") return
+      navigate(
+        node.kind === "skill"
+          ? `/skills/${encodeURIComponent(node.id)}`
+          : `/workspace/${encodeURIComponent(node.id)}`,
+      )
+    },
+    [navigate],
+  )
+
+  const selected = useMemo(
+    () => (selectedId ? data?.nodes.find((n) => n.id === selectedId) ?? null : null),
+    [data, selectedId],
+  )
+  const around = useMemo(() => {
+    if (!selected || !data) return []
+    const title = (id: string) => data.nodes.find((n) => n.id === id)?.title ?? id
+    return data.edges
+      .filter((e) => e.from === selected.id || e.to === selected.id)
+      .map((e) =>
+        e.from === selected.id
+          ? { key: `${e.from}|${e.to}|${e.type}`, text: `${e.label} ${title(e.to)}`, id: e.to }
+          : { key: `${e.from}|${e.to}|${e.type}`, text: `${title(e.from)} ${e.label} this`, id: e.from },
+      )
+  }, [selected, data])
+
+  const counts = useMemo(() => {
+    const c = { objects: 0, documents: 0 }
+    for (const n of data?.nodes ?? []) {
+      if (n.kind === "document") c.documents += 1
+      else c.objects += 1
     }
-  }
-
-  const viewScale = () => {
-    const svg = svgRef.current
-    if (!svg) return 1
-    return VIEW_W / svg.getBoundingClientRect().width
-  }
-
-  const selectNode = (id: string) => {
-    setSelection({ kind: "node", id })
-  }
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    const d = drag.current
-    if (!d) return
-    if (d.mode === "node" && d.id) {
-      const cur = clientToWorld(e.clientX, e.clientY)
-      const dx = cur.x - d.startX
-      const dy = cur.y - d.startY
-      if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
-      setPositions((prev) => {
-        const next = new Map(prev)
-        next.set(d.id!, { x: d.origX + dx, y: d.origY + dy })
-        return next
-      })
-    } else if (d.mode === "pan") {
-      const scale = viewScale()
-      const dx = (e.clientX - d.startX) * scale
-      const dy = (e.clientY - d.startY) * scale
-      if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
-      setPan({ x: d.origX + dx, y: d.origY + dy })
-    }
-  }
-
-  const onPointerUp = () => {
-    drag.current = null
-  }
-
-  const selectedNode =
-    selection?.kind === "node" ? data?.nodes.find((n) => n.id === selection.id) ?? null : null
+    return c
+  }, [data])
 
   return (
     <div
       data-fill-screen
-      className={cn(
-        "flex min-h-0 w-full bg-bg",
-        fullscreen ? "fixed inset-0 z-50" : "h-full",
-      )}
+      className={cn("flex min-h-0 w-full bg-bg", fullscreen ? "fixed inset-0 z-50" : "h-full")}
     >
-      <div
-        className={cn(
-          "flex min-w-0 flex-1 flex-col",
-          fullscreen ? "px-0 pt-0" : "px-3 pt-3",
-        )}
-      >
+      <div className={cn("flex min-w-0 flex-1 flex-col", fullscreen ? "px-0 pt-0" : "px-3 pt-3")}>
         <div
           className={cn(
             "flex shrink-0 items-center gap-2",
-            fullscreen
-              ? "border-b border-line bg-surface px-3 py-1.5"
-              : "px-1 pb-2",
+            fullscreen ? "border-b border-line bg-surface px-3 py-1.5" : "px-1 pb-2",
           )}
         >
           <h1 className="flex min-w-0 items-center gap-1.5 text-[14px] font-semibold text-ink">
@@ -172,22 +131,16 @@ export function Brain() {
           </h1>
           {!fullscreen ? (
             <p className="hidden min-w-0 flex-1 truncate text-[12px] text-muted lg:block">
-              Click a node · ask beside the map — lit paths follow what the agent reads
+              {data && counts.objects > 0
+                ? `${counts.objects} confirmed ${counts.objects === 1 ? "item" : "items"} · ${counts.documents} ${counts.documents === 1 ? "document" : "documents"} quoted · drag to turn, scroll to zoom, click to pick, double-click to open`
+                : "Drag to turn, scroll to zoom, click to pick, double-click to open"}
             </p>
           ) : (
             <span className="min-w-0 flex-1" />
           )}
           <div className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setZoom(1)
-                setPan({ x: 0, y: 0 })
-                if (data) setPositions(layoutNodes(data.nodes))
-              }}
-            >
-              Reset
+            <Button variant="ghost" size="sm" onClick={() => setResetSignal((n) => n + 1)}>
+              Fit
             </Button>
             <Button variant="ghost" size="sm" onClick={() => void load()}>
               <RefreshCw className="size-3.5" />
@@ -220,211 +173,38 @@ export function Brain() {
             fullscreen ? "border-0" : "rounded-lg border border-line",
           )}
         >
-          {!data || data.nodes.length === 0 ? (
+          {!data ? (
+            <div className="grid h-full place-items-center text-faint">
+              <Loader2 className="size-4 animate-spin" />
+            </div>
+          ) : data.nodes.length === 0 ? (
             <div className="grid h-full place-items-center p-8 text-center text-[13px] text-muted">
-              No approved knowledge yet. Confirm items under For review and they
-              appear here.
+              No confirmed knowledge yet. Confirm items under For review and they appear here.
             </div>
           ) : (
-            <svg
-              ref={svgRef}
-              viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-              className="h-full w-full touch-none"
-              role="img"
-              aria-label="Interactive company knowledge graph"
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={() => {
-                onPointerUp()
-                setHoverId(null)
-              }}
-              onWheel={(e) => {
-                e.preventDefault()
-                setZoom((z) => Math.min(2.4, Math.max(0.45, z * (e.deltaY > 0 ? 0.92 : 1.08))))
-              }}
-              onPointerDown={(e) => {
-                if (e.target !== e.currentTarget && (e.target as Element).tagName !== "svg") return
-                drag.current = {
-                  mode: "pan",
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  origX: pan.x,
-                  origY: pan.y,
-                  moved: false,
-                }
-                e.currentTarget.setPointerCapture(e.pointerId)
-              }}
+            <Suspense
+              fallback={
+                <div className="grid h-full place-items-center text-faint">
+                  <Loader2 className="size-4 animate-spin" />
+                </div>
+              }
             >
-              <defs>
-                <filter id="brain-lit-glow" x="-80%" y="-80%" width="260%" height="260%">
-                  <feGaussianBlur stdDeviation="3.5" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-              </defs>
-              <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
-                <BrainSilhouette />
-                {(data.edges ?? []).map((edge) => {
-                  const a = positions.get(edge.from)
-                  const b = positions.get(edge.to)
-                  if (!a || !b) return null
-                  const active =
-                    selection?.kind === "edge" &&
-                    selection.from === edge.from &&
-                    selection.to === edge.to &&
-                    selection.type === edge.type
-                  const touched =
-                    selection?.kind === "node" &&
-                    (selection.id === edge.from || selection.id === edge.to)
-                  const lit = litEdges.includes(`${edge.from}|${edge.to}`)
-                  return (
-                    <g key={`${edge.from}-${edge.to}-${edge.type}`}>
-                      <line
-                        x1={a.x}
-                        y1={a.y}
-                        x2={b.x}
-                        y2={b.y}
-                        stroke="transparent"
-                        strokeWidth={14}
-                        className="cursor-pointer"
-                        onPointerDown={(e) => {
-                          e.stopPropagation()
-                          setSelection({
-                            kind: "edge",
-                            from: edge.from,
-                            to: edge.to,
-                            type: edge.type,
-                          })
-                        }}
-                      />
-                      <line
-                        x1={a.x}
-                        y1={a.y}
-                        x2={b.x}
-                        y2={b.y}
-                        stroke={
-                          lit
-                            ? "#f59e0b"
-                            : active
-                              ? "var(--color-accent, #2563eb)"
-                              : touched
-                                ? "#94a3b8"
-                                : "var(--color-line, #d4d4d4)"
-                        }
-                        strokeWidth={lit ? 3.2 : active ? 2.5 : touched ? 1.8 : 1.2}
-                        opacity={litIds.length > 0 && !lit ? 0.22 : 1}
-                        className={cn("pointer-events-none", lit && "brain-edge-lit")}
-                      />
-                    </g>
-                  )
-                })}
-
-                {(data.nodes ?? []).map((node) => {
-                  const pos = positions.get(node.id)
-                  if (!pos) return null
-                  const matches =
-                    kindFilter === "all" ||
-                    node.kind === kindFilter ||
-                    (kindFilter === "fact" && (node.kind === "term" || node.kind === "fact"))
-                  const active = selection?.kind === "node" && selection.id === node.id
-                  const hovered = hoverId === node.id
-                  const lit = litIds.includes(node.id)
-                  const showLabel = active || hovered || lit
-                  return (
-                    <g
-                      key={node.id}
-                      transform={`translate(${pos.x}, ${pos.y})`}
-                      opacity={matches ? (litIds.length > 0 && !lit ? 0.28 : 1) : 0.18}
-                      className="cursor-grab active:cursor-grabbing"
-                      onPointerEnter={() => setHoverId(node.id)}
-                      onPointerLeave={() =>
-                        setHoverId((cur) => (cur === node.id ? null : cur))
-                      }
-                      onPointerDown={(e) => {
-                        e.stopPropagation()
-                        const p = positions.get(node.id) ?? { x: 0, y: 0 }
-                        const start = clientToWorld(e.clientX, e.clientY)
-                        drag.current = {
-                          mode: "node",
-                          id: node.id,
-                          startX: start.x,
-                          startY: start.y,
-                          origX: p.x,
-                          origY: p.y,
-                          moved: false,
-                        }
-                        e.currentTarget.setPointerCapture(e.pointerId)
-                      }}
-                      onPointerUp={(e) => {
-                        const d = drag.current
-                        const wasDrag = d?.moved
-                        drag.current = null
-                        if (!wasDrag) {
-                          e.stopPropagation()
-                          selectNode(node.id)
-                        }
-                      }}
-                    >
-                      <circle
-                        r={lit ? 22 : active ? 20 : hovered ? 17 : 15}
-                        fill={kindFill(node.kind)}
-                        stroke={
-                          lit
-                            ? "#fbbf24"
-                            : active
-                              ? "var(--color-accent, #2563eb)"
-                              : hovered
-                                ? "#cbd5e1"
-                                : "#fff"
-                        }
-                        strokeWidth={lit ? 4 : active ? 3 : 2}
-                        className={lit ? "brain-node-lit" : undefined}
-                        filter={lit ? "url(#brain-lit-glow)" : undefined}
-                      />
-                      {showLabel ? (
-                        <g className="pointer-events-none">
-                          <rect
-                            x={-72}
-                            y={24}
-                            width={144}
-                            height={22}
-                            rx={4}
-                            fill="var(--color-surface, #fff)"
-                            stroke="var(--color-line, #d4d4d4)"
-                            strokeWidth={1}
-                            opacity={0.96}
-                          />
-                          <text
-                            y={39}
-                            textAnchor="middle"
-                            style={{
-                              fill: "var(--color-ink, #171717)",
-                              fontSize: 11,
-                              fontWeight: active ? 600 : 500,
-                            }}
-                          >
-                            {truncate(node.title, 22)}
-                          </text>
-                        </g>
-                      ) : null}
-                      <title>{node.title}</title>
-                    </g>
-                  )
-                })}
-              </g>
-            </svg>
+              <BrainGraph3D
+                nodes={data.nodes}
+                edges={data.edges}
+                litIds={litIds}
+                selectedId={selectedId}
+                kindFilter={kindFilter}
+                resetSignal={resetSignal}
+                onSelect={select}
+                onOpen={open}
+              />
+            </Suspense>
           )}
         </div>
       </div>
 
-      <ResizeHandle
-        panel={side}
-        edge="end"
-        label="Resize live terminal panel"
-        className="hidden md:block"
-      />
+      <ResizeHandle panel={side} edge="end" label="Resize chat panel" className="hidden md:block" />
 
       <aside
         className="flex shrink-0 flex-col border-l border-line bg-bg"
@@ -432,17 +212,8 @@ export function Brain() {
       >
         {data ? (
           <div className="shrink-0 border-b border-line px-3 py-2">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-faint">Index</div>
-            <ul className="mt-1.5 flex flex-wrap gap-1">
-              {(
-                [
-                  ["all", "All", "#94a3b8"],
-                  ["rule", "Rules", "#3b82f6"],
-                  ["process", "Processes", "#10b981"],
-                  ["skill", "Skills", "#f59e0b"],
-                  ["fact", "Terms", "#8b5cf6"],
-                ] as const
-              ).map(([id, label, color]) => {
+            <ul className="flex flex-wrap gap-1">
+              {LEGEND.map(([id, label, color]) => {
                 const active = kindFilter === id
                 return (
                   <li key={id}>
@@ -456,11 +227,7 @@ export function Brain() {
                           : "border-line text-muted hover:bg-surface-2",
                       )}
                     >
-                      <span
-                        className="size-1.5 rounded-full"
-                        style={{ background: color }}
-                        aria-hidden
-                      />
+                      <span className="size-1.5 rounded-full" style={{ background: color }} aria-hidden />
                       {label}
                     </button>
                   </li>
@@ -469,16 +236,65 @@ export function Brain() {
             </ul>
             {litIds.length > 0 ? (
               <p className="mt-2 text-[11.5px] text-pending">
-                {litIds.length} {litIds.length === 1 ? "spot" : "spots"} lit from the live answer
+                {litIds.length} {litIds.length === 1 ? "item" : "items"} read by the assistant so far
               </p>
             ) : null}
+          </div>
+        ) : null}
+
+        {selected ? (
+          <div className="shrink-0 border-b border-line px-3 py-2.5">
+            <div className="flex items-start gap-2">
+              <span
+                className="mt-1 size-2 shrink-0 rounded-full"
+                style={{ background: LEGEND.find(([id]) => id === selected.kind || (id === "fact" && selected.kind === "term"))?.[2] ?? "#94a3b8" }}
+                aria-hidden
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium text-ink">{selected.title}</div>
+                <div className="text-[11.5px] text-faint">
+                  {selected.kind === "document"
+                    ? "Document — quoted by what it is joined to"
+                    : selected.kind === "term"
+                      ? "Business term"
+                      : selected.kind[0].toUpperCase() + selected.kind.slice(1)}
+                </div>
+              </div>
+              {selected.kind !== "document" ? (
+                <Button size="sm" variant="subtle" onClick={() => open(selected)}>
+                  <ExternalLink className="size-3.5" />
+                  Open
+                </Button>
+              ) : null}
+            </div>
+            {around.length > 0 ? (
+              <ul className="mt-2 grid gap-1">
+                {around.slice(0, 8).map((a) => (
+                  <li key={a.key}>
+                    <button
+                      type="button"
+                      className="w-full truncate text-left text-[12px] text-muted hover:text-ink"
+                      onClick={() => setSelectedId(a.id)}
+                    >
+                      {a.text}
+                    </button>
+                  </li>
+                ))}
+                {around.length > 8 ? (
+                  <li className="text-[11.5px] text-faint">and {around.length - 8} more</li>
+                ) : null}
+              </ul>
+            ) : (
+              <p className="mt-2 text-[12px] text-faint">Joined to nothing else yet.</p>
+            )}
           </div>
         ) : null}
 
         <div className="min-h-0 flex-1">
           <CompanyChat
             companyName={companyName}
-            focusNode={selectedNode}
+            focusNode={selected && selected.kind !== "document" ? selected : null}
+            preferredAgent={preferredAgent}
             onLit={onChatLit}
             onNeedsConnect={() => navigate("/connect")}
           />
@@ -486,148 +302,4 @@ export function Brain() {
       </aside>
     </div>
   )
-}
-
-function BrainSilhouette() {
-  const cx = VIEW_W / 2
-  const cy = VIEW_H / 2 + 10
-  // Top-down brain outline: two lobes, midline fissure, rounded occiput.
-  const d = [
-    `M ${cx} ${cy - 268}`,
-    `C ${cx - 70} ${cy - 275}, ${cx - 200} ${cy - 240}, ${cx - 310} ${cy - 140}`,
-    `C ${cx - 380} ${cy - 40}, ${cx - 390} ${cy + 80}, ${cx - 340} ${cy + 180}`,
-    `C ${cx - 290} ${cy + 255}, ${cx - 160} ${cy + 285}, ${cx - 40} ${cy + 250}`,
-    `C ${cx - 12} ${cy + 220}, ${cx + 12} ${cy + 220}, ${cx + 40} ${cy + 250}`,
-    `C ${cx + 160} ${cy + 285}, ${cx + 290} ${cy + 255}, ${cx + 340} ${cy + 180}`,
-    `C ${cx + 390} ${cy + 80}, ${cx + 380} ${cy - 40}, ${cx + 310} ${cy - 140}`,
-    `C ${cx + 200} ${cy - 240}, ${cx + 70} ${cy - 275}, ${cx} ${cy - 268}`,
-    "Z",
-  ].join(" ")
-  const fissure = `M ${cx} ${cy - 200} C ${cx - 8} ${cy - 40}, ${cx + 8} ${cy + 60}, ${cx} ${cy + 210}`
-  return (
-    <g aria-hidden className="pointer-events-none">
-      <path
-        d={d}
-        fill="var(--color-accent-soft, #eff6ff)"
-        fillOpacity={0.55}
-        stroke="var(--color-line, #d4d4d4)"
-        strokeWidth={1.5}
-      />
-      <path
-        d={fissure}
-        fill="none"
-        stroke="var(--color-line, #d4d4d4)"
-        strokeWidth={1.2}
-        strokeDasharray="4 6"
-        opacity={0.7}
-      />
-      <ellipse
-        cx={cx - 150}
-        cy={cy - 10}
-        rx={150}
-        ry={170}
-        fill="var(--color-accent, #2563eb)"
-        fillOpacity={0.03}
-      />
-      <ellipse
-        cx={cx + 150}
-        cy={cy - 10}
-        rx={150}
-        ry={170}
-        fill="var(--color-accent, #2563eb)"
-        fillOpacity={0.03}
-      />
-    </g>
-  )
-}
-
-/**
- * Packs nodes into a brain-shaped field (two lobes + denser core), not a ring.
- *
- * Placement is deterministic from the node id so refresh does not reshuffle
- * the map under the owner's hands.
- */
-function layoutNodes(nodes: BrainNode[]): Map<string, Pos> {
-  const map = new Map<string, Pos>()
-  const n = nodes.length
-  if (n === 0) return map
-
-  const cx = VIEW_W / 2
-  const cy = VIEW_H / 2 + 10
-  const rx = Math.min(320, 120 + n * 4)
-  const ry = Math.min(250, 100 + n * 3.2)
-
-  const lobeOf = (kind: string): number => {
-    switch (kind) {
-      case "rule":
-      case "term":
-        return -1
-      case "process":
-      case "skill":
-        return 1
-      default:
-        return 0
-    }
-  }
-  const ordered = [...nodes].sort((a, b) => {
-    const la = lobeOf(a.kind) - lobeOf(b.kind)
-    if (la !== 0) return la
-    return a.title.localeCompare(b.title)
-  })
-
-  const golden = Math.PI * (3 - Math.sqrt(5))
-  ordered.forEach((node, i) => {
-    const lobe = lobeOf(node.kind)
-    const t = (i + 0.5) / n
-    const r = Math.sqrt(t)
-    const theta = i * golden + (lobe < 0 ? -0.35 : lobe > 0 ? 0.35 : 0)
-    let ux = r * Math.cos(theta)
-    let uy = r * Math.sin(theta)
-
-    ux = ux * 0.72 + lobe * 0.38
-    const fissure = Math.tanh(ux * 10) * 0.1
-    ux += fissure
-
-    const midWidth = 1 + 0.22 * Math.cos(uy * Math.PI * 0.9)
-    const frontal = 1 - 0.14 * Math.max(0, -uy)
-    const occipital = 1 - 0.06 * Math.max(0, uy)
-
-    const j = jitter(node.id)
-    const x = cx + (ux * midWidth * frontal + j.x * 0.04) * rx
-    const y = cy + (uy * occipital + j.y * 0.04) * ry
-    map.set(node.id, { x, y })
-  })
-  return map
-}
-
-/** [-1,1] pair from id — same id always lands in the same place. */
-function jitter(id: string): Pos {
-  let h = 2166136261
-  for (let i = 0; i < id.length; i++) {
-    h ^= id.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  const x = ((h >>> 0) % 2000) / 1000 - 1
-  const y = ((h >>> 16) % 2000) / 1000 - 1
-  return { x, y }
-}
-
-function kindFill(kind: string): string {
-  switch (kind) {
-    case "rule":
-      return "#3b82f6"
-    case "process":
-      return "#10b981"
-    case "skill":
-      return "#f59e0b"
-    case "term":
-    case "fact":
-      return "#8b5cf6"
-    default:
-      return "#94a3b8"
-  }
-}
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
