@@ -326,25 +326,17 @@ impl Worker {
         // so a pass over eleven objects is thrown away by the pass over
         // twelve. It waits for the compile queue to drain, and then only
         // runs if the set actually grew since the last time.
-        if self.lake.pending_of_kind(KIND_COMPILE)? == 0
-            && self.lake.pending_of_kind(KIND_SETTLE)? == 0
-        {
-            let objects = self.lake.object_ids(None)?.len();
-            let fingerprint = self.lake.knowledge_fingerprint().unwrap_or_default();
-            let related_fingerprint = self
-                .lake
-                .setting("related_fingerprint")?
-                .unwrap_or_default();
-            if objects > 1 && fingerprint != related_fingerprint && enqueue_relating(&self.lake)? {
-                queued += 1;
-            }
+        if try_enqueue_relate_if_due(&self.lake)? {
+            queued += 1;
         }
 
-        // Build supervisor: after reading and relating, synthesise canonical
-        // knowledge and open the owner confirmation quiz.
+        // Build supervisor: after reading (and relating, unless deferred).
+        // When relate is deferred until after the build quiz, do not wait for
+        // a relate job that has not been queued yet.
+        let relate_done = self.lake.pending_of_kind(KIND_RELATE)? == 0;
         if self.lake.pending_of_kind(KIND_COMPILE)? == 0
             && self.lake.pending_of_kind(KIND_SETTLE)? == 0
-            && self.lake.pending_of_kind(KIND_RELATE)? == 0
+            && relate_done
         {
             let docs = self.lake.documents().map(|d| d.len()).unwrap_or(0);
             let supervised_at: i64 = self
@@ -1020,7 +1012,7 @@ pub fn enqueue_skill_drafting(lake: &Lake) -> Result<bool> {
 ///
 /// Keyed on how many objects exist, so asking twice with nothing new is one
 /// job, and a folder that grew is new work.
-pub fn enqueue_relating(lake: &Lake) -> Result<bool> {
+fn enqueue_relating(lake: &Lake) -> Result<bool> {
     let fingerprint = lake.knowledge_fingerprint().unwrap_or_default();
     Ok(lake.enqueue(&NewJob {
         kind: KIND_RELATE.into(),
@@ -1028,6 +1020,26 @@ pub fn enqueue_relating(lake: &Lake) -> Result<bool> {
         idempotency_key: format!("{KIND_RELATE}:{fingerprint}"),
         priority: PRIORITY_NORMAL,
     })?)
+}
+
+/// Queues relate when compile has settled and policy allows it.
+pub fn try_enqueue_relate_if_due(lake: &Lake) -> Result<bool> {
+    if lake.pending_of_kind(KIND_COMPILE)? > 0 || lake.pending_of_kind(KIND_SETTLE)? > 0 {
+        return Ok(false);
+    }
+    if !lake.may_enqueue_relate()? {
+        return Ok(false);
+    }
+    let objects = lake.object_ids(None)?.len();
+    if objects <= 1 {
+        return Ok(false);
+    }
+    let fingerprint = lake.knowledge_fingerprint().unwrap_or_default();
+    let related_fingerprint = lake.setting("related_fingerprint")?.unwrap_or_default();
+    if fingerprint == related_fingerprint {
+        return Ok(false);
+    }
+    enqueue_relating(lake)
 }
 
 pub fn enqueue_supervise(lake: &Lake, document_count: usize) -> Result<bool> {

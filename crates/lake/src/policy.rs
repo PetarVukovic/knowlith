@@ -73,6 +73,17 @@ pub struct Policy {
     /// Documents packed into one CLI invoke.
     #[serde(default = "default_compile_batch")]
     pub compile_batch_size: usize,
+    /// Run the relate pass only after the owner confirms the build quiz.
+    ///
+    /// While false, relate still runs right after compile and settle — which
+    /// blocks the build supervisor on a whole-folder model call before the
+    /// owner sees the quiz.
+    #[serde(default = "default_relate_after_build")]
+    pub relate_after_build: bool,
+}
+
+fn default_relate_after_build() -> bool {
+    true
 }
 
 fn default_engine() -> String {
@@ -96,6 +107,7 @@ impl Default for Policy {
             engine: default_engine(),
             compile_workers: DEFAULT_COMPILE_WORKERS,
             compile_batch_size: DEFAULT_COMPILE_BATCH,
+            relate_after_build: default_relate_after_build(),
         }
     }
 }
@@ -248,6 +260,7 @@ mod tests {
             engine: "cursor-agent".into(),
             compile_workers: 3,
             compile_batch_size: 12,
+            relate_after_build: true,
         };
         lake.set_policy(&mine).unwrap();
         assert_eq!(lake.policy(), mine);
@@ -262,6 +275,12 @@ mod tests {
         assert_eq!(raw.engine, "auto");
         assert_eq!(raw.compile_workers, DEFAULT_COMPILE_WORKERS);
         assert_eq!(raw.compile_batch_size, DEFAULT_COMPILE_BATCH);
+        assert!(raw.relate_after_build);
+    }
+
+    #[test]
+    fn relate_after_build_defaults_on() {
+        assert!(Policy::default().relate_after_build);
     }
 
     #[test]

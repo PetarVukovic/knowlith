@@ -247,3 +247,16 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* 3d-force-graph injects a canvas plus a nav-info strip. The canvas must
+   fill the host or the cortex sits in a letterboxed hole; the strip is a
+   library credit the owner does not need. */
+.brain-graph {
+  position: relative;
+}
+.brain-graph canvas {
+  display: block;
+}
+.brain-graph .scene-nav-info {
+  display: none;
+}

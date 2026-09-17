@@ -1,21 +1,13 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AppWindow, ExternalLink, FileText, Loader2, Plug, Terminal } from "lucide-react"
+import { AppWindow, ExternalLink, FileText, Loader2, Plug, Search, Terminal } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { failed, tools as toolsApi } from "@/lib/api"
 import { objectTryPrompt } from "@/lib/askAi"
-import { brainDocumentLakeId } from "@/lib/brainGraph"
+import { BRAIN_KIND_COLOR, BRAIN_LEGEND, brainDocumentLakeId, brainKindMatches } from "@/lib/brainGraph"
 import type { AiTool, BrainAssistant, BrainEdge, BrainNode, ObjectKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
-
-const LEGEND = [
-  ["all", "All", "#94a3b8"],
-  ["rule", "Rules", "#3b82f6"],
-  ["process", "Processes", "#10b981"],
-  ["skill", "Skills", "#f59e0b"],
-  ["fact", "Terms", "#8b5cf6"],
-  ["document", "Documents", "#8b979c"],
-] as const
 
 function asObjectKind(kind: string): ObjectKind {
   if (kind === "rule" || kind === "process" || kind === "skill" || kind === "term" || kind === "fact") {
@@ -24,30 +16,42 @@ function asObjectKind(kind: string): ObjectKind {
   return "rule"
 }
 
+function kindLabel(kind: string): string {
+  if (kind === "document") return "Document"
+  if (kind === "term" || kind === "fact") return "Business term"
+  return kind[0].toUpperCase() + kind.slice(1)
+}
+
+function kindColor(kind: string): string {
+  if (kind === "term") return BRAIN_KIND_COLOR.fact
+  return BRAIN_KIND_COLOR[kind] ?? BRAIN_KIND_COLOR.document
+}
+
 /**
- * Detail beside the brain map: filters, the selected node, its connections,
- * and buttons that open the owner's connected AI with a prepared question.
+ * Detail beside the brain map: the selected node, its connections, a list of
+ * everything currently on the cortex, and buttons that open the owner's
+ * connected AI with a prepared question.
  */
 export function BrainInspector({
   companyName,
   kindFilter,
-  onKindFilter,
   selected,
   edges,
   nodes,
   assistants,
   onSelectId,
+  onClear,
   onOpen,
   onOpenDocument,
 }: {
   companyName: string
   kindFilter: string
-  onKindFilter: (kind: string) => void
   selected: BrainNode | null
   edges: BrainEdge[]
   nodes: BrainNode[]
   assistants: BrainAssistant[]
   onSelectId: (id: string) => void
+  onClear: () => void
   onOpen: (node: BrainNode) => void
   onOpenDocument?: (documentId: string) => void
 }) {
@@ -55,19 +59,11 @@ export function BrainInspector({
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [tools, setTools] = useState<AiTool[] | null>(null)
+  const [query, setQuery] = useState("")
 
   useEffect(() => {
     void toolsApi.list().then(setTools)
   }, [])
-
-  const kindCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: nodes.length }
-    for (const n of nodes) {
-      const key = n.kind === "term" ? "fact" : n.kind
-      counts[key] = (counts[key] ?? 0) + 1
-    }
-    return counts
-  }, [nodes])
 
   const titleOf = (id: string) => nodes.find((n) => n.id === id)?.title ?? id
 
@@ -78,9 +74,17 @@ export function BrainInspector({
           .filter((e) => e.from === selected.id || e.to === selected.id)
           .map((e) =>
             e.from === selected.id
-              ? { key: `${e.from}|${e.to}|${e.type}`, text: `${e.label} ${titleOf(e.to)}`, id: e.to, label: e.label }
-              : { key: `${e.from}|${e.to}|${e.type}`, text: `${titleOf(e.from)} ${e.label} this`, id: e.from, label: e.label },
+              ? { key: `${e.from}|${e.to}|${e.type}`, text: `${e.label} ${titleOf(e.to)}`, id: e.to }
+              : { key: `${e.from}|${e.to}|${e.type}`, text: `${titleOf(e.from)} ${e.label} this`, id: e.from },
           )
+
+  const listed = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return nodes
+      .filter((n) => brainKindMatches(kindFilter, n.kind))
+      .filter((n) => (q ? n.title.toLowerCase().includes(q) : true))
+      .sort((a, b) => a.title.localeCompare(b.title))
+  }, [nodes, kindFilter, query])
 
   const launch = async (slug: string, connected: boolean) => {
     if (!selected || selected.kind === "document") return
@@ -124,47 +128,16 @@ export function BrainInspector({
       }))
   }, [tools, assistants])
 
+  const filterName = BRAIN_LEGEND.find(([id]) => id === kindFilter)?.[1]?.toLowerCase() ?? "items"
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-line px-3 py-2">
-        <ul className="flex flex-wrap gap-1">
-          {LEGEND.map(([id, label, color]) => {
-            const active = kindFilter === id
-            const count = kindCounts[id] ?? 0
-            return (
-              <li key={id}>
-                <button
-                  type="button"
-                  onClick={() => onKindFilter(id)}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11.5px]",
-                    active
-                      ? "border-accent bg-accent-soft text-ink"
-                      : "border-line text-muted hover:bg-surface-2",
-                  )}
-                >
-                  <span className="size-1.5 rounded-full" style={{ background: color }} aria-hidden />
-                  {label}
-                  {id !== "all" && count > 0 ? (
-                    <span className="tabular text-[10.5px] text-faint">{count}</span>
-                  ) : null}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      </div>
-
       {selected ? (
-        <div className="shrink-0 border-b border-line px-3 py-2.5">
+        <div className="shrink-0 border-b border-line px-3 py-3">
           <div className="flex items-start gap-2">
             <span
-              className="mt-1 size-2 shrink-0 rounded-full"
-              style={{
-                background:
-                  LEGEND.find(([id]) => id === selected.kind || (id === "fact" && selected.kind === "term"))?.[2] ??
-                  "#94a3b8",
-              }}
+              className="mt-1.5 size-2 shrink-0 rounded-full"
+              style={{ background: kindColor(selected.kind) }}
               aria-hidden
             />
             <div className="min-w-0 flex-1">
@@ -172,9 +145,7 @@ export function BrainInspector({
               <div className="text-[11.5px] text-faint">
                 {selected.kind === "document"
                   ? "Document — quoted by what it is joined to"
-                  : selected.kind === "term"
-                    ? "Business term"
-                    : selected.kind[0].toUpperCase() + selected.kind.slice(1)}
+                  : kindLabel(selected.kind)}
               </div>
             </div>
             {selected.kind === "document" ? (
@@ -198,8 +169,8 @@ export function BrainInspector({
           </div>
 
           {around.length > 0 ? (
-            <ul className="mt-2.5 grid gap-1">
-              <li className="text-[11px] font-medium uppercase tracking-wide text-faint">
+            <ul className="mt-2.5 grid gap-0.5">
+              <li className="px-1.5 text-[12px] text-faint">
                 {around.length} {around.length === 1 ? "connection" : "connections"}
               </li>
               {around.map((a) => (
@@ -215,12 +186,12 @@ export function BrainInspector({
               ))}
             </ul>
           ) : (
-            <p className="mt-2 text-[12px] text-faint">No connections yet.</p>
+            <p className="mt-2 px-1.5 text-[12px] text-faint">No connections yet.</p>
           )}
 
           {selected.kind !== "document" ? (
             <div className="mt-3 border-t border-line pt-3">
-              <p className="text-[11.5px] font-medium text-ink">Continue in your AI</p>
+              <p className="text-[12.5px] font-medium text-ink">Continue in your AI</p>
               <p className="mt-0.5 text-[11.5px] leading-snug text-muted">
                 Desktop apps open in their own window. CLIs open a small separate terminal on your Mac or PC — not
                 inside Knowlith. MCP must be connected first.
@@ -265,22 +236,66 @@ export function BrainInspector({
               ) : null}
             </div>
           ) : null}
+
+          <Button className="mt-3" size="sm" variant="ghost" onClick={onClear}>
+            Show all
+          </Button>
         </div>
       ) : (
-        <div className="shrink-0 border-b border-line px-3 py-4 text-[12.5px] leading-relaxed text-muted">
+        <div className="shrink-0 border-b border-line px-3 py-3 text-[12.5px] leading-relaxed text-muted">
           {kindFilter === "all" ? (
-            <>Click a node to see what it connects to. Double-click to open the full entry.</>
+            <>Click a node on the brain to see what it connects to. Double-click to open the full entry.</>
           ) : (
             <>
-              Showing {kindCounts[kindFilter] ?? 0}{" "}
-              {LEGEND.find(([id]) => id === kindFilter)?.[1]?.toLowerCase() ?? "nodes"}. Click one to inspect it or
-              continue in your AI.
+              Showing {listed.length} {filterName}. Click one on the map or in the list.
             </>
           )}
         </div>
       )}
 
-      <div className="min-h-0 flex-1" />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="shrink-0 px-3 pt-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
+            <Input
+              className="h-8 pl-8 text-[12.5px]"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find on the brain…"
+              aria-label="Find on the brain"
+            />
+          </div>
+        </div>
+        <ul className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+          {listed.length === 0 ? (
+            <li className="px-2 py-3 text-[12px] text-faint">Nothing matches.</li>
+          ) : (
+            listed.map((n) => {
+              const active = selected?.id === n.id
+              return (
+                <li key={n.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectId(n.id)}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left",
+                      active ? "bg-accent-soft text-ink" : "text-muted hover:bg-surface-2 hover:text-ink",
+                    )}
+                  >
+                    <span
+                      className="size-1.5 shrink-0 rounded-full"
+                      style={{ background: kindColor(n.kind) }}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[12.5px]">{n.title}</span>
+                    <span className="shrink-0 text-[10.5px] text-faint">{kindLabel(n.kind)}</span>
+                  </button>
+                </li>
+              )
+            })
+          )}
+        </ul>
+      </div>
     </div>
   )
 }

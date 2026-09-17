@@ -1920,6 +1920,7 @@ async fn confirm_build_quiz_route(
     let mut lake = state.lake.lock().map_err(failed)?;
     knowlith_supervisor::confirm_quiz(&mut lake, &body.quiz_id, &body.approved_object_ids)
         .map_err(failed)?;
+    let _ = knowlith_worker::try_enqueue_relate_if_due(&lake).map_err(failed)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 

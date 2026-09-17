@@ -237,6 +237,28 @@ impl Lake {
         Ok(())
     }
 
+    /// Whether a relate job may be queued now.
+    ///
+    /// With [`Policy::relate_after_build`], dependency edges wait until the
+    /// owner has confirmed the build quiz so the supervisor is not blocked
+    /// behind a whole-folder model pass.
+    pub fn may_enqueue_relate(&self) -> Result<bool> {
+        if !self.policy().relate_after_build {
+            return Ok(true);
+        }
+        match self.build_phase()? {
+            Some(phase) if phase == "complete" => Ok(true),
+            Some(phase) if phase == "active" || phase == "quiz_pending" => Ok(false),
+            _ => {
+                if let Some(quiz) = self.build_quiz()? {
+                    Ok(quiz.state == "confirmed")
+                } else {
+                    Ok(true)
+                }
+            }
+        }
+    }
+
     /// Marks an entity row as owner-confirmed from the build quiz.
     pub fn approve_entity(&self, id: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
@@ -254,5 +276,38 @@ impl Lake {
             rusqlite::params![id, now],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy::Policy;
+
+    #[test]
+    fn relate_waits_for_build_quiz_when_deferred() {
+        let lake = Lake::in_memory().unwrap();
+        lake.set_policy(&Policy {
+            relate_after_build: true,
+            ..Policy::default()
+        })
+        .unwrap();
+        lake.set_build_phase("quiz_pending").unwrap();
+        assert!(!lake.may_enqueue_relate().unwrap());
+
+        lake.set_build_phase("complete").unwrap();
+        assert!(lake.may_enqueue_relate().unwrap());
+    }
+
+    #[test]
+    fn relate_runs_after_settle_when_not_deferred() {
+        let lake = Lake::in_memory().unwrap();
+        lake.set_policy(&Policy {
+            relate_after_build: false,
+            ..Policy::default()
+        })
+        .unwrap();
+        lake.set_build_phase("quiz_pending").unwrap();
+        assert!(lake.may_enqueue_relate().unwrap());
     }
 }
