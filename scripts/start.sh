@@ -109,17 +109,44 @@ api -X PUT -H 'Content-Type: application/json' \
   -d "{\"name\":\"$COMPANY_NAME\",\"profile\":\"$COMPANY_PROFILE\"}" \
   "$BASE/api/company" >/dev/null
 
+SOURCE_ID=""
 if [ "$WITH_DEMO" = "1" ]; then
   step 'Demo source'
   mkdir -p "$DEMO"
   cp "$ROOT/fixtures/knowlith-demo/invoices/"*.md "$DEMO/" 2>/dev/null || true
-  api -X POST -H 'Content-Type: application/json' \
+  # Rescan skips files whose mtime is <3s old (write-settle). Copying here
+  # and posting the source in the same second leaves every file "still being
+  # written" and the lake stays at zero documents.
+  say "waiting for write-settle on copied files…"
+  sleep 4
+  SOURCE_ID=$(api -X POST -H 'Content-Type: application/json' \
     -d "{\"path\":\"$DEMO\",\"name\":\"Demo invoices\",\"processor\":\"$ENGINE\"}" \
-    "$BASE/api/sources" | python3 -m json.tool
+    "$BASE/api/sources" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+  say "source id: $SOURCE_ID"
+
+  step 'Waiting for documents to land in the lake'
+  for i in $(seq 1 90); do
+    HEALTH=$(api "$BASE/api/health")
+    DOCS=$(echo "$HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('documents',0))")
+    WORK=$(api "$BASE/api/work")
+    STAGE=$(echo "$WORK" | python3 -c "import json,sys; print(json.load(sys.stdin).get('stage',''))")
+    DOING=$(echo "$WORK" | python3 -c "import json,sys; print(json.load(sys.stdin).get('doing',''))")
+    say "[$i] documents=$DOCS stage=$STAGE — $DOING"
+    if [ "$DOCS" -gt 0 ] && [ "$STAGE" = "idle" ]; then
+      break
+    fi
+    if [ "$STAGE" = "idle" ] && [ "$DOCS" -eq 0 ] && [ "$i" -eq 8 ]; then
+      say "re-queueing rescan (first pass may have hit write-settle)"
+      api -X POST "$BASE/api/sources/$SOURCE_ID/rescan" >/dev/null
+    fi
+    sleep 5
+  done
 fi
 
 step 'Opening UI fullscreen'
-open_fullscreen "$BASE"
+OPEN_URL="$BASE/onboarding"
+[ "$FRESH" = "1" ] || OPEN_URL="$BASE"
+open_fullscreen "$OPEN_URL"
 
 printf '\n  Ctrl-C stops the daemon.\n'
 printf '  Work panel: %s\n' "$BASE"
