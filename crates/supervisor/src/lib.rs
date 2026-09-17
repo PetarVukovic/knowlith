@@ -5,14 +5,18 @@ mod chunk;
 mod cluster;
 mod session;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
+#[cfg(test)]
+use std::collections::BTreeMap;
 
 use chrono::Utc;
 use knowlith_core::{
     locate, Confidence, ContextObject, Evidence, ObjectKind, ObjectStatus, Subtype,
 };
-use knowlith_engine::Engine;
-use knowlith_lake::{CommunityRow, EntityRow, Lake, QuizEvidence, QuizQuestion};
+use knowlith_engine::{Engine, Request};
+
+use knowlith_lake::{EntityRow, Lake, QuizEvidence, QuizQuestion};
+#[cfg(test)]
 use regex::Regex;
 use serde::Deserialize;
 
@@ -176,22 +180,40 @@ pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<Run
     }
     let communities = lake.communities().map_err(|e| e.to_string())?;
 
-    let mut session = Session::load(lake, session_id)?;
-    let corpus = build_corpus(&documents, &communities, &company)?;
-    session.record(lake, "user", &corpus)?;
-
-    let reply = session.ask(
-        engine,
-        "Synthesise entities, canonical company knowledge, and a confirmation quiz.",
-        INSTRUCTIONS,
-        Some(OUTPUT_SCHEMA),
-    )?;
-    session.record(lake, "assistant", &reply)?;
-
-    let parsed: Output = parse_json(&reply)?;
+    let mut parsed = Output { entities: vec![], canonical: vec![], quiz: vec![] };
+    let batches = build_batches(&documents, &company)?;
+    let total = batches.len();
+    for (index, input) in batches.into_iter().enumerate() {
+        // The key includes all model-visible context. A new session can reuse
+        // finished work without inheriting an ever-growing conversation.
+        let request = Request::new("supervisor", INSTRUCTIONS, input).with_schema(OUTPUT_SCHEMA);
+        let key = format!("supervisor:v2:{}:{}", engine.name(), knowlith_engine::cassette_key(&request));
+        let cached = lake.setting(&key).map_err(|e| e.to_string())?;
+        let (reply, batch) = if let Some(reply) = cached.filter(|s| parse_json(s).is_ok()) {
+            let batch = parse_json(&reply)?;
+            (reply, batch)
+        } else {
+            let reply = engine.run(&request).map_err(|e| e.to_string())?.text;
+            let batch = parse_json(&reply)?;
+            lake.set_setting(&key, &reply).map_err(|e| e.to_string())?;
+            (reply, batch)
+        };
+        lake.append_supervisor_turn(session_id, "checkpoint", &format!("{key}: {} bytes", reply.len()))
+            .map_err(|e| e.to_string())?;
+        lake.set_setting("build_progress", &serde_json::json!({"done": index + 1, "total": total}).to_string())
+            .map_err(|e| e.to_string())?;
+        parsed.entities.extend(batch.entities);
+        parsed.canonical.extend(batch.canonical);
+        parsed.quiz.extend(batch.quiz);
+    }
     let now = Utc::now().to_rfc3339();
 
+    let existing_entities = lake.entities().map_err(|e| e.to_string())?;
+    let mut eligible = BTreeSet::new();
     for entity in &parsed.entities {
+        if existing_entities.iter().any(|e| e.id == entity.id && e.status != "proposed") { continue; }
+        if entity.links.is_empty() || entity.links.iter().any(|l| !names.contains_key(&l.document_id)) { continue; }
+        eligible.insert(entity.id.clone());
         lake.put_entity(&EntityRow {
             id: entity.id.clone(),
             title: entity.title.clone(),
@@ -207,21 +229,32 @@ pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<Run
 
     let mut canonical = 0usize;
     for item in &parsed.canonical {
+        // Model-provided identifiers must never overwrite an owner's decision.
+        if lake.object(&item.id).map_err(|e| e.to_string())?.is_some_and(|o| o.status != ObjectStatus::Proposed) { continue; }
         if let Some(doc) = documents.iter().find(|d| d.id == item.document_id) {
             if let Ok(object) = object_from(item, doc, &now) {
                 if lake.put_object(&object).is_ok() {
                     canonical += 1;
+                    eligible.insert(item.id.clone());
                 }
             }
         }
     }
 
     let quiz_id = format!("quiz:{session_id}");
+    let mut seen_questions = BTreeSet::new();
     let questions: Vec<QuizQuestion> = parsed
         .quiz
         .iter()
-        .map(|q| QuizQuestion {
-            id: q.id.clone(),
+        .filter(|q| {
+            !q.quote.trim().is_empty()
+                && documents.iter().any(|d| d.id == q.document_id && locate(d, &q.quote).is_some())
+                && q.proposed_object_id.as_ref().is_none_or(|id| eligible.contains(id))
+                && seen_questions.insert((q.document_id.clone(), q.question.clone()))
+        })
+        .enumerate()
+        .map(|(index, q)| QuizQuestion {
+            id: format!("{session_id}:{index}:{}", q.id),
             question: q.question.clone(),
             agent_answer: q.agent_answer.clone(),
             evidence: vec![QuizEvidence {
@@ -259,44 +292,31 @@ pub fn run(lake: &mut Lake, engine: &dyn Engine, session_id: &str) -> Result<Run
     })
 }
 
-fn build_corpus(
-    documents: &[knowlith_core::Document],
-    communities: &[CommunityRow],
-    company: &str,
-) -> Result<String, String> {
-    let mut out = String::new();
-    if !company.trim().is_empty() {
-        out.push_str("Company profile:\n");
-        out.push_str(company.trim());
-        out.push_str("\n\n");
-    }
-    out.push_str("Communities:\n");
-    for c in communities {
-        out.push_str(&format!("- {} ({} documents)\n", c.label, c.document_ids.len()));
-    }
-    out.push_str("\nDocuments (episodes):\n");
-    for doc in documents {
-        out.push_str(&format!("\n<document id=\"{}\" name=\"{}\">\n", doc.id, doc.name));
-        let chunks = chunk::chunk_text(&doc.text, 1800);
-        for (i, piece) in chunks.iter().enumerate().take(6) {
-            out.push_str(&format!("<!-- chunk {i} -->\n{piece}\n"));
-        }
-        if chunks.len() > 6 {
-            out.push_str(&format!("<!-- {} more chunks omitted -->\n", chunks.len() - 6));
-        }
-        out.push_str("</document>\n");
-    }
-
-    let hints = deterministic_entities(documents);
-    if !hints.is_empty() {
-        out.push_str("\nDeterministic entity hints (verify before using):\n");
-        for (name, count) in hints {
-            out.push_str(&format!("- {name} (seen in {count} documents)\n"));
+/// Bounded requests retain every byte, including the end of long documents.
+fn build_batches(documents: &[knowlith_core::Document], company: &str) -> Result<Vec<String>, String> {
+    const LIMIT: usize = 48_000;
+    if company.len() > 8_000 { return Err("Company profile must be at most 8,000 bytes.".into()); }
+    let prefix = format!("Company profile:\n{company}\nDocuments (episodes):\n");
+    let mut batches = Vec::new();
+    let mut current = prefix.clone();
+    let mut sorted: Vec<_> = documents.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    for doc in sorted {
+        if doc.id.len() + doc.name.len() > 4_000 { return Err("Document metadata is too long.".into()); }
+        for piece in chunk::chunk_text(&doc.text, 24_000) {
+            let entry = format!("\n<document id={:?} name={:?}>\n{piece}\n</document>\n", doc.id, doc.name);
+            if current.len() + entry.len() > LIMIT {
+                batches.push(current);
+                current = prefix.clone();
+            }
+            current.push_str(&entry);
         }
     }
-    Ok(out)
+    if current.len() > prefix.len() { batches.push(current); }
+    Ok(batches)
 }
 
+#[cfg(test)]
 fn deterministic_entities(documents: &[knowlith_core::Document]) -> BTreeMap<String, usize> {
     let billed = Regex::new(r"(?i)billed to[:\s]+([A-Za-z0-9][A-Za-z0-9 .&-]{1,40})").unwrap();
     let issued = Regex::new(r"(?i)issued by[:\s]+([A-Za-z0-9][A-Za-z0-9 .&-]{1,40})").unwrap();
@@ -438,6 +458,90 @@ pub fn confirm_quiz(lake: &mut Lake, quiz_id: &str, approved_object_ids: &[Strin
 mod tests {
     use super::*;
     use knowlith_core::{Document, DocumentKind};
+
+    fn sample_lake(text: String) -> Lake {
+        let mut lake = Lake::in_memory().unwrap();
+        lake.put_source("s", "Company", "/company", "folder", "codex").unwrap();
+        lake.put_document("s", &Document {
+            id: "doc:terms".into(), path: "/company/terms.md".into(), name: "terms.md".into(),
+            kind: DocumentKind::Markdown, byte_len: text.len() as u64,
+            sha256: "source".into(), text_sha256: "rendition".into(), text,
+            verbatim: true, modified: "2026-09-17T00:00:00Z".into(), columns: None, blocks: vec![],
+        }).unwrap();
+        lake
+    }
+
+    struct Capture(std::sync::Mutex<Vec<String>>);
+    impl Engine for Capture {
+        fn name(&self) -> &str { "capture" }
+        fn run(&self, request: &knowlith_engine::Request) -> knowlith_engine::Result<knowlith_engine::Reply> {
+            self.0.lock().unwrap().push(request.input.clone());
+            Ok(knowlith_engine::Reply::new("capture", r#"{"entities":[],"canonical":[],"quiz":[]}"#))
+        }
+    }
+
+    #[test]
+    fn first_supervisor_request_contains_the_company_documents() {
+        let mut lake = sample_lake("Payment is due in 30 days.".into());
+        let engine = Capture(std::sync::Mutex::new(vec![]));
+        run(&mut lake, &engine, "first").unwrap();
+        assert!(engine.0.lock().unwrap()[0].contains("Payment is due in 30 days."));
+    }
+
+    #[test]
+    fn long_documents_are_covered_without_unbounded_requests() {
+        let mut lake = sample_lake(format!("{}\nTAIL_MARKER", "ŽPayment terms.\n\n".repeat(12_000)));
+        let engine = Capture(std::sync::Mutex::new(vec![]));
+        run(&mut lake, &engine, "large").unwrap();
+        let calls = engine.0.lock().unwrap();
+        assert!(calls.iter().any(|input| input.contains("TAIL_MARKER")));
+        assert!(calls.iter().all(|input| input.len() <= 48_000));
+        assert!(calls.len() > 1);
+    }
+
+    #[test]
+    fn unchanged_documents_reuse_successful_synthesis_across_sessions() {
+        let mut lake = sample_lake("Payment terms.".into());
+        let engine = Capture(std::sync::Mutex::new(vec![]));
+        run(&mut lake, &engine, "first").unwrap();
+        run(&mut lake, &engine, "second").unwrap();
+        assert_eq!(engine.0.lock().unwrap().len(), 1);
+        lake.set_setting("company_profile", "A different business").unwrap();
+        run(&mut lake, &engine, "third").unwrap();
+        assert_eq!(engine.0.lock().unwrap().len(), 2);
+    }
+
+    struct Fixed(&'static str);
+    impl Engine for Fixed {
+        fn name(&self) -> &str { "fixed" }
+        fn run(&self, _: &Request) -> knowlith_engine::Result<knowlith_engine::Reply> {
+            Ok(knowlith_engine::Reply::new("fixed", self.0))
+        }
+    }
+
+    #[test]
+    fn invented_quiz_evidence_is_not_presented_for_approval() {
+        let mut lake = sample_lake("Payment terms.".into());
+        let engine = Fixed(r#"{"entities":[],"canonical":[],"quiz":[{"id":"q1","question":"True?","agent_answer":"Yes","document_id":"doc:terms","quote":"Invented quote","proposed_object_id":"rule:missing"}]}"#);
+        run(&mut lake, &engine, "quiz").unwrap();
+        assert!(lake.build_quiz().unwrap().unwrap().questions.is_empty());
+    }
+
+    #[test]
+    fn synthesis_cannot_overwrite_an_owner_approved_rule() {
+        let mut lake = sample_lake("Payment terms.".into());
+        let engine = Fixed(r#"{"entities":[],"canonical":[{"id":"rule:terms","kind":"rule","title":"Terms","body":"New interpretation","document_id":"doc:terms","quote":"Payment terms."}],"quiz":[]}"#);
+        let parsed = parse_json(engine.0).unwrap();
+        let doc = lake.documents().unwrap().remove(0);
+        let mut approved = object_from(&parsed.canonical[0], &doc, "2026-09-17T00:00:00Z").unwrap();
+        approved.status = ObjectStatus::Approved;
+        approved.body = "Owner approved wording".into();
+        lake.put_object(&approved).unwrap();
+        run(&mut lake, &engine, "safe").unwrap();
+        let after = lake.object("rule:terms").unwrap().unwrap();
+        assert_eq!(after.status, ObjectStatus::Approved);
+        assert_eq!(after.body, "Owner approved wording");
+    }
 
     #[test]
     fn confirm_quiz_approves_only_what_the_owner_marked_correct() {
