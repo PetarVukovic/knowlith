@@ -105,7 +105,7 @@ fn skill_text(body: &str, situation: Option<&str>) -> String {
         text.push_str(&format!("\nThis case: {situation}\n"));
     }
     text.push_str(
-        "\nBefore you finish: call get_relevant_context for this case, read what it lists, and call check_coverage. If anything it names is an open question, say so rather than deciding it yourself.",
+        "\nBefore you finish: call get_task_context for this case, then call check_coverage. If anything it names is an open question, say so rather than deciding it yourself.",
     );
     text
 }
@@ -164,8 +164,8 @@ fn built_in_text(name: &str, situation: Option<&str>) -> String {
         "check-against-company" => format!(
             "Check {about} against this company's approved knowledge.\n\n\
              Work in this order:\n\
-             1. get_relevant_context with what this is about, to see everything that touches it.\n\
-             2. Read each one with get_context. Take every figure from lookup_value, never from a sentence.\n\
+             1. get_task_context with what this is about — it returns the full approved text, prerequisites, and quotes.\n\
+             2. Take every figure from lookup_value, never from a sentence.\n\
              3. check_coverage before you answer.\n\n\
              Report three things separately: what agrees with the company's rules, what contradicts them and which document says so, and what you could not check because the owner has not decided it."
         ),
@@ -176,8 +176,8 @@ fn built_in_text(name: &str, situation: Option<&str>) -> String {
         ),
         "how-do-we-do-this" => format!(
             "How does this company handle {about}?\n\n\
-             Start with get_relevant_context, then get_process. Give the steps in the company's own order and quote the document each step comes from. \
-             Where the procedure depends on a rule, read the rule too and say what it says."
+             Start with get_task_context, then get_process if you need every step spelled out. \
+             Give the steps in the company's own order and quote the document each step comes from."
         ),
         _ => String::new(),
     }
@@ -263,7 +263,7 @@ mod tests {
     fn checking_against_the_company_always_ends_at_coverage() {
         let text = built_in_text("check-against-company", None);
         assert!(text.contains("check_coverage"));
-        assert!(text.contains("get_relevant_context"));
+        assert!(text.contains("get_task_context"));
     }
 
     #[test]

@@ -31,8 +31,8 @@ pub use connect::{
 };
 pub use icon::{Icon, company_icon};
 pub use launch::{
-    Outcome, TryLaunch, cli_command_line, cli_print_argv, open_or_restart, open_with_prompt,
-    prompt_deeplink,
+    Outcome, TryLaunch, cli_command_line, cli_print_argv, open_browser, open_or_restart,
+    open_with_prompt, prompt_deeplink,
 };
 pub use pick::PickError;
 pub use power::{Power, power};

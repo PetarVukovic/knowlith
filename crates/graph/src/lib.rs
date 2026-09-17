@@ -220,6 +220,8 @@ mod tests {
             to_id: to.into(),
             kind,
             origin: RelationOrigin::Structural,
+            why: None,
+            confidence: Some(1.0),
         }
     }
 

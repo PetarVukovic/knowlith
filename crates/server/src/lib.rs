@@ -17,7 +17,6 @@
 pub mod assets;
 pub mod auth;
 pub mod dto;
-pub mod terminal;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -143,8 +142,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tools/{app}/open", post(open_app))
         .route("/api/tools/{app}/try", post(try_in_app))
         .route("/api/tools/{app}/preview", get(preview_app))
-        .route("/api/terminal", get(terminal::terminal_ws))
         .route("/api/bundle", post(build_bundle))
+        .route("/api/export", post(export_knowledge))
         .route("/api/policy", get(read_policy).put(write_policy))
         .route("/api/engines", get(list_engines))
         .route("/api/work/release", post(release_work))
@@ -196,25 +195,6 @@ async fn guard(State(state): State<AppState>, request: Request, next: Next) -> R
         .unwrap_or_default()
         .to_string();
 
-    // WebSocket clients cannot set custom headers from the browser. The
-    // shipped page therefore passes the token as `?token=`; Vite's proxy
-    // still attaches the header in development. Only the socket route may
-    // do this: a token in a URL lands in history, screenshots and pasted
-    // links, so no other endpoint is allowed to accept it there.
-    if given.is_empty() && request.uri().path() == "/api/terminal" {
-        if let Some(query) = request.uri().query() {
-            for pair in query.split('&') {
-                if let Some(value) = pair.strip_prefix("token=") {
-                    given = value.replace('+', " ");
-                    if let Ok(decoded) = percent_decode(&given) {
-                        given = decoded;
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
     if !state.token.matches(&given) {
         return (
             StatusCode::UNAUTHORIZED,
@@ -226,37 +206,6 @@ async fn guard(State(state): State<AppState>, request: Request, next: Next) -> R
             .into_response();
     }
     next.run(request).await
-}
-
-/// Minimal percent-decoding for the WebSocket token query (unreserved + %XX).
-fn percent_decode(input: &str) -> Result<String, ()> {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' if i + 2 < bytes.len() => {
-                let h = from_hex(bytes[i + 1])?;
-                let l = from_hex(bytes[i + 2])?;
-                out.push((h << 4) | l);
-                i += 3;
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8(out).map_err(|_| ())
-}
-
-fn from_hex(b: u8) -> Result<u8, ()> {
-    match b {
-        b'0'..=b'9' => Ok(b - b'0'),
-        b'a'..=b'f' => Ok(b - b'a' + 10),
-        b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err(()),
-    }
 }
 
 pub async fn serve(state: AppState, port: u16) -> anyhow::Result<()> {
@@ -1696,8 +1645,7 @@ struct TryBody {
 
 /// Opens a connected AI app outside Knowlith with a prepared question.
 ///
-/// Desktop hosts get a deep link; CLI hosts open Terminal.app. Asking
-/// inside Knowlith is the company chat, over `/api/terminal`.
+/// Desktop hosts get a deep link; CLI hosts open Terminal.app.
 async fn try_in_app(
     Path(app): Path<String>,
     Json(body): Json<TryBody>,
@@ -1785,6 +1733,18 @@ async fn build_bundle(State(state): State<AppState>) -> ApiResult<serde_json::Va
 
 fn text_of(value: &serde_json::Value, key: &str) -> String {
     value.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+}
+
+/// Writes approved objects to portable Markdown under ~/Knowlith/knowledge/.
+async fn export_knowledge(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let base = knowlith_desktop::paths::knowledge_dir();
+    let report = knowlith_lake::export_approved(&base, &lake).map_err(failed)?;
+    Ok(Json(serde_json::json!({
+        "path": report.root,
+        "written": report.written,
+        "skipped": report.skipped,
+    })))
 }
 
 // -------------------------------------------------- background processing --

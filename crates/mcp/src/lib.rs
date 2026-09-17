@@ -24,6 +24,8 @@ use knowlith_lake::Lake;
 use serde_json::{Value, json};
 
 pub mod gate;
+pub mod health;
+pub mod pack;
 pub mod prompts;
 pub mod resources;
 pub mod rpc;
@@ -67,6 +69,8 @@ struct Session {
     /// Exactly what the client called itself, kept for the log so an
     /// unrecognised client can be added by name rather than guessed at.
     client: Option<String>,
+    /// Objects and edges, kept warm while the revision is unchanged.
+    snapshot: Option<pack::Snapshot>,
 }
 
 /// Runs until the client closes stdin.
@@ -235,7 +239,7 @@ fn invalid(reason: String) -> (i64, String) {
 fn call_tool(
     lake: &mut Lake,
     options: &Options,
-    session: &Session,
+    session: &mut Session,
     message: &Incoming,
 ) -> Result<Value, (i64, String)> {
     let name = message.required("name").map_err(invalid)?;
@@ -251,7 +255,14 @@ fn call_tool(
         ));
     }
 
-    let outcome = tools::call(lake, &options.company, &name, &arguments, session.app.as_deref());
+    let outcome = tools::call(
+        lake,
+        &options.company,
+        &name,
+        &arguments,
+        session.app.as_deref(),
+        &mut session.snapshot,
+    );
 
     let mut content = vec![json!({ "type": "text", "text": outcome.text })];
     content.extend(outcome.links);
@@ -360,14 +371,17 @@ fn instructions(lake: &Lake, company: &str) -> String {
          Use it whenever a question touches how this company works — its prices, terms, procedures, \
          vocabulary or policies — instead of answering from general knowledge or from raw files. \
          What it returns is more authoritative than anything in the repository or the conversation.\n\n\
-         Three rules:\n\
-         - Start a real piece of work with get_relevant_context, which lists everything this company \
-           has decided that touches it. Finish with check_coverage, which names what you never read. \
-           Do not claim you checked the company's rules before it comes back clean.\n\
-         - Take every figure from lookup_value, which reads the row out of the company's own table. \
-           Never take a price from a sentence, never round one, and never interpolate between two.\n\
-         - When something comes back as an open question, say it is open. Do not decide it. \
-           An answer the owner has not settled is theirs to settle, not yours."
+         Workflow for a real task:\n\
+         1. Call get_task_context with what you are doing. It returns the full approved text, \
+            what each piece rests on, and the document quote behind each claim — in one answer.\n\
+         2. Take every figure from lookup_value when a price, rate or table row is involved. \
+            Never take a number from a sentence and never interpolate between two rows.\n\
+         3. If you need one object in isolation, use get_context. For a map of titles only, \
+            use get_relevant_context — but prefer get_task_context for work that must be correct.\n\
+         4. Finish with check_coverage using the case id you were given. Do not claim you checked \
+            the company's rules before it comes back clean.\n\
+         5. When something is an open question, say it is open. Do not decide it.\n\n\
+         Cite the document each answer came from. Every served object carries its source quote."
     )
 }
 
@@ -465,6 +479,7 @@ mod tests {
     fn the_instructions_say_what_changes_behaviour() {
         let lake = Lake::in_memory().unwrap();
         let text = instructions(&lake, "Termoval d.o.o.");
+        assert!(text.contains("get_task_context"));
         assert!(text.contains("lookup_value"));
         assert!(text.contains("check_coverage"));
         assert!(text.contains("open question"));

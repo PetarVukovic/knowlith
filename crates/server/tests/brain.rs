@@ -131,6 +131,8 @@ async fn an_edge_between_two_rules_carries_the_owners_word_for_it() {
         target_label: "A".into(),
         kind: knowlith_core::RelationType::DependsOn,
         origin: knowlith_core::RelationOrigin::Model,
+        why: None,
+        edge_confidence: None,
     }];
     lake.put_object(&b).expect("stored");
 

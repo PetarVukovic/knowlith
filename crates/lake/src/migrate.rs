@@ -17,7 +17,7 @@ use crate::Result;
 /// The shape this build expects. Bumped whenever a step is added, and stored
 /// so a lake written by a newer Knowlith can be recognised rather than
 /// quietly half-read by an older one.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 pub fn run(conn: &Connection) -> Result<()> {
     // A read of what is actually there beats a version number: a lake that
@@ -90,6 +90,14 @@ pub fn run(conn: &Connection) -> Result<()> {
             "CREATE INDEX IF NOT EXISTS idx_tool_reads_case ON tool_reads(case_id)",
             [],
         )?;
+    }
+
+    if has_table(conn, "relations")? && !has_column(conn, "relations", "why")? {
+        conn.execute("ALTER TABLE relations ADD COLUMN why TEXT", [])?;
+    }
+
+    if has_table(conn, "relations")? && !has_column(conn, "relations", "confidence")? {
+        conn.execute("ALTER TABLE relations ADD COLUMN confidence REAL", [])?;
     }
 
     // An older lake has objects but no index over them. Building it here

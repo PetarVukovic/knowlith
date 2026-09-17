@@ -486,13 +486,6 @@ export const tools = {
   },
 }
 
-/** WebSocket URL for a headless CLI run (token query for the shipped page). */
-export function terminalSocketUrl(): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const qs = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ""
-  return `${proto}//${window.location.host}/api/terminal${qs}`
-}
-
 export const brain = {
   async get(): Promise<CompanyBrain> {
     return get<CompanyBrain>(

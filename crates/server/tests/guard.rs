@@ -225,16 +225,15 @@ async fn nothing_here_is_offered_to_another_origin() {
 }
 
 #[tokio::test]
-async fn a_token_in_the_url_opens_only_the_socket() {
-    // The page has to put the token in the URL for the WebSocket, because a
-    // browser cannot set a header on one. Nowhere else: a URL with a secret
-    // in it is copied into chats, screenshots and history.
+async fn a_token_in_the_url_is_never_enough() {
+    // A secret in a URL is copied into chats, screenshots and history, so no
+    // endpoint may treat `?token=` as authentication.
     assert_eq!(
         status(without_token("GET", &format!("/api/health?token={SECRET}"))).await,
         StatusCode::UNAUTHORIZED
     );
-    assert_ne!(
-        status(without_token("GET", &format!("/api/terminal?token={SECRET}"))).await,
+    assert_eq!(
+        status(without_token("GET", &format!("/api/brain?token={SECRET}"))).await,
         StatusCode::UNAUTHORIZED
     );
 }

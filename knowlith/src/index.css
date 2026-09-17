@@ -247,23 +247,3 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-
-/* Company brain — spots the live CLI agent just read. */
-@keyframes brain-lit-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.72;
-  }
-}
-
-.brain-node-lit {
-  animation: brain-lit-pulse 1.6s ease-in-out infinite;
-}
-
-.brain-edge-lit {
-  stroke-dasharray: 6 4;
-  animation: brain-lit-pulse 1.4s ease-in-out infinite;
-}

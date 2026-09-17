@@ -67,9 +67,10 @@ pub fn block(company: &str, profile: &str) -> String {
          The `{key}` MCP server holds this company's approved rules, prices, procedures and \
          vocabulary. When a question touches how {company} works, it is the source — more \
          authoritative than this file, than the repository, and than anything you already know.\n\n\
-         - Begin a real piece of work with `get_relevant_context`, which lists everything the \
-           company has decided that touches it. Close with `check_coverage`, which names what you \
-           never read. Do not say you checked the company's rules until it comes back clean.\n\
+         - Begin a real piece of work with `get_task_context`, which returns the full approved \
+           text, prerequisites, and source quotes in one answer. Use `get_relevant_context` only \
+           when you need a title map first. Close with `check_coverage`. Do not say you checked \
+           the company's rules until it comes back clean.\n\
          - Take every figure from `lookup_value`. It reads the row out of the company's own table. \
            Never take a price from a sentence and never interpolate between two you have seen.\n\
          - When something comes back as an open question, say it is open. The owner has not \
@@ -163,7 +164,7 @@ mod tests {
     #[test]
     fn the_block_says_the_three_things_that_change_behaviour() {
         let text = block("Termoval d.o.o.", "");
-        assert!(text.contains("get_relevant_context"));
+        assert!(text.contains("get_task_context"));
         assert!(text.contains("check_coverage"));
         assert!(text.contains("lookup_value"));
         assert!(text.contains("open question"));

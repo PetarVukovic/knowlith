@@ -1,4 +1,4 @@
-//! The eleven things an AI tool can ask this company.
+//! The twelve things an AI tool can ask this company.
 //!
 //! Two decisions run through all of them.
 //!
@@ -19,7 +19,7 @@ use knowlith_graph::Graph;
 use knowlith_lake::Lake;
 use serde_json::{Value, json};
 
-use crate::gate;
+use crate::{gate, health, pack};
 
 /// How many objects a single answer may carry.
 ///
@@ -130,6 +130,39 @@ pub fn catalogue(icon: &Value) -> Vec<Value> {
             icon,
         ),
         tool(
+            "get_task_context",
+            "Rich context for a task",
+            "The main tool for real work. Given what you are doing, returns the full approved text of every rule, process and term that touches it — including what each piece rests on, every source quote, and a case id for check_coverage. Prefer this over get_relevant_context when the answer must be correct.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "What you are working on, in a sentence."
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4,
+                        "default": 3,
+                        "description": "How many graph hops of prerequisites to include."
+                    },
+                    "maxObjects": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 16,
+                        "default": 12,
+                        "description": "How many objects the pack may carry."
+                    },
+                    "caseId": { "type": "string", "description": "Reuse an open case, if you already have one." }
+                },
+                "required": ["question"]
+            }),
+            Some(results_schema()),
+            read(true),
+            icon,
+        ),
+        tool(
             "search_context",
             "Search the company",
             "Finds approved rules, processes and terms by meaning of the words in them. Returns the text, the document it came from and the exact quote. Never returns anything the owner has not approved.",
@@ -154,7 +187,12 @@ pub fn catalogue(icon: &Value) -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "An id from get_relevant_context or search_context." },
-                    "caseId": { "type": "string" }
+                    "caseId": { "type": "string" },
+                    "includeFoundations": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, depth-1 prerequisites are returned inline with their full text and quotes."
+                    }
                 },
                 "required": ["id"]
             }),
@@ -382,6 +420,7 @@ fn results_schema() -> Value {
 pub fn names() -> Vec<&'static str> {
     vec![
         "get_relevant_context",
+        "get_task_context",
         "search_context",
         "get_context",
         "lookup_value",
@@ -403,12 +442,27 @@ pub fn call(
     name: &str,
     arguments: &Value,
     app: Option<&str>,
+    snapshot: &mut Option<pack::Snapshot>,
 ) -> Outcome {
     let case = arguments.get("caseId").and_then(Value::as_str);
 
     match name {
         "get_relevant_context" => match text_argument(arguments, "question") {
-            Ok(question) => relevant(lake, &question, app),
+            Ok(question) => relevant(lake, company, &question, app),
+            Err(outcome) => outcome,
+        },
+        "get_task_context" => match text_argument(arguments, "question") {
+            Ok(question) => {
+                let depth = arguments
+                    .get("depth")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(pack::default_depth() as u64) as usize;
+                let max_objects = arguments
+                    .get("maxObjects")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(pack::default_max_objects() as u64) as usize;
+                task_context(lake, company, &question, case, app, snapshot, depth, max_objects)
+            }
             Err(outcome) => outcome,
         },
         "search_context" => match text_argument(arguments, "question") {
@@ -423,7 +477,13 @@ pub fn call(
             Err(outcome) => outcome,
         },
         "get_context" => match text_argument(arguments, "id") {
-            Ok(id) => one(lake, &id, case, app),
+            Ok(id) => {
+                let include = arguments
+                    .get("includeFoundations")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true);
+                one(lake, &id, case, app, include, snapshot)
+            }
             Err(outcome) => outcome,
         },
         "lookup_value" => match text_argument(arguments, "what") {
@@ -459,18 +519,18 @@ fn text_argument(arguments: &Value, name: &str) -> Result<String, Outcome> {
 
 // ------------------------------------------------------- get_relevant_context --
 
-fn relevant(lake: &mut Lake, question: &str, app: Option<&str>) -> Outcome {
+fn relevant(lake: &mut Lake, company: &str, question: &str, app: Option<&str>) -> Outcome {
+    if let Some(note) = health::message(&health::status(lake), company) {
+        return Outcome::new(
+            note,
+            json!({ "caseId": Value::Null, "areas": [], "openQuestions": [], "note": "not_ready" }),
+        );
+    }
+
     let objects = match lake.objects() {
         Ok(objects) => objects,
         Err(e) => return Outcome::refused(format!("The lake could not be read: {e}")),
     };
-
-    if objects.is_empty() {
-        return Outcome::new(
-            "This company has not put anything into Knowlith yet. There is nothing to check against, so say so rather than answering from general knowledge.",
-            json!({ "caseId": Value::Null, "areas": [], "openQuestions": [], "note": "empty" }),
-        );
-    }
 
     let matched = lake.search_objects(question, 16).unwrap_or_default();
     let servable: Vec<&ContextObject> = objects.iter().filter(|o| gate::is_servable(o)).collect();
@@ -497,7 +557,7 @@ fn relevant(lake: &mut Lake, question: &str, app: Option<&str>) -> Outcome {
     let graph = Graph::build(&lake.edges().unwrap_or_default());
     let direct: Vec<String> = areas.iter().map(|(id, ..)| id.clone()).collect();
     for id in &direct {
-        for foundation in graph.foundations(id).into_iter().filter(|f| f.distance <= 2) {
+        for foundation in graph.foundations(id).into_iter().filter(|f| f.distance <= 3) {
             if let Some(object) = servable.iter().find(|o| o.id == foundation.id) {
                 if seen.insert(object.id.clone()) {
                     let under = areas
@@ -658,10 +718,26 @@ fn search(
         return Outcome::new(text, json!({ "results": [], "found": 0 }));
     }
 
-    answer(lake, found, case, "search_context", app)
+    let served = found
+        .into_iter()
+        .map(|object| Served {
+            object,
+            role: "primary",
+            pack_why: None,
+            edge_why: None,
+        })
+        .collect();
+    answer_served(lake, served, case, "search_context", app)
 }
 
-fn one(lake: &mut Lake, id: &str, case: Option<&str>, app: Option<&str>) -> Outcome {
+fn one(
+    lake: &mut Lake,
+    id: &str,
+    case: Option<&str>,
+    app: Option<&str>,
+    include_foundations: bool,
+    snapshot: &mut Option<pack::Snapshot>,
+) -> Outcome {
     let object = match lake.object(id) {
         Ok(Some(object)) => object,
         Ok(None) => return Outcome::refused(format!("There is nothing here with the id {id}.")),
@@ -669,7 +745,38 @@ fn one(lake: &mut Lake, id: &str, case: Option<&str>, app: Option<&str>) -> Outc
     };
 
     match gate::access(&object) {
-        gate::Access::Full => answer(lake, vec![object], case, "get_context", app),
+        gate::Access::Full => {
+            let mut served = vec![Served {
+                object,
+                role: "primary",
+                pack_why: None,
+                edge_why: None,
+            }];
+            if include_foundations {
+                let snap = match pack::Snapshot::refresh(lake, snapshot) {
+                    Ok(s) => s,
+                    Err(e) => return Outcome::refused(e),
+                };
+                let graph = Graph::build(&snap.edges);
+                for foundation in graph
+                    .foundations(id)
+                    .into_iter()
+                    .filter(|f| f.distance == 1)
+                {
+                    if let Ok(Some(found)) = lake.object(&foundation.id) {
+                        if gate::is_servable(&found) {
+                            served.push(Served {
+                                object: found,
+                                role: "foundation",
+                                pack_why: Some(format!("\"{}\" rests on this", served[0].object.title)),
+                                edge_why: None,
+                            });
+                        }
+                    }
+                }
+            }
+            answer_served(lake, served, case, "get_context", app)
+        }
         gate::Access::NameOnly(why) => Outcome::new(
             format!(
                 "\"{}\" is not settled: {why}. Tell whoever asked that this is an open question at this company, and do not answer it yourself.",
@@ -682,6 +789,94 @@ fn one(lake: &mut Lake, id: &str, case: Option<&str>, app: Option<&str>) -> Outc
             object.title
         )),
     }
+}
+
+fn task_context(
+    lake: &mut Lake,
+    company: &str,
+    question: &str,
+    case: Option<&str>,
+    app: Option<&str>,
+    snapshot: &mut Option<pack::Snapshot>,
+    depth: usize,
+    max_objects: usize,
+) -> Outcome {
+    if matches!(health::status(lake), health::Status::Empty) {
+        if let Some(note) = health::message(&health::Status::Empty, company) {
+            return Outcome::new(note, json!({ "results": [], "found": 0, "note": "empty" }));
+        }
+    }
+
+    let snap = match pack::Snapshot::refresh(lake, snapshot) {
+        Ok(s) => s,
+        Err(e) => return Outcome::refused(e),
+    };
+
+    let plan = pack::plan(lake, snap, question, depth, max_objects);
+    if plan.items.is_empty() {
+        return Outcome::new(
+            "Nothing in this company's approved knowledge touches that. Say so plainly.",
+            json!({ "results": [], "found": 0, "note": "no_match" }),
+        );
+    }
+
+    let ids: Vec<String> = plan.items.iter().map(|item| item.id.clone()).collect();
+    let case_id = match case {
+        Some(existing) => existing.to_string(),
+        None => match lake.open_case(question, &ids, app) {
+            Ok(id) => id,
+            Err(e) => return Outcome::refused(format!("The case could not be opened: {e}")),
+        },
+    };
+
+    let mut served = Vec::new();
+    for item in &plan.items {
+        let Some(object) = snap.objects.iter().find(|o| o.id == item.id) else {
+            continue;
+        };
+        if !gate::is_servable(object) {
+            continue;
+        }
+        served.push(Served {
+            object: object.clone(),
+            role: match item.role {
+                pack::Role::Primary => "primary",
+                pack::Role::Foundation => "foundation",
+            },
+            pack_why: Some(item.why.clone()),
+            edge_why: item.edge_why.clone(),
+        });
+    }
+
+    let mut outcome = answer_served(lake, served, Some(&case_id), "get_task_context", app);
+
+    if let Some(note) = health::message(&health::status(lake), company) {
+        outcome.text = format!("{note}\n\n{}", outcome.text);
+    }
+    if !plan.open_questions.is_empty() {
+        outcome.text.push_str("\n\nOpen questions — the owner has not decided these. Say so; do not answer them:\n");
+        for (title, _) in &plan.open_questions {
+            outcome.text.push_str(&format!("- {title}\n"));
+        }
+    }
+    if !plan.stale_titles.is_empty() {
+        outcome.text.push_str("\nCheck before relying on: ");
+        outcome.text.push_str(&plan.stale_titles.join(", "));
+        outcome.text.push('\n');
+    }
+    outcome.text.push_str(&format!("\ncase id: {case_id}"));
+    if let Some(structured) = outcome.structured.as_object_mut() {
+        structured.insert("caseId".into(), json!(case_id));
+        structured.insert(
+            "openQuestions".into(),
+            json!(plan
+                .open_questions
+                .iter()
+                .map(|(title, why)| json!({ "subject": title, "why": why }))
+                .collect::<Vec<_>>()),
+        );
+    }
+    outcome
 }
 
 fn processes(
@@ -711,13 +906,29 @@ fn processes(
             json!({ "results": [], "found": 0 }),
         );
     }
-    answer(lake, found, case, "get_process", app)
+    let served = found
+        .into_iter()
+        .map(|object| Served {
+            object,
+            role: "primary",
+            pack_why: None,
+            edge_why: None,
+        })
+        .collect();
+    answer_served(lake, served, case, "get_process", app)
+}
+
+struct Served {
+    object: ContextObject,
+    role: &'static str,
+    pack_why: Option<String>,
+    edge_why: Option<String>,
 }
 
 /// Turns objects into the shape every reading tool returns.
-fn answer(
+fn answer_served(
     lake: &mut Lake,
-    objects: Vec<ContextObject>,
+    objects: Vec<Served>,
     case: Option<&str>,
     tool: &str,
     app: Option<&str>,
@@ -728,8 +939,10 @@ fn answer(
     let mut text = String::new();
     let mut results = Vec::new();
     let mut links = Vec::new();
+    let mut seen_reads = BTreeSet::new();
 
-    for object in &objects {
+    for served in &objects {
+        let object = &served.object;
         let stale = lake.stale_since(&object.id).ok().flatten();
         let rests_on: Vec<String> = graph
             .foundations(&object.id)
@@ -737,6 +950,24 @@ fn answer(
             .filter(|f| f.distance == 1)
             .map(|f| f.id)
             .collect();
+
+        if served.role != "primary" {
+            text.push_str(&format!("### {} ({}) — {}\n\n", object.title, served.role, served.pack_why.as_deref().unwrap_or("")));
+        } else {
+            text.push_str(&format!("## {}\n\n", object.title));
+        }
+        text.push_str(&format!("{}\n\n", object.body.trim()));
+
+        for span in &object.evidence {
+            let document = lake
+                .document(&span.document_id)
+                .map(|d| d.name)
+                .unwrap_or_else(|_| span.document_id.clone());
+            text.push_str(&format!(
+                "Source: {} — {}\n> {}\n\n",
+                document, span.locator, span.quote
+            ));
+        }
 
         let source = object.evidence.first().map(|span| {
             let document = lake
@@ -750,33 +981,41 @@ fn answer(
             })
         });
 
-        text.push_str(&format!("## {}\n\n{}\n\n", object.title, object.body.trim()));
-        if let Some(source) = &source {
-            text.push_str(&format!(
-                "Source: {} — {}\n> {}\n\n",
-                source["document"].as_str().unwrap_or(""),
-                source["locator"].as_str().unwrap_or(""),
-                source["quote"].as_str().unwrap_or("")
-            ));
-        }
         if let Some(warning) = gate::stale_warning(stale.as_deref()) {
             text.push_str(&format!("{warning}\n\n"));
         }
-        if !rests_on.is_empty() {
-            text.push_str(&format!(
-                "Rests on: {}. Read those too before you rely on this.\n\n",
-                rests_on.join(", ")
-            ));
+        if let Some(why) = &served.edge_why {
+            text.push_str(&format!("Dependency: {why}\n\n"));
+        }
+        if served.role == "primary" && !rests_on.is_empty() {
+            let inlined: BTreeSet<_> = objects.iter().map(|s| s.object.id.as_str()).collect();
+            let missing: Vec<_> = rests_on
+                .iter()
+                .filter(|id| !inlined.contains(id.as_str()))
+                .collect();
+            if !missing.is_empty() {
+                text.push_str(&format!(
+                    "Also rests on: {}.\n\n",
+                    missing
+                        .iter()
+                        .map(|id| id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
         }
 
         results.push(json!({
             "id": object.id,
             "title": object.title,
             "kind": kind_word(object.kind),
+            "role": served.role,
             "text": object.body,
             "restsOn": rests_on,
             "stale": stale.is_some(),
             "confidence": object.confidence.phrase(),
+            "why": served.pack_why,
+            "dependency": served.edge_why,
             "source": source,
         }));
 
@@ -790,7 +1029,21 @@ fn answer(
             }));
         }
 
-        let _ = lake.record_case_read(&object.id, tool, case, app);
+        if seen_reads.insert(object.id.clone()) {
+            let _ = lake.record_case_read(&object.id, tool, case, app);
+        }
+
+        if tool == "get_task_context" && pack::wants_table_lookup(object) {
+            if let Ok(rows) = lake.rows_matching(&object.title, 3) {
+                if !rows.is_empty() {
+                    text.push_str("Table rows for this subject:\n");
+                    for row in &rows {
+                        text.push_str(&format!("- {} — {}\n", row.document_name, row.text));
+                    }
+                    text.push('\n');
+                }
+            }
+        }
     }
 
     let found = results.len();

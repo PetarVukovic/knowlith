@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { AppWindow, Loader2, MessageSquare, Terminal } from "lucide-react"
+import { AppWindow, Loader2, Terminal } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -19,23 +19,15 @@ export type AskPickResult = {
   slug: string
 }
 
-/** CLI assistants the company chat can run on this machine. */
-export const CHAT_SLUGS = new Set(["claude-code", "codex", "cursor"])
-
 /**
- * Asks which connected AI should answer, then hands the question over.
- *
- * Two doors, and the dialog says which is which: a CLI assistant answers
- * inside Knowlith's own chat (`onAskInside`), a desktop app opens outside
- * with the question ready. There used to be a third — an xterm in a side
- * panel — and two ways of asking inside was one too many.
+ * Asks which connected AI should answer, then opens it outside Knowlith
+ * with the question ready in the composer or a Terminal session.
  */
 export function AskAiPicker({
   open,
   onOpenChange,
   prompt,
   about,
-  onAskInside,
   onLaunched,
   onNeedsConnect,
 }: {
@@ -43,8 +35,6 @@ export function AskAiPicker({
   onOpenChange: (open: boolean) => void
   prompt: string
   about?: string
-  /** When given, CLI assistants go here instead of a Terminal window. */
-  onAskInside?: (slug: string) => void
   onLaunched: (result: AskPickResult) => void
   onNeedsConnect: () => void
 }) {
@@ -66,14 +56,8 @@ export function AskAiPicker({
   }, [open])
 
   const choices = (tools ?? []).filter((t) => t.connected && t.launchSurface !== "missing")
-  const inside = (tool: AiTool) => onAskInside !== undefined && CHAT_SLUGS.has(tool.slug)
 
   const pick = async (tool: AiTool) => {
-    if (inside(tool)) {
-      onOpenChange(false)
-      onAskInside?.(tool.slug)
-      return
-    }
     setBusy(tool.slug)
     setError(null)
     const result = await toolsApi.try(tool.slug, prompt)
@@ -93,10 +77,9 @@ export function AskAiPicker({
   }
 
   const describe = (tool: AiTool): string => {
-    if (inside(tool)) return "Answers here, in Knowlith's chat"
     if (tool.launchSurface === "terminal") {
       const bin = tool.slug === "cursor" ? "agent" : tool.slug === "claude-code" ? "claude" : "codex"
-      return `Runs \`${bin}\` in a Terminal window with the question`
+      return `Opens Terminal with \`${bin}\` and the question ready`
     }
     return "Opens the desktop app with the question ready"
   }
@@ -107,9 +90,7 @@ export function AskAiPicker({
         <DialogTitle>Which AI should answer?</DialogTitle>
         <DialogDescription>
           {about ? `About “${about}”. ` : ""}
-          {onAskInside
-            ? "CLI assistants answer here; desktop apps open outside Knowlith."
-            : "CLIs open a Terminal window; desktop apps open outside Knowlith."}
+          Desktop apps open outside Knowlith; CLIs open in Terminal.
         </DialogDescription>
 
         <p className="mt-3 rounded-md bg-surface-2 px-3 py-2 text-[12.5px] italic text-muted">
@@ -137,11 +118,7 @@ export function AskAiPicker({
         ) : (
           <ul className="mt-4 grid gap-2">
             {choices.map((tool) => {
-              const Icon = inside(tool)
-                ? MessageSquare
-                : tool.launchSurface === "terminal"
-                  ? Terminal
-                  : AppWindow
+              const Icon = tool.launchSurface === "terminal" ? Terminal : AppWindow
               return (
                 <li key={tool.slug}>
                   <button

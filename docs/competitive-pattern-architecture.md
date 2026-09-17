@@ -52,7 +52,7 @@ graph · (future) vectors · SQLite search
       ↓
 
 MCP GATEWAY  (already)
-get_relevant_context · search_context · get_context · lookup_value
+get_task_context · get_relevant_context · search_context · get_context · lookup_value
 get_process · get_skill · get_source_evidence · what_breaks_if
 check_coverage · propose_change
 ```
@@ -141,8 +141,8 @@ Related (not primary): [nithiin7/remote-file-server-mcp](https://github.com/nith
 | **P0** | No **write-settle** before extract; rescans are periodic | renfield-mcp-filesystem | Debounce after create/write events; then hash; then queue `compile_document`. Keep hourly/periodic rescan as reconciliation net |
 | **P0** | Weak **deny patterns** (`~$…`, `.DS_Store`, `Thumbs.db` only) | j0hanz filesystem-mcp | Skip `.env`, `*.pem`, `id_rsa`, keystores, etc.; report as owner-visible skip reasons |
 | **P0** | Compiler lacks **company schema** (“what this company is”) | AWS knowledge-acquisition + company-brain-builder | Owner answers via UI → lake; worker reads them. Already named in `ARCHITECTURE.md` Open shape |
-| **P1** | Mostly **poll**, not event watch | renfield + Digital-Defiance | fs events for local roots; SMB notify when available; rescan remains safety net |
-| **P1** | SQLite is runtime source of truth; no **portable approved snapshot** | second-brain / memstem / OKF-adjacent | Keep lake for queue, evidence, tool_reads; add exportable Markdown/OKF of *approved* objects so indexes stay rebuildable from files |
+| ~~**P1**~~ | ~~Mostly **poll**, not event watch~~ | renfield + Digital-Defiance | **Landed:** `crates/worker/src/watch.rs` — notify on active roots, write-settle debounce, rescan remains safety net |
+| ~~**P1**~~ | ~~SQLite is runtime source of truth; no **portable approved snapshot**~~ | second-brain / memstem | **Landed:** `knowlith export` + `POST /api/export` → `~/Knowlith/knowledge/` |
 | **P2** | Skill / rule subset is relevance-based, not **dependency-aware** | graph-of-skills | Use existing `knowlith-graph` edges to trim what `get_skill` / case packs pull |
 | **P2** | True **edge process** for unmounted SMB | renfield | Only when daemon must not hold share credentials (separate box / isolation). Mounted `\\NAS\` on the owner machine does not require a second binary yet |
 | **Later** | Path-level RBAC per agent | achetronic | Multi-agent / multi-role policy — not V1 |
@@ -263,6 +263,61 @@ existing try deep links + CLI spawn.
 - [ ] Defer true SMB edge process until a non-mounted / credential-isolated deployment exists
 - [ ] Defer path RBAC until a second agent role exists
 - [ ] Event-driven fs watch (local + SMB notify); periodic rescan remains the safety net
+
+### Landed (2026-09-17)
+
+- **Rich context layer** — `get_task_context`, context packer, session snapshot
+  cache, edge `why`/`confidence`, `knowledge_fingerprint` relate trigger, health
+  gate. Documented in [`mcp-rich-context.md`](mcp-rich-context.md).
+- **`knowlith start`** — `serve` + embedded UI + background worker + default
+  browser open (Mac/Windows/Linux). Production one-binary path; no Node at runtime.
+
+---
+
+## Files → MCP: how competitors do it vs Knowlith
+
+Most filesystem MCP servers expose **file operations as tools** (`read_file`,
+`list_files`, …). Knowlith deliberately does **not**: agents get **approved
+company knowledge** as tools (`get_task_context`, `lookup_value`, …). Files
+enter only through the edge compiler.
+
+| Project | File → agent path | MCP surface |
+| --- | --- | --- |
+| **renfield-mcp-filesystem** | Watch inbox → settle → REST push to backend → ingest | `list_files`, `read_file`, `move_file` + backend `ingest_file` |
+| **j0hanz/filesystem-mcp** | Agent calls tools directly on allowed roots | 17 filesystem tools + resource subscriptions |
+| **Digital-Defiance/mcp-filesystem** | Watch + checksum sync | read/list/watch tools |
+| **local-shell-mcp** | Workspace root; agent reads/writes/chunks | file_* + shell + browser |
+| **agent-mcp-gateway** | Merges local + upstream MCP catalogs | Compact profile hides broad upstream tools |
+| **Knowlith** | allowed root → extract → candidate → **approve** → lake | **No raw filesystem MCP**; `get_task_context` packs approved objects |
+
+**Steal from renfield (edge, not MCP shape):** event watch, SMB `CHANGE_NOTIFY`,
+write-settle, runtime `roots.yaml` reload, dry-run scan, credentials stay on
+edge. **Do not steal:** create-only ignore-rewrite — we must recompile on
+`sha256` change.
+
+**Steal from j0hanz (edge guards, not tools):** deny patterns (landed),
+resource `listChanged` (landed as MCP watcher), optional Streamable HTTP for
+multi-agent later.
+
+**Steal from local-skills-mcp / graph-of-skills (gateway):** lazy skill
+loading (prompts list + `get_skill`), dependency-aware packs (`get_task_context`
+landed).
+
+**Steal from second-brain / memstem (storage):** portable approved Markdown
+export — lake stays operational; files rebuild indexes.
+
+### Production install (Mac / Windows)
+
+| Step | Competitors | Knowlith |
+| --- | --- | --- |
+| Install | `npx`, Docker, Python venv | Single binary (`install.sh` / `install.ps1`) |
+| Runtime deps | Node 24+, Docker, … | **None** — UI baked into binary (`crates/server/build.rs`) |
+| Start | Manual MCP config | `knowlith start` → daemon + worker + **browser** |
+| AI hookup | Edit `mcp.json` | `knowlith connect` |
+| Background | systemd / k8s / manual | `knowlith autostart on` |
+
+Gap until release cut: GitHub Release assets for `install.sh` to download.
+Dev path remains `scripts/dev.sh` (Vite + debug daemon).
 
 ### Landed (2026-09-16)
 

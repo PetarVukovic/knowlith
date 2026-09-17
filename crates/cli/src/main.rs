@@ -95,6 +95,27 @@ enum Command {
         /// own, which is worth being explicit about.
         #[arg(long)]
         no_worker: bool,
+        /// Open the interface in the default browser once the daemon is listening.
+        #[arg(long)]
+        open: bool,
+    },
+    /// Start Knowlith: serve the interface, open the browser, work in the background.
+    ///
+    /// This is what `install.sh` points at — one command after install.
+    Start {
+        #[arg(long, default_value_t = 7717)]
+        port: u16,
+        #[arg(long)]
+        company: Option<String>,
+        #[arg(long, default_value = "auto")]
+        engine: String,
+        #[arg(long)]
+        replay: Option<PathBuf>,
+        #[arg(long)]
+        no_worker: bool,
+        /// Do not open a browser tab — for servers and headless machines.
+        #[arg(long)]
+        no_open: bool,
     },
     /// Drain the work queue: rescan folders, compile what moved, recheck quotes.
     ///
@@ -207,6 +228,8 @@ enum Command {
         #[arg(long)]
         install: bool,
     },
+    /// Write approved knowledge to Markdown under ~/Knowlith/knowledge/.
+    Export,
     /// Keep the background service running when the window is closed.
     Autostart {
         #[command(subcommand)]
@@ -263,9 +286,39 @@ fn main() -> Result<()> {
             engine,
             replay,
             no_worker,
+            open,
         } => {
             let name = company_of(&lake, company.as_deref());
-            serve(lake, db, port, &name, &engine, replay.as_deref(), no_worker)
+            serve(
+                lake,
+                db,
+                port,
+                &name,
+                &engine,
+                replay.as_deref(),
+                no_worker,
+                open,
+            )
+        }
+        Command::Start {
+            port,
+            company,
+            engine,
+            replay,
+            no_worker,
+            no_open,
+        } => {
+            let name = company_of(&lake, company.as_deref());
+            serve(
+                lake,
+                db,
+                port,
+                &name,
+                &engine,
+                replay.as_deref(),
+                no_worker,
+                !no_open,
+            )
         }
         Command::Work { engine, replay, once } => work(db, &engine, replay.as_deref(), once),
         Command::Skills {
@@ -317,8 +370,24 @@ fn main() -> Result<()> {
             let name = company_of(&lake, company.as_deref());
             bundle(&lake, &name, install)
         }
+        Command::Export => run_export(&lake),
         Command::Autostart { what } => autostart(what),
     }
+}
+
+fn run_export(lake: &Lake) -> Result<()> {
+    let base = knowlith_desktop::paths::knowledge_dir();
+    let report = knowlith_lake::export_approved(&base, lake)?;
+    println!(
+        "exported {} approved {} to {}",
+        report.written,
+        if report.written == 1 { "object" } else { "objects" },
+        base.display()
+    );
+    if report.skipped > 0 {
+        println!("  {} unchanged or not approved", report.skipped);
+    }
+    Ok(())
 }
 
 /// The company's name, resolving an override and remembering it.
@@ -533,8 +602,17 @@ fn serve(
     engine_name: &str,
     replay: Option<&Path>,
     no_worker: bool,
+    open: bool,
 ) -> Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
+
+    if open {
+        let url = format!("http://127.0.0.1:{port}");
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            knowlith_desktop::open_browser(&url);
+        });
+    }
 
     // CLI `--engine` wins when explicit. `auto` defers to the owner's saved
     // policy, then to whatever is installed on this machine.
@@ -739,8 +817,15 @@ fn relate(
 
     let mut added = 0;
     for edge in &run.edges {
-        for (from, to, kind, origin) in knowlith_compiler::edge_pair(edge) {
-            if lake.put_relation(&from, &to, kind, origin)? {
+        for stored in knowlith_compiler::edge_pair(edge) {
+            if lake.put_relation_detail(
+                &stored.from,
+                &stored.to,
+                stored.kind,
+                stored.origin,
+                stored.why.as_deref(),
+                stored.confidence,
+            )? {
                 added += 1;
             }
         }

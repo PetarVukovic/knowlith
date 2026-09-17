@@ -14,11 +14,14 @@
 //! updates itself when something changes" actually means here — not a feature
 //! of the database, a property of the write path.
 
+mod export;
 mod jobs;
 mod merge;
 mod migrate;
 mod policy;
 mod serve;
+
+pub use export::{export_approved, ExportReport};
 
 use std::path::Path;
 
@@ -55,6 +58,8 @@ pub enum LakeError {
     Sqlite(#[from] rusqlite::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
     #[error("no document {0} in the lake")]
     UnknownDocument(String),
     #[error("no object {0} in the lake")]
@@ -135,12 +140,14 @@ pub struct Lake {
 }
 
 /// One edge of the knowledge graph.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Edge {
     pub from_id: String,
     pub to_id: String,
     pub kind: RelationType,
     pub origin: RelationOrigin,
+    pub why: Option<String>,
+    pub confidence: Option<f32>,
 }
 
 impl Lake {
@@ -474,15 +481,20 @@ impl Lake {
             params![object.id],
         )?;
         for relation in &object.relations {
+            let confidence = relation
+                .edge_confidence
+                .or_else(|| Some(edge_confidence_for(relation.origin)));
             tx.execute(
-                "INSERT OR REPLACE INTO relations (from_id, to_id, type, origin, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT OR REPLACE INTO relations (from_id, to_id, type, origin, created_at, why, confidence)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     object.id,
                     relation.target_id,
                     relation_str(relation.kind),
                     origin_str(relation.origin),
                     now(),
+                    relation.why,
+                    confidence,
                 ],
             )?;
         }
@@ -611,6 +623,8 @@ impl Lake {
                     target_label: titles.get(e.to_id.as_str()).map(|t| t.to_string()).unwrap_or_else(|| e.to_id.clone()),
                     kind: e.kind,
                     origin: e.origin,
+                    why: e.why.clone(),
+                    edge_confidence: e.confidence,
                 })
                 .collect();
             out.push(object);
@@ -779,9 +793,9 @@ impl Lake {
     // -------------------------------------------------------------- graph --
 
     pub fn edges(&self) -> Result<Vec<Edge>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT from_id, to_id, type, origin FROM relations")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT from_id, to_id, type, origin, why, confidence FROM relations",
+        )?;
         let rows = stmt
             .query_map([], |r| {
                 Ok(Edge {
@@ -789,6 +803,8 @@ impl Lake {
                     to_id: r.get(1)?,
                     kind: relation_from(&r.get::<_, String>(2)?),
                     origin: origin_from(&r.get::<_, String>(3)?),
+                    why: r.get(4)?,
+                    confidence: r.get(5)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -807,10 +823,35 @@ impl Lake {
         kind: RelationType,
         origin: RelationOrigin,
     ) -> Result<bool> {
+        self.put_relation_detail(from_id, to_id, kind, origin, None, None)
+    }
+
+    /// Writes one edge, updating `why` and `confidence` when the edge already exists.
+    pub fn put_relation_detail(
+        &self,
+        from_id: &str,
+        to_id: &str,
+        kind: RelationType,
+        origin: RelationOrigin,
+        why: Option<&str>,
+        confidence: Option<f32>,
+    ) -> Result<bool> {
+        let confidence = confidence.or_else(|| Some(edge_confidence_for(origin)));
         let changed = self.conn.execute(
-            "INSERT OR IGNORE INTO relations (from_id, to_id, type, origin, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![from_id, to_id, relation_str(kind), origin_str(origin), now()],
+            "INSERT INTO relations (from_id, to_id, type, origin, created_at, why, confidence)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(from_id, to_id, type) DO UPDATE SET
+                why = COALESCE(excluded.why, relations.why),
+                confidence = COALESCE(excluded.confidence, relations.confidence)",
+            params![
+                from_id,
+                to_id,
+                relation_str(kind),
+                origin_str(origin),
+                now(),
+                why,
+                confidence,
+            ],
         )?;
         Ok(changed > 0)
     }
@@ -1182,6 +1223,14 @@ fn status_str(status: knowlith_core::ObjectStatus) -> &'static str {
         Conflicted => "conflicted",
         Superseded => "superseded",
         Rejected => "rejected",
+    }
+}
+
+/// Default trust for graph expansion, by how the edge was created.
+fn edge_confidence_for(origin: RelationOrigin) -> f32 {
+    match origin {
+        RelationOrigin::Structural | RelationOrigin::Manual => 1.0,
+        RelationOrigin::Model => 0.75,
     }
 }
 

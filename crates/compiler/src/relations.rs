@@ -233,20 +233,35 @@ fn creates_cycle(kept: &[ProposedEdge], edge: &ProposedEdge) -> bool {
 /// `UsedBy` is stored explicitly rather than derived, because the impact
 /// query — "what breaks if I change this" — is the one the owner runs, and
 /// it must not depend on scanning every row in the other direction.
-pub fn edge_pair(edge: &ProposedEdge) -> [(String, String, RelationType, RelationOrigin); 2] {
+/// One stored edge, ready for the lake.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredEdge {
+    pub from: String,
+    pub to: String,
+    pub kind: RelationType,
+    pub origin: RelationOrigin,
+    pub why: Option<String>,
+    pub confidence: Option<f32>,
+}
+
+pub fn edge_pair(edge: &ProposedEdge) -> [StoredEdge; 2] {
     [
-        (
-            edge.from.clone(),
-            edge.to.clone(),
-            RelationType::DependsOn,
-            RelationOrigin::Model,
-        ),
-        (
-            edge.to.clone(),
-            edge.from.clone(),
-            RelationType::UsedBy,
-            RelationOrigin::Model,
-        ),
+        StoredEdge {
+            from: edge.from.clone(),
+            to: edge.to.clone(),
+            kind: RelationType::DependsOn,
+            origin: RelationOrigin::Model,
+            why: Some(edge.why.clone()),
+            confidence: Some(0.75),
+        },
+        StoredEdge {
+            from: edge.to.clone(),
+            to: edge.from.clone(),
+            kind: RelationType::UsedBy,
+            origin: RelationOrigin::Model,
+            why: None,
+            confidence: Some(0.75),
+        },
     ]
 }
 
@@ -360,7 +375,7 @@ mod tests {
             to: "b".into(),
             why: "w".into(),
         };
-        assert!(edge_pair(&edge).iter().all(|(_, _, _, origin)| *origin == RelationOrigin::Model));
+        assert!(edge_pair(&edge).iter().all(|stored| stored.origin == RelationOrigin::Model));
     }
 
     #[test]

@@ -109,6 +109,8 @@ fn lake_with_a_company(path: &Path) -> Lake {
         target_label: "Tko je stalan kupac".into(),
         kind: knowlith_core::RelationType::DependsOn,
         origin: knowlith_core::RelationOrigin::Model,
+        why: None,
+        edge_confidence: None,
     }];
     lake.put_object(&discount).unwrap();
 
@@ -196,7 +198,7 @@ fn a_client_can_initialize_and_list_everything() {
     assert!(out[0]["result"]["instructions"].as_str().unwrap().contains("Termoval"));
 
     let tools = out[1]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 12);
     assert!(tools.iter().all(|t| t["icons"][0]["src"].is_string()));
 
     assert!(!out[2]["result"]["prompts"].as_array().unwrap().is_empty());
@@ -216,7 +218,10 @@ fn an_approved_rule_comes_back_with_its_source_and_its_foundation() {
     assert!(text.contains("5% popusta"));
     assert!(text.contains("Uvjeti prodaje.md"), "no document name: {text}");
     assert!(text.contains("Popust za stalne kupce iznosi 5%."), "no quote: {text}");
-    assert!(text.contains("Rests on"), "the threshold was not named: {text}");
+    assert!(
+        text.contains("Tko je stalan kupac") || text.contains("20.000 EUR"),
+        "the foundation was not inlined: {text}"
+    );
 
     let structured = &result["structuredContent"]["results"][0];
     assert_eq!(structured["id"], "rule:discount");
@@ -277,11 +282,17 @@ fn coverage_reports_what_the_agent_never_looked_at() {
         .unwrap()
         .contains("5% popusta"));
 
-    // Read only one of the two, then close.
+    // Read only one of the two, then close. Foundations are off here on
+    // purpose: with includeFoundations true, threshold would be read along
+    // with discount and coverage would look clean while the agent skipped it.
     let closed = converse(
         &db,
         &[
-            call("get_context", 1, json!({ "id": "rule:discount", "caseId": case_id })),
+            call(
+                "get_context",
+                1,
+                json!({ "id": "rule:discount", "caseId": case_id, "includeFoundations": false }),
+            ),
             call("check_coverage", 2, json!({ "caseId": case_id })),
         ],
     );
@@ -772,6 +783,40 @@ fn an_unknown_client_is_left_unattributed_rather_than_guessed() {
     assert!(
         reads.iter().all(|(_, app)| app.is_none()),
         "an unrecognised client must not be filed under one of the three we know: {reads:?}",
+    );
+}
+
+#[test]
+fn get_task_context_returns_a_rich_pack_with_foundations_and_a_case() {
+    let db = temp_db("task-context");
+    drop(lake_with_a_company(&db));
+
+    let out = converse(
+        &db,
+        &[call(
+            "get_task_context",
+            1,
+            json!({ "question": "ponuda za stalnog kupca s popustom" }),
+        )],
+    );
+    let result = &out[0]["result"];
+    assert_eq!(result["isError"], json!(false));
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("5% popusta"), "primary rule missing: {text}");
+    assert!(
+        text.contains("20.000 EUR") || text.contains("Tko je stalan kupac"),
+        "foundation not inlined: {text}"
+    );
+    assert!(text.contains("case id:"), "no case for coverage: {text}");
+
+    let structured = &result["structuredContent"];
+    assert!(structured["caseId"].is_string());
+    assert!(structured["results"].as_array().unwrap().len() >= 2);
+
+    let lake = Lake::open(&db).unwrap();
+    assert!(
+        !reads_in(&lake).is_empty(),
+        "a rich pack must record what was served",
     );
 }
 

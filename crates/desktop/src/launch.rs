@@ -51,7 +51,7 @@ impl Outcome {
             ),
             Outcome::NoWindow => {
                 format!(
-                    "{} runs in the terminal. On Company brain, click a node and Ask AI — a live session opens beside the map.",
+                    "{} runs in the terminal. Use Try in your AI or Ask on the company brain — Knowlith opens Terminal with the question ready.",
                     app.label()
                 )
             }
@@ -166,10 +166,7 @@ pub fn open(app: App) {
 
 /// Opens the application with a prompt already sitting in its composer.
 ///
-/// Desktop hosts get a deep link; CLI hosts get a Terminal window. The
-/// in-app way to ask is the company chat, which runs the CLI headless over
-/// `/api/terminal` — there used to be a third path, an xterm in a side
-/// panel, and two ways of doing one thing meant two sets of bugs.
+/// Desktop hosts get a deep link; CLI hosts get a Terminal window.
 pub fn open_with_prompt(app: App, prompt: &str) -> TryLaunch {
     match app.launch_surface() {
         crate::apps::LaunchSurface::Missing => TryLaunch {
@@ -211,23 +208,15 @@ pub fn open_with_prompt(app: App, prompt: &str) -> TryLaunch {
     }
 }
 
-/// The shell line the chat shows for a headless run, so the owner can see
-/// what was started on their machine.
+/// The shell line Terminal would run, for display when the owner asks to see it.
 pub fn cli_command_line(app: App, prompt: &str) -> Option<String> {
     let binary = app.cli_binary()?;
     Some(terminal_command(app, &binary, prompt))
 }
 
-/// Non-interactive argv: plain text on stdout, then exit.
-///
-/// Used by the company-brain chat so the owner sees an answer, not a TUI.
-/// MCP from the owner's config stays on — that is how Knowlith is read.
+/// Non-interactive argv for a one-shot CLI run (tests and tooling).
 ///
 /// `server_key` is the `mcpServers` key Connect wrote (`knowlith-<company>`).
-/// Each CLI, run headless, has its own way of quietly *not* calling a tool
-/// and answering from the model instead; the flags below are what stop
-/// that, because an answer with no read behind it is the one thing this
-/// chat may not show.
 pub fn cli_print_argv(app: App, server_key: &str, prompt: &str) -> Option<(std::path::PathBuf, Vec<String>)> {
     let binary = app.cli_binary()?;
     let args = match app {
@@ -303,6 +292,11 @@ pub fn prompt_deeplink(app: App, prompt: &str) -> Option<String> {
         }
     };
     Some(url)
+}
+
+/// Opens the local interface in the owner's default browser.
+pub fn open_browser(url: &str) {
+    open_url(url);
 }
 
 /// Hands a URL to the operating system. Used for `claude://`, `codex://`,
@@ -509,7 +503,7 @@ mod tests {
         }
         assert_eq!(open_or_restart(App::Cursor), Outcome::NoWindow);
         let message = Outcome::NoWindow.message(App::Cursor);
-        assert!(message.contains("Ask AI"), "{message}");
+        assert!(message.contains("Ask") || message.contains("Try in your AI"), "{message}");
         assert!(!message.contains("not installed"), "{message}");
     }
 

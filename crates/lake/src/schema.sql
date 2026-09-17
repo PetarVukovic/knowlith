@@ -155,6 +155,11 @@ CREATE TABLE IF NOT EXISTS relations (
     type        TEXT NOT NULL,   -- depends_on | used_by | derived_from | conflicts_with
     origin      TEXT NOT NULL,   -- structural | model | manual
     created_at  TEXT NOT NULL,
+    -- Why this edge exists, when a model or a person proposed it.
+    why         TEXT,
+    -- How much to trust this edge in graph expansion. Structural and manual
+    -- edges are 1.0; model-proposed edges default lower until confirmed.
+    confidence  REAL,
     PRIMARY KEY (from_id, to_id, type)
 );
 

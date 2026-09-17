@@ -140,6 +140,8 @@ fn approving_marks_everything_downstream_as_needing_attention() {
             target_label: "Izrada ponude".into(),
             kind: RelationType::UsedBy,
             origin: RelationOrigin::Structural,
+            why: None,
+            edge_confidence: None,
         }],
     ))
     .unwrap();
@@ -153,6 +155,8 @@ fn approving_marks_everything_downstream_as_needing_attention() {
             target_label: "Izradi ponudu".into(),
             kind: RelationType::UsedBy,
             origin: RelationOrigin::Structural,
+            why: None,
+            edge_confidence: None,
         }],
     ))
     .unwrap();
@@ -212,6 +216,8 @@ fn the_graph_in_memory_agrees_with_the_graph_on_disk() {
             target_label: "Popust".into(),
             kind: RelationType::UsedBy,
             origin: RelationOrigin::Structural,
+            why: None,
+            edge_confidence: None,
         }],
     ))
     .unwrap();
@@ -224,6 +230,8 @@ fn the_graph_in_memory_agrees_with_the_graph_on_disk() {
             target_label: "Ponuda".into(),
             kind: RelationType::UsedBy,
             origin: RelationOrigin::Structural,
+            why: None,
+            edge_confidence: None,
         }],
     ))
     .unwrap();
@@ -365,6 +373,8 @@ fn a_merge_rewires_what_pointed_at_the_dropped_object() {
             target_label: "Redovni popust".into(),
             kind: RelationType::DependsOn,
             origin: RelationOrigin::Structural,
+            why: None,
+            edge_confidence: None,
         }],
     ))
     .unwrap();

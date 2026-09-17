@@ -339,6 +339,8 @@ fn build(
                 // Structural: the edge is the set of objects we handed the
                 // engine, which we chose, not something it proposed.
                 origin: RelationOrigin::Structural,
+                why: None,
+                edge_confidence: None,
             })
             .collect(),
         path: format!("skills/{}.md", id.trim_start_matches("skill:").replace('.', "/")),
@@ -457,6 +459,8 @@ mod tests {
             target_label: "Rok plaćanja".into(),
             kind: RelationType::DependsOn,
             origin: RelationOrigin::Structural,
+            why: None,
+            edge_confidence: None,
         });
         vec![
             process,

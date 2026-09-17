@@ -394,6 +394,41 @@ impl Lake {
         )?;
         Ok(format!("{count}:{}", latest.unwrap_or_default()))
     }
+
+    /// Changes whenever the live object set or any object's wording moves.
+    ///
+    /// Used to decide whether the dependency graph needs another pass. Object
+    /// count alone misses an edit that keeps the same number of rules.
+    pub fn knowledge_fingerprint(&self) -> Result<String> {
+        use knowlith_core::sha256_hex;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT id, updated_at, title, body FROM objects
+             WHERE status IN ('approved', 'proposed', 'conflicted')
+             ORDER BY id",
+        )?;
+        let mut material = String::new();
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, updated_at, title, body) = row?;
+            material.push_str(&id);
+            material.push('\t');
+            material.push_str(&updated_at);
+            material.push('\t');
+            material.push_str(&title);
+            material.push('\t');
+            material.push_str(&body);
+            material.push('\n');
+        }
+        Ok(sha256_hex(material.as_bytes()))
+    }
 }
 
 /// Turns a person's question into something FTS5 will accept.

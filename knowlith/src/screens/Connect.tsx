@@ -110,11 +110,6 @@ export function Connect() {
     if (tool.state === "connected") {
       // CLI assistants have no desktop window — Open on Connect used to call
       // the daemon, get "not installed", and contradict the Connected badge.
-      if (tool.launchSurface === "terminal") {
-        setNote(`${tool.label} answers in the chat beside the company brain.`)
-        navigate(`/brain?agent=${encodeURIComponent(tool.slug)}`)
-        return
-      }
       setBusy(tool.slug)
       // Open with a ready question in the composer — empty Open left owners
       // staring at a blank chat with no reason to reach for Knowlith.

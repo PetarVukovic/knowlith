@@ -325,6 +325,8 @@ fn validate(group: &Group, documents: &HashMap<&str, &Document>) -> std::result:
                 target_label: target.clone(),
                 kind: RelationType::DependsOn,
                 origin: RelationOrigin::Structural,
+                why: None,
+                edge_confidence: None,
             })
             .collect(),
         path: path_for(kind, &group.id),

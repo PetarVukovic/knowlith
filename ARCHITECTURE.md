@@ -137,6 +137,10 @@ silence.
 case, and deliberately records nothing. Recording it would inflate the counts
 and destroy the coverage figure.
 
+**Rich packs are reads.** `get_task_context` returns full approved text,
+inlined foundations, and every evidence quote in one answer, and records a
+`tool_reads` row for each object it serves. See [`docs/mcp-rich-context.md`](docs/mcp-rich-context.md).
+
 **Coverage is possible because the set is finite.** The approved set is known
 and the gateway named what it offered, so the interface can report what an
 agent *skipped* — which nothing built on open-ended retrieval can do.
@@ -226,14 +230,11 @@ off; the library's drag controls fire a synthetic `pointerup` without a
 pointer id that three's orbit controls cannot handle, and the owner's
 interactions are click and hover.
 
-**What lights up is what was read.** The chat beside the graph runs the
-owner's own CLI in print mode over a WebSocket. While a session is live the
-interface polls `GET /api/usage` and lights the objects the gateway recorded
-under that session's `tool_reads`. The glow is proof of use drawn on the map:
-it comes from the same rows as the Activity screen, never from the answer's
-text. There is one path for asking inside Knowlith — the print-mode chat —
-not a second interactive terminal doing the same job with a different failure
-mode.
+**Asking happens outside Knowlith.** Clicking a node and choosing an assistant
+calls `POST /api/tools/{app}/try`, which opens Claude Desktop, Codex or a
+Terminal session on the owner's machine with the question prefilled. The MCP
+plugin the owner connected during setup reads the lake; Knowlith does not run
+a chat of its own beside the map.
 
 ## What updates by itself, and what the owner has to do
 

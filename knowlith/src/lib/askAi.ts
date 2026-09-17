@@ -53,7 +53,7 @@ export async function askConnectedAi(prompt: string): Promise<AskOk | AskErr> {
 export function companyKnowledgePrompt(company: string): string {
   return (
     `Using only Knowlith tools, tell me what you know about ${company}. ` +
-    `Call get_relevant_context for this company, read what it lists, then call check_coverage. ` +
+    `Call get_task_context for this company, then call check_coverage. ` +
     `Say clearly what you could verify from approved knowledge and what you could not.`
   )
 }
@@ -65,23 +65,23 @@ export function objectTryPrompt(kind: ObjectKind, title: string, company: string
     case "skill":
       return (
         `Use Knowlith's "${name}" skill. Walk me through how ${company} actually does this. ` +
-        `Call get_relevant_context and check_coverage before you finish.`
+        `Call get_task_context and check_coverage before you finish.`
       )
     case "rule":
       return (
         `Using only Knowlith, apply the company rule "${name}" for ${company}. ` +
-        `Call get_relevant_context and check_coverage. Cite the document you read.`
+        `Call get_task_context and check_coverage. Cite the document you read.`
       )
     case "process":
       return (
         `Using only Knowlith, walk me through the process "${name}" the way ${company} actually does it. ` +
-        `Call get_relevant_context and check_coverage. Keep the steps in order.`
+        `Call get_task_context and check_coverage. Keep the steps in order.`
       )
     case "term":
     case "fact":
       return (
         `Using only Knowlith, explain what "${name}" means at ${company}. ` +
-        `Call get_relevant_context and check_coverage. Do not invent a definition.`
+        `Call get_task_context and check_coverage. Do not invent a definition.`
       )
   }
 }

@@ -10,10 +10,9 @@ import type { ObjectKind, ObjectStatus } from "@/lib/types"
 /**
  * Opens a connected AI with a question that names this piece of knowledge.
  *
- * A CLI assistant answers in the company chat on the Brain screen, with
- * this object in focus; a desktop app opens outside. Either way the panel
- * watches for a gateway read of *this* id — that is the proof, not
- * whatever the assistant printed.
+ * Opens a connected AI outside Knowlith with a question about this object.
+ * The panel watches for a gateway read of *this* id — that is the proof,
+ * not whatever the assistant printed.
  */
 export function TryInAi({
   id,
@@ -98,7 +97,7 @@ export function TryInAi({
             {watching || readBy || gaveUp ? "Try again in your AI" : label}
           </Button>
           <p className="min-w-0 flex-1 text-[13px] text-muted">
-            {hint ?? "Choose Claude, Codex or Cursor — CLIs answer in Knowlith's chat, desktop apps open outside."}
+            {hint ?? "Choose Claude, Codex or Cursor — desktop apps and Terminal open outside Knowlith."}
           </p>
           {readBy ? (
             <span className="flex shrink-0 items-center gap-1.5 text-[12.5px] text-confirmed">
@@ -129,9 +128,6 @@ export function TryInAi({
         prompt={question}
         about={title}
         onNeedsConnect={() => navigate("/connect")}
-        onAskInside={(slug) =>
-          navigate(`/brain?focus=${encodeURIComponent(id)}&agent=${encodeURIComponent(slug)}`)
-        }
         onLaunched={(result) => {
           setHint(result.message)
           setWatching(true)

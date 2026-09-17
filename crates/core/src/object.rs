@@ -104,13 +104,17 @@ pub enum RelationOrigin {
     Manual,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Relation {
     pub target_id: String,
     pub target_label: String,
     #[serde(rename = "type")]
     pub kind: RelationType,
     pub origin: RelationOrigin,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_confidence: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

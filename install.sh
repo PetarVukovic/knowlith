@@ -174,7 +174,8 @@ printf '\n'
 
 printf '\nNext:\n'
 printf '  %s scan ~/Documents/YourCompany   read a folder\n' "knowlith"
-printf '  %s serve                          open the interface on http://127.0.0.1:7717\n' "knowlith"
+printf '  %s start                          open the interface in your browser\n' "knowlith"
+printf '  %s serve                          same, without opening a browser tab\n' "knowlith"
 printf '  %s connect                        hand it to Claude and Codex\n' "knowlith"
 printf '  %s autostart on                   keep it running when you close the window\n' "knowlith"
 printf '\nWhat it reads is kept in ~/Knowlith. Knowlith itself sends nothing anywhere;\n'

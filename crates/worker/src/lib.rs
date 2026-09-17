@@ -43,6 +43,8 @@ use knowlith_lake::{Lake, NewJob, PRIORITY_BACKGROUND, PRIORITY_NORMAL, ScanTarg
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+mod watch;
+
 pub const KIND_RESCAN: &str = "rescan";
 pub const KIND_COMPILE: &str = "compile_document";
 pub const KIND_SKILLS: &str = "draft_skills";
@@ -327,12 +329,12 @@ impl Worker {
             && self.lake.pending_of_kind(KIND_SETTLE)? == 0
         {
             let objects = self.lake.object_ids(None)?.len();
-            let related_at: usize = self
+            let fingerprint = self.lake.knowledge_fingerprint().unwrap_or_default();
+            let related_fingerprint = self
                 .lake
-                .setting("related_at")?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            if objects > 1 && objects != related_at && enqueue_relating(&self.lake)? {
+                .setting("related_fingerprint")?
+                .unwrap_or_default();
+            if objects > 1 && fingerprint != related_fingerprint && enqueue_relating(&self.lake)? {
                 queued += 1;
             }
         }
@@ -661,8 +663,19 @@ impl Worker {
 
         let mut added = 0;
         for edge in &run.edges {
-            for (from, to, kind, origin) in knowlith_compiler::edge_pair(edge) {
-                if self.lake.put_relation(&from, &to, kind, origin).unwrap_or(false) {
+            for stored in knowlith_compiler::edge_pair(edge) {
+                if self
+                    .lake
+                    .put_relation_detail(
+                        &stored.from,
+                        &stored.to,
+                        stored.kind,
+                        stored.origin,
+                        stored.why.as_deref(),
+                        stored.confidence,
+                    )
+                    .unwrap_or(false)
+                {
                     added += 1;
                 }
             }
@@ -670,9 +683,10 @@ impl Worker {
         // Recorded so the pass does not repeat until the set changes again.
         // Written after the edges land, so a failed run is retried rather
         // than marked done.
-        let _ = self
-            .lake
-            .set_setting("related_at", &self.lake.object_ids(None).map(|ids| ids.len()).unwrap_or(0).to_string());
+        let count = self.lake.object_ids(None).map(|ids| ids.len()).unwrap_or(0);
+        let fingerprint = self.lake.knowledge_fingerprint().unwrap_or_default();
+        let _ = self.lake.set_setting("related_at", &count.to_string());
+        let _ = self.lake.set_setting("related_fingerprint", &fingerprint);
 
         Ok(format!(
             "{added} edges across {} objects · {} proposals not usable",
@@ -822,6 +836,8 @@ pub fn spawn_pool(
         }));
     }
 
+    handles.push(watch::spawn(db.to_path_buf(), stop));
+
     Ok(handles)
 }
 
@@ -959,11 +975,11 @@ pub fn enqueue_skill_drafting(lake: &Lake) -> Result<bool> {
 /// Keyed on how many objects exist, so asking twice with nothing new is one
 /// job, and a folder that grew is new work.
 pub fn enqueue_relating(lake: &Lake) -> Result<bool> {
-    let objects = lake.object_ids(None)?.len();
+    let fingerprint = lake.knowledge_fingerprint().unwrap_or_default();
     Ok(lake.enqueue(&NewJob {
         kind: KIND_RELATE.into(),
         payload: "{}".into(),
-        idempotency_key: format!("{KIND_RELATE}:{objects}"),
+        idempotency_key: format!("{KIND_RELATE}:{fingerprint}"),
         priority: PRIORITY_NORMAL,
     })?)
 }
@@ -1010,7 +1026,7 @@ mod policy_tests {
 /// How long after the last write we wait before trusting the bytes.
 ///
 /// Renfield-style write-settle. Separate from the compiler's `settle` job.
-const WRITE_SETTLE_SECS: u64 = 3;
+pub(crate) const WRITE_SETTLE_SECS: u64 = 3;
 
 /// True when the file's mtime is so recent it may still be mid-copy.
 fn still_being_written(path: &Path) -> bool {

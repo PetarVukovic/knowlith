@@ -45,6 +45,11 @@ pub fn lake_db() -> PathBuf {
     root().join("data").join("lake.sqlite")
 }
 
+/// Portable Markdown export of approved knowledge — rebuildable from files.
+pub fn knowledge_dir() -> PathBuf {
+    root().join("knowledge")
+}
+
 /// Where the gateway writes what it could not say over the wire.
 ///
 /// An MCP server speaks JSON-RPC on stdout and must never print anything
