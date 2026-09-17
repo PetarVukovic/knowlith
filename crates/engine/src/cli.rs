@@ -357,9 +357,13 @@ fn wait_with_timeout(
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
+                    let within = if timeout.as_secs() == 0 {
+                        format!("{} ms", timeout.as_millis())
+                    } else {
+                        format!("{} s", timeout.as_secs())
+                    };
                     return Err(EngineError::Transport(format!(
-                        "{label} did not answer within {} seconds, and was stopped",
-                        timeout.as_secs()
+                        "{label} did not answer within {within}, and was stopped"
                     )));
                 }
                 std::thread::sleep(POLL);

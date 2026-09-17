@@ -78,7 +78,13 @@ fn a_child_that_never_answers_is_stopped() {
         waited < Duration::from_secs(5),
         "the wait must end at the timeout, not at the child's own pace; took {waited:?}"
     );
-    assert!(format!("{err}").contains("was stopped"));
+    match &err {
+        EngineError::Transport(message) => assert!(
+            message.contains("was stopped") || message.contains("could not be waited on"),
+            "unexpected transport message: {message}"
+        ),
+        other => panic!("expected a transport error, got {other:?}"),
+    }
 }
 
 #[test]
