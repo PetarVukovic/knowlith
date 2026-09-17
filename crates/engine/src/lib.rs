@@ -169,6 +169,22 @@ impl Engine for Box<dyn Engine> {
     }
 }
 
+/// The engine the owner named in Settings / onboarding.
+///
+/// `auto` (and anything unknown) returns `None`: the worker then keeps the
+/// engine the daemon bound at start, which is what tests inject and what
+/// `knowlith serve --engine auto` resolved. An explicit slug is a live
+/// switch — clicking Cursor must spawn `agent` without a restart, because
+/// the daemon otherwise keeps running Claude from cold start.
+pub fn engine_for_policy(slug: &str) -> Option<Box<dyn Engine>> {
+    match slug.trim() {
+        "managed" => Some(Box::new(ManagedEngine)),
+        other => Flavour::from_slug(other).map(|flavour| {
+            Box::new(Breaker::new(CliEngine::new(flavour))) as Box<dyn Engine>
+        }),
+    }
+}
+
 /// Knowlith Managed.
 ///
 /// Deliberately not implemented in this build. The service it would call does
@@ -185,7 +201,7 @@ impl Engine for ManagedEngine {
 
     fn run(&self, _request: &Request) -> Result<Reply> {
         Err(EngineError::Unavailable(
-            "Knowlith Managed is not available in this build. Choose Codex or Claude Code on this Mac.".into(),
+            "Knowlith Managed is not available in this build. Choose Codex, Claude Code or Cursor Agent on this Mac.".into(),
         ))
     }
 }
@@ -214,5 +230,17 @@ mod tests {
         assert!(EngineError::Transport("reset".into()).is_retryable());
         assert!(!EngineError::Refused("bad json".into()).is_retryable());
         assert!(!EngineError::Unavailable("not installed".into()).is_retryable());
+    }
+
+    #[test]
+    fn clicking_cursor_is_the_agent_binary_not_claude() {
+        assert_eq!(Flavour::from_slug("cursor-agent").unwrap().program(), "agent");
+        assert_eq!(Flavour::from_slug("cursor").unwrap().program(), "agent");
+        assert_eq!(Flavour::from_slug("claude-code").unwrap().program(), "claude");
+        assert_eq!(Flavour::from_slug("codex").unwrap().program(), "codex");
+        assert!(Flavour::from_slug("auto").is_none());
+        assert_eq!(engine_for_policy("cursor-agent").unwrap().name(), "Cursor Agent");
+        assert_eq!(engine_for_policy("claude-code").unwrap().name(), "Claude Code");
+        assert!(engine_for_policy("auto").is_none());
     }
 }

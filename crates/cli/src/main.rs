@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use knowlith_engine::{Breaker, CliEngine, Engine, Flavour, ManagedEngine, RecordingEngine, ReplayEngine, Request, detect};
+use knowlith_engine::{Engine, Flavour, RecordingEngine, ReplayEngine, Request, detect};
 use knowlith_extract::{ExtractError, extract_file, is_noise};
 use knowlith_compiler::Compilation;
 use knowlith_graph::Graph;
@@ -435,16 +435,10 @@ fn resolve_engine(name: &str) -> Result<String> {
 
 fn pick_engine(name: &str) -> Result<Box<dyn Engine>> {
     let name = resolve_engine(name)?;
-    Ok(match name.as_str() {
-        "codex" => Box::new(Breaker::new(CliEngine::new(Flavour::Codex))),
-        "claude" | "claude-code" => Box::new(Breaker::new(CliEngine::new(Flavour::ClaudeCode))),
-        "cursor-agent" | "agent" | "cursor" => {
-            Box::new(Breaker::new(CliEngine::new(Flavour::CursorAgent)))
-        }
-        "managed" => Box::new(ManagedEngine),
-        other => anyhow::bail!(
-            "unknown engine \"{other}\". Try codex, claude-code, cursor-agent, managed or auto."
-        ),
+    knowlith_engine::engine_for_policy(&name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unknown engine \"{name}\". Try codex, claude-code, cursor-agent, managed or auto."
+        )
     })
 }
 

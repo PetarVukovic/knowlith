@@ -332,3 +332,33 @@ fn an_owner_who_turned_automatic_reading_off_gets_no_model_calls() {
         "something was compiled despite automatic reading being off"
     );
 }
+
+#[test]
+fn an_owner_who_picked_cursor_reads_with_agent_not_the_daemon_binding() {
+    // The daemon bound a scripted Claude-stand-in. Policy says Cursor.
+    // The next AI job must spawn Cursor Agent (`agent`), not the bound engine.
+    let worker = worker(Arc::new(Scripted(FOUND)));
+    assert_eq!(worker.reader_name(), "Scripted");
+    worker
+        .lake()
+        .set_policy(&knowlith_lake::Policy {
+            processing: knowlith_lake::Processing::Automatic,
+            pause_on_battery: false,
+            large_scan: 500,
+            engine: "cursor-agent".into(),
+            ..knowlith_lake::Policy::default()
+        })
+        .unwrap();
+    assert_eq!(worker.reader_name(), "Cursor Agent");
+    worker
+        .lake()
+        .set_policy(&knowlith_lake::Policy {
+            processing: knowlith_lake::Processing::Automatic,
+            pause_on_battery: false,
+            large_scan: 500,
+            engine: "claude-code".into(),
+            ..knowlith_lake::Policy::default()
+        })
+        .unwrap();
+    assert_eq!(worker.reader_name(), "Claude Code");
+}

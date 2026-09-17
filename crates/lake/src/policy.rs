@@ -62,9 +62,9 @@ pub struct Policy {
     /// Which CLI reads documents for compile jobs: `auto`, `codex`,
     /// `claude-code`, `cursor-agent`, or `managed`.
     ///
-    /// The worker binds the engine at daemon start. Changing this while
-    /// Knowlith is running takes effect on the next restart — the API says
-    /// so rather than pretending the switch is live.
+    /// An explicit choice is live: the worker reads this on each AI job, so
+    /// clicking Cursor in onboarding starts `agent` on the next document
+    /// without a restart. `auto` keeps the engine the daemon bound at start.
     #[serde(default = "default_engine")]
     pub engine: String,
     /// Parallel CLI compile workers (I/O track is always separate).

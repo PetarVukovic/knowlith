@@ -97,7 +97,7 @@ sh scripts/start.sh --fresh --demo
 
 Supervisor demo end-to-end (reset, compile, build quiz): `sh scripts/fresh-start.sh`
 
-**Changing the reader in Settings only takes effect after you restart Knowlith.** The background worker binds its engine at daemon start; curl and the UI persist the choice for the next start.
+**Changing the reader in Settings applies to the next document** — Cursor runs `agent`, Claude Code runs `claude`, Codex runs `codex`. No restart.
 
 ---
 

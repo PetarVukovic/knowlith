@@ -617,6 +617,25 @@ mod tests {
     }
 
     #[test]
+    fn clicking_each_cli_starts_that_cli_not_another() {
+        let cursor = terminal_command(App::Cursor, std::path::Path::new("/bin/agent"), "q");
+        assert!(cursor.starts_with("/bin/agent "), "{cursor}");
+        let claude = terminal_command(App::ClaudeCode, std::path::Path::new("/bin/claude"), "q");
+        assert!(claude.starts_with("/bin/claude "), "{claude}");
+        let codex = terminal_command(App::Codex, std::path::Path::new("/bin/codex"), "q");
+        assert!(codex.starts_with("/bin/codex "), "{codex}");
+    }
+
+    #[test]
+    fn a_codex_cli_on_path_opens_in_the_terminal() {
+        if App::Codex.cli_binary().is_none() {
+            return;
+        }
+        assert_eq!(App::Codex.launch_surface(), crate::apps::LaunchSurface::Terminal);
+        assert_eq!(open_or_restart(App::Codex), Outcome::NoWindow);
+    }
+
+    #[test]
     fn claude_and_codex_cli_take_the_prompt_as_documented() {
         // `claude [prompt]` and `codex [PROMPT]` — positional after `--`.
         let claude = terminal_command(App::ClaudeCode, std::path::Path::new("/opt/bin/claude"), "hi");

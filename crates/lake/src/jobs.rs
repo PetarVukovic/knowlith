@@ -308,6 +308,20 @@ impl Lake {
         Ok(released)
     }
 
+    /// After the owner picks a different reader, queued AI work must not sit
+    /// behind the previous CLI's backoff. Clicking Cursor while Claude is
+    /// rate-limited would otherwise look like nothing happened until the
+    /// delay expired.
+    pub fn nudge_ai_queue(&self) -> Result<usize> {
+        let nudged = self.conn.execute(
+            "UPDATE jobs SET run_after = ?1
+             WHERE state = 'queued'
+               AND kind IN ('compile_document', 'draft_skills', 'relate', 'supervise', 'settle')",
+            params![Utc::now().to_rfc3339()],
+        )?;
+        Ok(nudged)
+    }
+
     /// Held jobs, with why, so the interface can say which button helps.
     pub fn held(&self) -> Result<Vec<(String, String, i64)>> {
         let mut stmt = self.conn.prepare(

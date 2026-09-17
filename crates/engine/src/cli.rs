@@ -71,6 +71,18 @@ impl Flavour {
         }
     }
 
+    /// The CLI the owner named, including the aliases Settings and onboarding use.
+    ///
+    /// `auto` is not a flavour — it means "use whatever the daemon bound".
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        match slug.trim() {
+            "codex" => Some(Self::Codex),
+            "claude" | "claude-code" => Some(Self::ClaudeCode),
+            "agent" | "cursor" | "cursor-agent" => Some(Self::CursorAgent),
+            _ => None,
+        }
+    }
+
     /// Whether the CLI can enforce a JSON Schema itself. Codex takes
     /// `--output-schema`; Claude Code and Cursor Agent do not, so the schema
     /// goes into the prompt instead.

@@ -533,8 +533,8 @@ impl Worker {
         }
 
         let company = self.lake.setting("company_profile").ok().flatten();
-        let engine_name = self.engine.name().to_string();
-        let engine = Arc::clone(&self.engine);
+        let engine = self.job_engine();
+        let engine_name = engine.name().to_string();
         let docs_for_engine: Vec<Document> = loaded.iter().map(|(_, d)| d.clone()).collect();
         let job_ids: Vec<i64> = loaded.iter().map(|(id, _)| *id).collect();
         let subject = batch_subject(loaded.iter().map(|(_, document)| document.name.as_str()));
@@ -649,8 +649,8 @@ impl Worker {
         stop: &AtomicBool,
     ) -> std::result::Result<String, Failure> {
         let objects = self.lake.objects().map_err(|e| Failure::Refused(e.to_string()))?;
-        let engine_name = self.engine.name().to_string();
-        let engine = Arc::clone(&self.engine);
+        let engine = self.job_engine();
+        let engine_name = engine.name().to_string();
 
         let run = self.with_heartbeat(job.id, stop, move || {
             knowlith_compiler::draft_all(&*engine, &objects)
@@ -690,7 +690,8 @@ impl Worker {
         if stop.load(Ordering::Relaxed) {
             return Ok("stopped before supervisor started".into());
         }
-        let report = knowlith_supervisor::run(&mut self.lake, &*self.engine, &session_id)
+        let engine = self.job_engine();
+        let report = knowlith_supervisor::run(&mut self.lake, &*engine, &session_id)
             .map_err(Failure::Refused)?;
         let _ = self
             .lake
@@ -715,8 +716,8 @@ impl Worker {
         stop: &AtomicBool,
     ) -> std::result::Result<String, Failure> {
         let objects = self.lake.objects().map_err(|e| Failure::Refused(e.to_string()))?;
-        let engine_name = self.engine.name().to_string();
-        let engine = Arc::clone(&self.engine);
+        let engine = self.job_engine();
+        let engine_name = engine.name().to_string();
 
         let run = self.with_heartbeat(job.id, stop, move || {
             knowlith_compiler::propose_relations(&*engine, &objects)
@@ -853,6 +854,25 @@ impl Worker {
 
     pub fn lake_mut(&mut self) -> &mut Lake {
         &mut self.lake
+    }
+
+    /// The CLI this tick will actually spawn.
+    ///
+    /// The daemon binds one engine at start (`auto` resolves Claude → Codex
+    /// → Cursor). That is the wrong process once the owner has clicked
+    /// Cursor in onboarding: policy says `cursor-agent` and the bound
+    /// engine is still Claude. An explicit policy slug wins on every AI
+    /// job; `auto` keeps the bound engine (tests, and a daemon that has
+    /// not been told otherwise).
+    pub fn reader_name(&self) -> String {
+        self.job_engine().name().to_string()
+    }
+
+    fn job_engine(&self) -> Arc<dyn Engine> {
+        match knowlith_engine::engine_for_policy(&self.lake.policy().engine) {
+            Some(engine) => Arc::from(engine),
+            None => Arc::clone(&self.engine),
+        }
     }
 }
 

@@ -238,10 +238,14 @@ impl App {
                 }
             }
             App::Codex => {
-                if self.application_path().is_some() || self.chatgpt_desktop().is_some() {
-                    LaunchSurface::Desktop
-                } else if self.cli_binary().is_some() {
+                // Same contract as Cursor / Claude Code: the CLI the owner
+                // clicked, in Terminal. Codex.app is a fallback when `codex`
+                // is not on PATH — opening the desktop app when they chose
+                // the CLI is the same bug as spawning `claude` for Cursor.
+                if self.cli_binary().is_some() {
                     LaunchSurface::Terminal
+                } else if self.application_path().is_some() || self.chatgpt_desktop().is_some() {
+                    LaunchSurface::Desktop
                 } else {
                     LaunchSurface::Missing
                 }

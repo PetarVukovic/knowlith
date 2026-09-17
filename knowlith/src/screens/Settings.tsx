@@ -409,8 +409,8 @@ export function Settings() {
                 <div className="grid gap-2 border-t border-line pt-4">
                   <div className="text-[13px] font-medium text-ink">Who reads your documents</div>
                   <p className="text-[12.5px] text-muted">
-                    Codex, Claude Code or Cursor Agent on this Mac. Changing this needs a
-                    Knowlith restart to take effect on work already queued.
+                    Codex, Claude Code or Cursor Agent on this Mac. A change applies to the next
+                    document — Cursor runs `agent`, Claude Code runs `claude`, Codex runs `codex`.
                   </p>
                   {(
                     [

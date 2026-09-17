@@ -2064,8 +2064,7 @@ struct PolicyDto {
     /// that actually helps rather than a generic "retry".
     held: Vec<HeldDto>,
     on_battery: bool,
-    /// Set when the saved engine changed: the worker still holds the old
-    /// one until Knowlith is restarted.
+    /// Set when the saved engine changed: the next document uses the new CLI.
     #[serde(skip_serializing_if = "Option::is_none")]
     engine_restart: Option<String>,
 }
@@ -2177,8 +2176,9 @@ async fn write_policy(
             let _ = lake.release_held();
         }
         if previous_engine != policy.engine {
+            let _ = lake.nudge_ai_queue();
             Some(
-                "Restart Knowlith for the new reader to take effect on queued work. The choice is saved."
+                "The next document will be read with this tool. No restart."
                     .into(),
             )
         } else if previous.compile_workers_capped() != policy.compile_workers {
