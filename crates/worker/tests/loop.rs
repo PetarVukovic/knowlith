@@ -20,10 +20,7 @@ impl Engine for Scripted {
         "Scripted"
     }
     fn run(&self, _request: &Request) -> knowlith_engine::Result<Reply> {
-        Ok(Reply {
-            text: self.0.to_string(),
-            engine: "Scripted".into(),
-        })
+        Ok(Reply::new("Scripted", self.0))
     }
 }
 

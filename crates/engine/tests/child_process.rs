@@ -133,3 +133,50 @@ fn the_child_inherits_no_working_directory_it_could_write_to() {
     assert!(!reply.text.contains("--add-dir"));
     assert!(!reply.text.contains("dangerously"));
 }
+
+#[test]
+fn claude_json_is_the_only_source_of_tokens_and_price() {
+    let path = script(
+        "claude-json",
+        r#"cat >/dev/null
+printf '%s\n' '{"type":"result","result":"{\"candidates\":[]}","usage":{"input_tokens":12,"output_tokens":3},"total_cost_usd":0.01,"model":"claude-sonnet"}'
+"#,
+    );
+    let reply = engine(&path)
+        .run(&Request::new("candidates", "x", "y"))
+        .expect("the child answered");
+    assert_eq!(reply.text, "{\"candidates\":[]}");
+    let usage = reply.usage.expect("the envelope carried a bill");
+    assert_eq!(usage.input_tokens, Some(12));
+    assert_eq!(usage.output_tokens, Some(3));
+    assert_eq!(usage.cost_usd, Some(0.01));
+}
+
+#[test]
+fn codex_progress_jsonl_does_not_replace_the_answer() {
+    let path = script(
+        "codex-jsonl",
+        r#"last=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output-last-message" ]; then
+    shift
+    last=$1
+  fi
+  shift
+done
+cat >/dev/null
+printf '%s\n' '{"candidates":[]}' > "$last"
+printf '%s\n' '{"payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"cached_input_tokens":4,"output_tokens":7}}}}'
+"#,
+    );
+    let reply = CliEngine::new(Flavour::Codex)
+        .with_program(path.to_string_lossy().into_owned())
+        .run(&Request::new("candidates", "x", "y"))
+        .expect("the child answered");
+    assert_eq!(reply.text, "{\"candidates\":[]}");
+    let usage = reply.usage.expect("jsonl carried tokens");
+    assert_eq!(usage.input_tokens, Some(50));
+    assert_eq!(usage.output_tokens, Some(7));
+    assert_eq!(usage.cache_tokens, Some(4));
+    assert!(usage.cost_usd.is_none());
+}

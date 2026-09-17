@@ -533,17 +533,31 @@ impl Worker {
         }
 
         let company = self.lake.setting("company_profile").ok().flatten();
+        let engine_name = self.engine.name().to_string();
         let engine = Arc::clone(&self.engine);
         let docs_for_engine: Vec<Document> = loaded.iter().map(|(_, d)| d.clone()).collect();
         let job_ids: Vec<i64> = loaded.iter().map(|(id, _)| *id).collect();
+        let subject = batch_subject(loaded.iter().map(|(_, document)| document.name.as_str()));
 
         // Stages 1 and 2 only. What the engine says about these documents is
         // stored as-is; deciding which claim is current happens once, over
         // everything, in `settle`.
-        let readings = self.with_heartbeat_many(&job_ids, stop, move || {
+        let batch = self.with_heartbeat_many(&job_ids, stop, move || {
             let refs: Vec<&Document> = docs_for_engine.iter().collect();
             knowlith_compiler::read_many(&*engine, &refs, company.as_deref())
         })??;
+        record_cli_usage(
+            &self.lake,
+            &engine_name,
+            if loaded.len() > 1 {
+                "candidates-batch"
+            } else {
+                "candidates"
+            },
+            &subject,
+            batch.usage.as_ref(),
+        );
+        let readings = batch.readings;
 
         let mut notes = Vec::with_capacity(loaded.len());
         for (_, document) in &loaded {
@@ -635,11 +649,19 @@ impl Worker {
         stop: &AtomicBool,
     ) -> std::result::Result<String, Failure> {
         let objects = self.lake.objects().map_err(|e| Failure::Refused(e.to_string()))?;
+        let engine_name = self.engine.name().to_string();
         let engine = Arc::clone(&self.engine);
 
         let run = self.with_heartbeat(job.id, stop, move || {
             knowlith_compiler::draft_all(&*engine, &objects)
         })??;
+        record_cli_usage(
+            &self.lake,
+            &engine_name,
+            "skill",
+            "approved processes",
+            run.usage.as_ref(),
+        );
 
         let mut stored = 0;
         for skill in &run.skills {
@@ -693,11 +715,19 @@ impl Worker {
         stop: &AtomicBool,
     ) -> std::result::Result<String, Failure> {
         let objects = self.lake.objects().map_err(|e| Failure::Refused(e.to_string()))?;
+        let engine_name = self.engine.name().to_string();
         let engine = Arc::clone(&self.engine);
 
         let run = self.with_heartbeat(job.id, stop, move || {
             knowlith_compiler::propose_relations(&*engine, &objects)
         })??;
+        record_cli_usage(
+            &self.lake,
+            &engine_name,
+            "relations",
+            "your knowledge",
+            run.usage.as_ref(),
+        );
 
         let mut added = 0;
         for edge in &run.edges {
@@ -1119,14 +1149,65 @@ fn plural(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
 }
 
+fn batch_subject<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
+    let names: Vec<&str> = names.into_iter().collect();
+    match names.as_slice() {
+        [] => "documents".into(),
+        [one] => (*one).to_string(),
+        [first, rest @ ..] => {
+            let n = rest.len();
+            format!(
+                "{first} and {}",
+                if n == 1 {
+                    "1 more".to_string()
+                } else {
+                    format!("{n} more")
+                }
+            )
+        }
+    }
+}
+
+fn record_cli_usage(
+    lake: &knowlith_lake::Lake,
+    engine: &str,
+    stage: &str,
+    subject: &str,
+    usage: Option<&knowlith_engine::EngineUsage>,
+) {
+    let Some(usage) = usage.filter(|usage| !usage.is_silent()) else {
+        return;
+    };
+    let _ = lake.record_engine_run(knowlith_lake::NewEngineRun {
+        engine: engine.to_string(),
+        stage: stage.to_string(),
+        subject: subject.to_string(),
+        input_tokens: usage.input_tokens.map(|n| n as i64),
+        output_tokens: usage.output_tokens.map(|n| n as i64),
+        cache_tokens: usage.cache_tokens.map(|n| n as i64),
+        cost_usd: usage.cost_usd,
+        model: usage.model.clone(),
+    });
+}
+
 #[cfg(test)]
 mod plural_tests {
-    use super::plural;
+    use super::{batch_subject, plural};
 
     #[test]
     fn one_is_not_reported_in_the_plural() {
         assert_eq!(plural(1, "file walked", "files walked"), "1 file walked");
         assert_eq!(plural(0, "file walked", "files walked"), "0 files walked");
         assert_eq!(plural(2, "file walked", "files walked"), "2 files walked");
+    }
+
+    #[test]
+    fn a_batch_is_named_after_the_first_file() {
+        assert_eq!(batch_subject(["Cjenik.xlsx"]), "Cjenik.xlsx");
+        assert_eq!(batch_subject(["Cjenik.xlsx", "Uvjeti.md"]), "Cjenik.xlsx and 1 more");
+        assert_eq!(
+            batch_subject(["Cjenik.xlsx", "Uvjeti.md", "Ponuda.pdf"]),
+            "Cjenik.xlsx and 2 more"
+        );
     }
 }

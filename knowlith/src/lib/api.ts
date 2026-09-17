@@ -44,6 +44,7 @@ import type {
   SourceAdded,
   Usage,
   Work,
+  EngineRun,
 } from "./types"
 
 const LATENCY = 120
@@ -276,6 +277,9 @@ export const api = {
   },
   async getRecentActivity() {
     return get<typeof fixtures.recentActivity>("/api/activity", fixtures.recentActivity, [])
+  },
+  async getEngineRuns(): Promise<EngineRun[]> {
+    return get<EngineRun[]>("/api/engine-runs", [], [])
   },
 
   /**

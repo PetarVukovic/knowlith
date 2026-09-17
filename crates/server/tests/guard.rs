@@ -101,6 +101,7 @@ async fn reading_and_writing_are_both_behind_the_token() {
         ("GET", "/api/objects"),
         ("GET", "/api/usage"),
         ("GET", "/api/activity"),
+        ("GET", "/api/engine-runs"),
         ("GET", "/api/tools"),
         ("PUT", "/api/company"),
         ("POST", "/api/tools/codex/connect"),

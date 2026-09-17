@@ -17,7 +17,7 @@ use crate::Result;
 /// The shape this build expects. Bumped whenever a step is added, and stored
 /// so a lake written by a newer Knowlith can be recognised rather than
 /// quietly half-read by an older one.
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 pub fn run(conn: &Connection) -> Result<()> {
     // A read of what is actually there beats a version number: a lake that
@@ -165,6 +165,28 @@ pub fn run(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    if !has_table(conn, "engine_runs")? {
+        // What each CLI invoke printed about tokens and price. Guarded on
+        // the table: CREATE TABLE in schema.sql covers a new lake, and an
+        // older file opened by this build still has to grow it without
+        // failing the open.
+        conn.execute_batch(
+            "CREATE TABLE engine_runs (
+                id              TEXT PRIMARY KEY,
+                at              TEXT NOT NULL,
+                engine          TEXT NOT NULL,
+                stage           TEXT NOT NULL,
+                subject         TEXT NOT NULL,
+                input_tokens    INTEGER,
+                output_tokens   INTEGER,
+                cache_tokens    INTEGER,
+                cost_usd        REAL,
+                model           TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_engine_runs_at ON engine_runs(at DESC);",
+        )?;
+    }
+
     if has_table(conn, "documents")? && !has_column(conn, "documents", "gone_at")? {
         // Set when a rescan finds the file no longer on disk. The snapshot
         // stays so quotes remain checkable; the owner decides whether the
@@ -250,6 +272,7 @@ mod tests {
 
         assert!(has_column(&conn, "tool_reads", "case_id").unwrap());
         assert!(has_column(&conn, "tool_reads", "app").unwrap());
+        assert!(has_table(&conn, "engine_runs").unwrap());
         let indexed: i64 = conn
             .query_row("SELECT count(*) FROM objects_fts", [], |r| r.get(0))
             .unwrap();

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use knowlith_core::{Document, ObjectKind};
-use knowlith_engine::{Engine, Request};
+use knowlith_engine::{Engine, EngineUsage, Request};
 use serde::{Deserialize, Serialize};
 
 use crate::{CompileError, Result};
@@ -184,11 +184,15 @@ struct BatchDoc {
 /// customers, what "success" means here. Without it the model invents the
 /// schema of an invoice twenty times. With it, stage 2 can prefer claims that
 /// matter for *this* company.
-pub fn propose(engine: &dyn Engine, document: &Document, company: Option<&str>) -> Result<Vec<Candidate>> {
+pub fn propose(
+    engine: &dyn Engine,
+    document: &Document,
+    company: Option<&str>,
+) -> Result<(Vec<Candidate>, Option<EngineUsage>)> {
     let instructions = with_company(INSTRUCTIONS, company);
     let request = Request::new("candidates", &instructions, &document.text).with_schema(CANDIDATE_SCHEMA);
     let reply = engine.run(&request)?;
-    parse(&reply.text)
+    Ok((parse(&reply.text)?, reply.usage))
 }
 
 /// Asks the engine about several documents in one CLI invoke.
@@ -199,14 +203,14 @@ pub fn propose_many(
     engine: &dyn Engine,
     documents: &[&Document],
     company: Option<&str>,
-) -> Result<HashMap<String, Vec<Candidate>>> {
+) -> Result<(HashMap<String, Vec<Candidate>>, Option<EngineUsage>)> {
     if documents.is_empty() {
-        return Ok(HashMap::new());
+        return Ok((HashMap::new(), None));
     }
     if documents.len() == 1 {
         let only = documents[0];
-        let found = propose(engine, only, company)?;
-        return Ok(HashMap::from([(only.id.clone(), found)]));
+        let (found, usage) = propose(engine, only, company)?;
+        return Ok((HashMap::from([(only.id.clone(), found)]), usage));
     }
 
     let instructions = with_company(BATCH_INSTRUCTIONS, company);
@@ -227,7 +231,7 @@ pub fn propose_many(
         .with_schema(BATCH_SCHEMA)
         .with_timeout(timeout);
     let reply = engine.run(&request)?;
-    parse_batch(&reply.text, documents)
+    Ok((parse_batch(&reply.text, documents)?, reply.usage))
 }
 
 fn with_company(base: &str, company: Option<&str>) -> String {
@@ -430,15 +434,13 @@ mod tests {
             }
             fn run(&self, request: &Request) -> knowlith_engine::Result<Reply> {
                 assert_eq!(request.stage, "candidates");
-                Ok(Reply {
-                    text: GOOD.into(),
-                    engine: "once".into(),
-                })
+                Ok(Reply::new("once", GOOD))
             }
         }
         let document = doc("a", "A.txt", "Popust od 5%.");
-        let map = propose_many(&Once, &[&document], None).unwrap();
+        let (map, usage) = propose_many(&Once, &[&document], None).unwrap();
         assert_eq!(map["a"].len(), 1);
+        assert!(usage.is_none());
     }
 
     fn doc(id: &str, name: &str, text: &str) -> Document {

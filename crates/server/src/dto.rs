@@ -713,6 +713,53 @@ pub struct WorkDto {
     /// Newest first. What was read, what came out of it, and what would
     /// not read at all.
     pub lines: Vec<WorkLineDto>,
+    /// What the CLI printed about tokens and price, when it printed any.
+    /// `null` until the first run that reported a number — silence is not `$0`.
+    pub spend: Option<WorkSpendDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSpendDto {
+    pub today: Vec<WorkSpendEngineDto>,
+    pub last: Option<WorkSpendLastDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSpendEngineDto {
+    pub engine: String,
+    pub tokens: Option<u64>,
+    pub cost_usd: Option<f64>,
+    pub phrase: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSpendLastDto {
+    pub engine: String,
+    pub subject: String,
+    pub phrase: String,
+    pub at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineRunDto {
+    pub id: String,
+    pub at: String,
+    pub engine: String,
+    pub stage: String,
+    pub subject: String,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cache_tokens: Option<i64>,
+    pub cost_usd: Option<f64>,
+    pub model: Option<String>,
+    /// `Codex · 4,218 tokens · $0.04` — only the parts the CLI filled in.
+    pub phrase: String,
+    /// Owner sentence: "Codex read Cjenik.xlsx".
+    pub title: String,
 }
 
 /// Work the owner's own policy is holding back.

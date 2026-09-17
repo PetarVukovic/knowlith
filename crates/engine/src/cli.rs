@@ -35,6 +35,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::{Engine, EngineError, Reply, Request, Result};
+use crate::usage::{parse_json_reply, scrape_usage_only};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flavour {
@@ -151,7 +152,10 @@ impl CliEngine {
             Flavour::ClaudeCode => {
                 args.push("--print".into());
                 args.push("--output-format".into());
-                args.push("text".into());
+                // JSON carries `result` plus `usage` / `total_cost_usd`.
+                // Text mode discards the bill, and the owner then has
+                // nothing honest to show for what the run cost.
+                args.push("json".into());
                 // No user, project or local settings — which is where hooks
                 // live — no MCP servers, and none of the tools that run
                 // commands or code, because reading a document needs none.
@@ -168,7 +172,7 @@ impl CliEngine {
                 args.push("-p".into());
                 args.push("--mode=ask".into());
                 args.push("--output-format".into());
-                args.push("text".into());
+                args.push("json".into());
                 args.push("--trust".into());
                 if let Some(model) = &self.model {
                     args.push("--model".into());
@@ -277,14 +281,26 @@ impl Engine for CliEngine {
         }
 
         // Codex was asked to put its final message in a file; anything it
-        // printed along the way is progress, not the answer.
-        let text = reply_file
-            .as_ref()
-            .and_then(|f| std::fs::read_to_string(f.path()).ok())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| String::from_utf8_lossy(&output.stdout).trim().to_string());
-        drop(reply_file);
+        // printed along the way is progress, not the answer. Claude and
+        // Cursor were asked for JSON so the bill comes back with the text.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let (text, usage) = match self.flavour {
+            Flavour::Codex => {
+                let text = reply_file
+                    .as_ref()
+                    .and_then(|f| std::fs::read_to_string(f.path()).ok())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| stdout.trim().to_string());
+                drop(reply_file);
+                (text, scrape_usage_only(&stdout, &stderr))
+            }
+            Flavour::ClaudeCode | Flavour::CursorAgent => {
+                drop(reply_file);
+                parse_json_reply(&stdout, &stderr)
+            }
+        };
 
         if text.is_empty() {
             return Err(EngineError::Refused(format!(
@@ -296,6 +312,7 @@ impl Engine for CliEngine {
         Ok(Reply {
             text,
             engine: self.name.clone(),
+            usage,
         })
     }
 }
@@ -534,7 +551,7 @@ mod tests {
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"--mode=ask".to_string()));
         assert!(args.contains(&"--output-format".to_string()));
-        assert!(args.contains(&"text".to_string()));
+        assert!(args.contains(&"json".to_string()));
         assert!(args.contains(&"--trust".to_string()));
         assert!(
             !args.iter().any(|a| a.contains("approve-mcp")),
@@ -546,6 +563,8 @@ mod tests {
     fn claude_runs_non_interactively() {
         let args = CliEngine::new(Flavour::ClaudeCode).arguments(None, None);
         assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"json".to_string()));
     }
 
     #[test]

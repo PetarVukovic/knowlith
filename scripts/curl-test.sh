@@ -70,7 +70,10 @@ step '10 · Build quiz (if any)'
 curlq GET /api/build/quiz | python3 -c "import json,sys; q=json.load(sys.stdin)
 print('  no quiz yet') if q is None else print('  state:', q.get('state'), ' questions:', len(q.get('questions', [])))"
 
-step '11 · Export approved knowledge to Markdown'
+step '11 · Engine runs (token spend when CLI reported it)'
+curlq GET /api/engine-runs | python3 -c "import json,sys; r=json.load(sys.stdin); print(f'  {len(r)} runs logged')"
+
+step '12 · Export approved knowledge to Markdown'
 curlq POST /api/export '{}' | python3 -m json.tool
 
-printf '\n\033[1mDone.\033[0m For MCP gateway proof: sh scripts/verify-gateway.sh\n\n'
+printf '\n\033[1mDone.\033[0m Full setup: sh scripts/curl-onboarding.sh --demo\n\n'

@@ -14,6 +14,7 @@
 //! updates itself when something changes" actually means here — not a feature
 //! of the database, a property of the write path.
 
+mod engine_runs;
 mod export;
 mod jobs;
 mod merge;
@@ -34,6 +35,7 @@ use knowlith_core::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+pub use engine_runs::{EngineRun, EngineSpend, NewEngineRun};
 pub use jobs::{Job, JobState, NewJob, PRIORITY_BACKGROUND, PRIORITY_NORMAL};
 pub use merge::MergeHint;
 pub use migrate::SCHEMA_VERSION;

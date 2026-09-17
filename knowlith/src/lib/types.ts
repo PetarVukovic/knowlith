@@ -534,6 +534,43 @@ export type Work = {
   total: number
   held: { reason: string; count: number } | null
   lines: WorkLine[]
+  /** What the CLI printed about tokens and price. Null until it printed a number. */
+  spend?: WorkSpend | null
+}
+
+export type WorkSpend = {
+  today: WorkSpendEngine[]
+  last: WorkSpendLast | null
+}
+
+export type WorkSpendEngine = {
+  engine: string
+  tokens: number | null
+  costUsd: number | null
+  phrase: string
+}
+
+export type WorkSpendLast = {
+  engine: string
+  subject: string
+  phrase: string
+  at: string
+}
+
+/** One CLI invoke, as the owner should read it. Separate from MCP proof-of-use. */
+export type EngineRun = {
+  id: string
+  at: string
+  engine: string
+  stage: string
+  subject: string
+  inputTokens: number | null
+  outputTokens: number | null
+  cacheTokens: number | null
+  costUsd: number | null
+  model: string | null
+  phrase: string
+  title: string
 }
 
 export type BuildQuizEvidence = {

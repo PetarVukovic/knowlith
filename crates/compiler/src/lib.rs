@@ -29,7 +29,7 @@ use std::collections::HashMap;
 
 use knowlith_core::object::{Relation, RelationOrigin, RelationType, Subtype};
 use knowlith_core::{Confidence, ContextObject, Document, Evidence, ObjectKind, ObjectStatus};
-use knowlith_engine::{Engine, EngineError};
+use knowlith_engine::{Engine, EngineError, EngineUsage};
 
 pub use candidates::{Candidate, CANDIDATE_SCHEMA, INSTRUCTIONS, propose_many};
 pub use consolidate::{Conflict, Group};
@@ -137,7 +137,7 @@ pub fn read_one(
 
     // Stage 2.
     match candidates::propose(engine, document, company) {
-        Ok(found) => out.candidates.extend(found),
+        Ok((found, _)) => out.candidates.extend(found),
         Err(CompileError::Engine(e)) if !e.is_retryable() => out.dropped.push(Dropped {
             document: document.name.clone(),
             title: String::new(),
@@ -154,11 +154,17 @@ pub fn read_one(
 /// Structural skips stay free. Everything that needs a model shares one
 /// child process so a folder of hundreds of files is not hundreds of cold
 /// starts. Settle still waits for the whole compile queue to drain.
+#[derive(Debug, Default, Clone)]
+pub struct BatchRead {
+    pub readings: HashMap<String, Reading>,
+    pub usage: Option<EngineUsage>,
+}
+
 pub fn read_many(
     engine: &dyn Engine,
     documents: &[&Document],
     company: Option<&str>,
-) -> Result<HashMap<String, Reading>> {
+) -> Result<BatchRead> {
     let mut out: HashMap<String, Reading> = HashMap::new();
     let mut need_model: Vec<&Document> = Vec::new();
 
@@ -178,11 +184,14 @@ pub fn read_many(
     }
 
     if need_model.is_empty() {
-        return Ok(out);
+        return Ok(BatchRead {
+            readings: out,
+            usage: None,
+        });
     }
 
     match candidates::propose_many(engine, &need_model, company) {
-        Ok(by_id) => {
+        Ok((by_id, usage)) => {
             for document in need_model {
                 let reading = out.entry(document.id.clone()).or_default();
                 reading.documents_read = 1;
@@ -190,6 +199,10 @@ pub fn read_many(
                     reading.candidates = found.clone();
                 }
             }
+            Ok(BatchRead {
+                readings: out,
+                usage,
+            })
         }
         Err(CompileError::Engine(e)) if !e.is_retryable() => {
             for document in need_model {
@@ -200,11 +213,13 @@ pub fn read_many(
                     reason: format!("{e}"),
                 });
             }
+            Ok(BatchRead {
+                readings: out,
+                usage: None,
+            })
         }
-        Err(e) => return Err(e),
+        Err(e) => Err(e),
     }
-
-    Ok(out)
 }
 
 /// Stages 3 and 4: the deterministic half, over the whole set at once.
@@ -433,10 +448,7 @@ mod tests {
             "Scripted"
         }
         fn run(&self, _request: &Request) -> knowlith_engine::Result<Reply> {
-            Ok(Reply {
-                text: self.0.to_string(),
-                engine: "Scripted".into(),
-            })
+            Ok(Reply::new("Scripted", self.0))
         }
     }
 
@@ -541,12 +553,12 @@ mod tests {
                 } else {
                     "Popust od 5% odobrava se stalnim kupcima."
                 };
-                Ok(Reply {
-                    text: format!(
+                Ok(Reply::new(
+                    "PerDocument",
+                    format!(
                         r#"{{"candidates":[{{"kind":"rule","title":"Odobravanje popusta","statement":"{quote}","quotes":["{quote}"]}}]}}"#
                     ),
-                    engine: "PerDocument".into(),
-                })
+                ))
             }
         }
 

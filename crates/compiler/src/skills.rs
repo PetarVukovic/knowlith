@@ -29,7 +29,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use knowlith_core::object::{Relation, RelationOrigin, RelationType};
 use knowlith_core::{Confidence, ContextObject, Evidence, ObjectKind, ObjectStatus};
-use knowlith_engine::{Engine, Request};
+use knowlith_engine::{Engine, EngineUsage, Request};
 use serde::Deserialize;
 
 use crate::consolidate::figures;
@@ -124,6 +124,7 @@ pub struct SkillRun {
     pub skills: Vec<ContextObject>,
     pub dropped: Vec<crate::Dropped>,
     pub processes_considered: usize,
+    pub usage: Option<EngineUsage>,
 }
 
 /// Drafts one skill for every approved process that has something to rest on.
@@ -157,8 +158,11 @@ pub fn draft_all(engine: &dyn Engine, objects: &[ContextObject]) -> Result<Skill
 
         let sources = foundations(process, &by_id);
 
-        match draft_one(engine, process, &sources) {
-            Ok(object) => out.skills.push(object),
+        match draft_with_usage(engine, process, &sources) {
+            Ok((object, usage)) => {
+                out.usage = EngineUsage::fold_invoke(out.usage.take(), usage);
+                out.skills.push(object);
+            }
             Err(CompileError::Engine(e)) if !e.is_retryable() => out.dropped.push(crate::Dropped {
                 document: skill_id,
                 title: process.title.clone(),
@@ -201,11 +205,19 @@ pub fn draft_one(
     process: &ContextObject,
     sources: &[&ContextObject],
 ) -> Result<ContextObject> {
+    Ok(draft_with_usage(engine, process, sources)?.0)
+}
+
+fn draft_with_usage(
+    engine: &dyn Engine,
+    process: &ContextObject,
+    sources: &[&ContextObject],
+) -> Result<(ContextObject, Option<EngineUsage>)> {
     let request = Request::new("skill", SKILL_INSTRUCTIONS, brief(process, sources))
         .with_schema(SKILL_SCHEMA);
     let reply = engine.run(&request)?;
     let draft = parse(&reply.text)?;
-    build(process, sources, &draft)
+    Ok((build(process, sources, &draft)?, reply.usage))
 }
 
 /// What the engine is shown: the process, then everything it rests on.
@@ -400,10 +412,7 @@ mod tests {
             "Scripted"
         }
         fn run(&self, _request: &Request) -> knowlith_engine::Result<Reply> {
-            Ok(Reply {
-                text: self.0.to_string(),
-                engine: "Scripted".into(),
-            })
+            Ok(Reply::new("Scripted", self.0))
         }
     }
 

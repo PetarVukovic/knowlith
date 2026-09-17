@@ -162,10 +162,7 @@ mod tests {
         assert!(!failing.is_open());
 
         let working = Breaker::new(Counting::new(|| {
-            Ok(Reply {
-                text: "ok".into(),
-                engine: "Counting".into(),
-            })
+            Ok(Reply::new("Counting", "ok"))
         }));
         assert!(working.run(&request()).is_ok());
         assert!(!working.is_open());

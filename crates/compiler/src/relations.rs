@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 
 use knowlith_core::object::{RelationOrigin, RelationType};
 use knowlith_core::{ContextObject, ObjectStatus};
-use knowlith_engine::{Engine, Request};
+use knowlith_engine::{Engine, EngineUsage, Request};
 use serde::Deserialize;
 
 use crate::{CompileError, Result};
@@ -97,6 +97,7 @@ pub struct RelationRun {
     pub edges: Vec<ProposedEdge>,
     pub dropped: Vec<crate::Dropped>,
     pub objects_considered: usize,
+    pub usage: Option<EngineUsage>,
 }
 
 /// Asks the engine, once, about the whole set.
@@ -125,6 +126,7 @@ pub fn propose(engine: &dyn Engine, objects: &[ContextObject]) -> Result<Relatio
     let proposed = parse(&reply.text)?;
 
     out.edges = keep_usable(proposed, &live, &mut out.dropped);
+    out.usage = reply.usage;
     Ok(out)
 }
 
@@ -278,10 +280,7 @@ mod tests {
             "Scripted"
         }
         fn run(&self, _request: &Request) -> knowlith_engine::Result<Reply> {
-            Ok(Reply {
-                text: self.0.to_string(),
-                engine: "Scripted".into(),
-            })
+            Ok(Reply::new("Scripted", self.0))
         }
     }
 

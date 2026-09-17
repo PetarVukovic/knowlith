@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { Check, ChevronRight } from "lucide-react"
 import { Panel, PanelHeader } from "@/components/ui/surface"
 import { api, tools as toolsApi } from "@/lib/api"
-import type { Usage } from "@/lib/types"
+import type { EngineRun, Usage } from "@/lib/types"
 import { cn, formatRelative } from "@/lib/utils"
 import { useApp } from "@/state/AppState"
 
@@ -20,29 +20,34 @@ type FoundRow = {
 type FeedItem =
   | { kind: "used"; at: string; row: Usage }
   | { kind: "found"; at: string; row: FoundRow }
+  | { kind: "spend"; at: string; row: EngineRun }
 
 /**
  * What left Knowlith — in owner language.
  *
  * Never claims why a model answered the way it did. Only what was found,
- * what the team confirmed, and what assistants actually read.
+ * what the team confirmed, what assistants actually read, and what the
+ * engine printed about tokens and price.
  */
 export function Activity() {
   const { companyName } = useApp()
   const navigate = useNavigate()
   const [usage, setUsage] = useState<Usage[] | null>(null)
   const [found, setFound] = useState<FoundRow[]>([])
+  const [spend, setSpend] = useState<EngineRun[]>([])
   const [openId, setOpenId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     const poll = async () => {
-      const [nextUsage, nextFound] = await Promise.all([
+      const [nextUsage, nextFound, nextSpend] = await Promise.all([
         toolsApi.usage(),
         api.getRecentActivity(),
+        api.getEngineRuns(),
       ])
       if (cancelled) return
       setUsage(nextUsage)
+      setSpend(nextSpend ?? [])
       setFound(
         (nextFound ?? []).map((row) => ({
           id: row.id,
@@ -69,16 +74,20 @@ export function Activity() {
     for (const row of found) {
       items.push({ kind: "found", at: row.at, row })
     }
+    for (const row of spend) {
+      items.push({ kind: "spend", at: row.at, row })
+    }
     items.sort((a, b) => b.at.localeCompare(a.at))
     return items
-  }, [usage, found])
+  }, [usage, found, spend])
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-4 py-8">
       <h1 className="text-[20px] font-semibold tracking-[-0.015em] text-ink">History</h1>
       <p className="mt-1 max-w-[54ch] text-[13px] text-muted">
-        Three kinds of moment, in plain words: something new was found in your folders, your team
-        confirmed it, or an AI assistant read it while answering someone.
+        Four kinds of moment, in plain words: something new was found in your folders, your team
+        confirmed it, an AI assistant read it while answering someone, or Knowlith's engine printed
+        what that read cost.
       </p>
 
       {usage === null ? (
@@ -94,6 +103,33 @@ export function Activity() {
       ) : (
         <ul className="mt-7 space-y-2">
           {feed.map((item) => {
+            if (item.kind === "spend") {
+              const row = item.row
+              const detail = spendDetail(row)
+              return (
+                <li key={row.id} className="rounded-xl border border-line bg-surface px-4 py-3.5">
+                  <div className="flex items-start gap-3">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[12px] font-medium uppercase tracking-wide text-faint">
+                        Reading your files
+                      </span>
+                      <span className="mt-0.5 block text-[13.5px] font-medium text-ink">
+                        {row.title}
+                      </span>
+                      {detail ? (
+                        <span className="mt-0.5 block font-mono text-[12.5px] tabular-nums text-muted">
+                          {detail}
+                        </span>
+                      ) : null}
+                      <span className="mt-1 block text-[12px] text-faint">
+                        {formatRelative(row.at)}
+                      </span>
+                    </span>
+                  </div>
+                </li>
+              )
+            }
+
             if (item.kind === "found") {
               const row = item.row
               return (
@@ -219,6 +255,13 @@ export function Activity() {
       )}
     </div>
   )
+}
+
+function spendDetail(row: EngineRun): string {
+  if (row.phrase.startsWith(`${row.engine} · `)) {
+    return row.phrase.slice(row.engine.length + 3)
+  }
+  return row.phrase === row.engine ? "" : row.phrase
 }
 
 function plainFoundTitle(title: string): string {

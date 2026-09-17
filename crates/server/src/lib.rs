@@ -137,6 +137,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/usage", get(usage))
         .route("/api/work", get(work))
+        .route("/api/engine-runs", get(engine_runs))
         .route("/api/brain", get(brain))
         .route("/api/tools", get(tools))
         .route("/api/tools/{app}/connect", post(connect_app))
@@ -1482,7 +1483,114 @@ async fn work(State(state): State<AppState>) -> ApiResult<WorkDto> {
         })
         .collect();
 
-    Ok(Json(WorkDto { stage, doing, done, total, held, lines }))
+    let spend = work_spend(
+        lake.engine_spend_today().map_err(failed)?,
+        lake.last_engine_run().map_err(failed)?,
+    );
+
+    Ok(Json(WorkDto { stage, doing, done, total, held, lines, spend }))
+}
+
+async fn engine_runs(State(state): State<AppState>) -> ApiResult<Vec<EngineRunDto>> {
+    let lake = state.lake.lock().map_err(failed)?;
+    let runs = lake.recent_engine_runs(60).map_err(failed)?;
+    Ok(Json(runs.into_iter().map(engine_run_dto).collect()))
+}
+
+fn work_spend(
+    today: Vec<knowlith_lake::EngineSpend>,
+    last: Option<knowlith_lake::EngineRun>,
+) -> Option<WorkSpendDto> {
+    let today: Vec<WorkSpendEngineDto> = today
+        .into_iter()
+        .filter_map(|row| {
+            let usage = usage_from_parts(
+                row.input_tokens,
+                row.output_tokens,
+                row.cache_tokens,
+                row.cost_usd,
+                None,
+            );
+            if usage.is_silent() {
+                return None;
+            }
+            Some(WorkSpendEngineDto {
+                engine: row.engine.clone(),
+                tokens: usage.total_tokens(),
+                cost_usd: usage.cost_usd,
+                phrase: usage.phrase(&row.engine),
+            })
+        })
+        .collect();
+    let last = last.and_then(|run| {
+        let usage = usage_from_run(&run);
+        if usage.is_silent() {
+            return None;
+        }
+        Some(WorkSpendLastDto {
+            engine: run.engine.clone(),
+            subject: run.subject,
+            phrase: usage.phrase(&run.engine),
+            at: run.at,
+        })
+    });
+    if today.is_empty() && last.is_none() {
+        None
+    } else {
+        Some(WorkSpendDto { today, last })
+    }
+}
+
+fn engine_run_dto(run: knowlith_lake::EngineRun) -> EngineRunDto {
+    let usage = usage_from_run(&run);
+    EngineRunDto {
+        title: spend_title(&run.stage, &run.engine, &run.subject),
+        phrase: usage.phrase(&run.engine),
+        id: run.id,
+        at: run.at,
+        engine: run.engine,
+        stage: run.stage,
+        subject: run.subject,
+        input_tokens: run.input_tokens,
+        output_tokens: run.output_tokens,
+        cache_tokens: run.cache_tokens,
+        cost_usd: run.cost_usd,
+        model: run.model,
+    }
+}
+
+fn spend_title(stage: &str, engine: &str, subject: &str) -> String {
+    match stage {
+        "relations" => format!("{engine} connected {subject}"),
+        "skill" => format!("{engine} drafted from {subject}"),
+        _ => format!("{engine} read {subject}"),
+    }
+}
+
+fn usage_from_run(run: &knowlith_lake::EngineRun) -> knowlith_engine::EngineUsage {
+    usage_from_parts(
+        run.input_tokens,
+        run.output_tokens,
+        run.cache_tokens,
+        run.cost_usd,
+        run.model.clone(),
+    )
+}
+
+fn usage_from_parts(
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cache_tokens: Option<i64>,
+    cost_usd: Option<f64>,
+    model: Option<String>,
+) -> knowlith_engine::EngineUsage {
+    knowlith_engine::EngineUsage {
+        input_tokens: input_tokens.and_then(|n| u64::try_from(n).ok()),
+        output_tokens: output_tokens.and_then(|n| u64::try_from(n).ok()),
+        cache_tokens: cache_tokens.and_then(|n| u64::try_from(n).ok()),
+        cost_usd,
+        model,
+    }
 }
 
 /// Drops the document name a worker put in front of its own sentence.

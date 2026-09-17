@@ -63,10 +63,7 @@ impl Engine for ReplayEngine {
     fn run(&self, request: &Request) -> Result<Reply> {
         let path = self.path(request);
         match std::fs::read_to_string(&path) {
-            Ok(text) => Ok(Reply {
-                text,
-                engine: self.name.clone(),
-            }),
+            Ok(text) => Ok(Reply::new(self.name.clone(), text)),
             // Not a transport problem: no amount of waiting produces a
             // recording. The message says exactly how to make one, because
             // the person hitting this is always in the middle of changing a
@@ -137,10 +134,7 @@ mod tests {
             "Canned"
         }
         fn run(&self, _request: &Request) -> Result<Reply> {
-            Ok(Reply {
-                text: self.0.to_string(),
-                engine: "Canned".into(),
-            })
+            Ok(Reply::new("Canned", self.0))
         }
     }
 

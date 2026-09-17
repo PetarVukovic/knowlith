@@ -67,6 +67,47 @@ async fn an_empty_queue_says_so_rather_than_inventing_progress() {
 }
 
 #[tokio::test]
+async fn spend_is_absent_until_the_cli_reports_a_number() {
+    let out = work(lake()).await;
+    assert!(out["spend"].is_null(), "silence is not a zero dollar figure");
+}
+
+#[tokio::test]
+async fn today_spend_names_only_what_the_cli_reported() {
+    let lake = lake();
+    lake.record_engine_run(knowlith_lake::NewEngineRun {
+        engine: "Codex".into(),
+        stage: "candidates".into(),
+        subject: "Cjenik.xlsx".into(),
+        input_tokens: Some(4000),
+        output_tokens: Some(218),
+        cache_tokens: None,
+        cost_usd: Some(0.04),
+        model: Some("gpt-5".into()),
+    })
+    .expect("stored");
+    lake.record_engine_run(knowlith_lake::NewEngineRun {
+        engine: "Codex".into(),
+        stage: "candidates".into(),
+        subject: "Uvjeti.md".into(),
+        input_tokens: Some(100),
+        output_tokens: Some(20),
+        cache_tokens: None,
+        cost_usd: None,
+        model: None,
+    })
+    .expect("stored");
+
+    let out = work(lake).await;
+    let today = &out["spend"]["today"][0];
+    assert_eq!(today["engine"], "Codex");
+    assert_eq!(today["phrase"], "Codex · 4,338 tokens · $0.04");
+    assert!(today["costUsd"].as_f64().unwrap() > 0.0);
+    assert_eq!(out["spend"]["last"]["subject"], "Uvjeti.md");
+    assert_eq!(out["spend"]["last"]["phrase"], "Codex · 120 tokens");
+}
+
+#[tokio::test]
 async fn the_stage_is_the_earliest_thing_still_outstanding() {
     // A relate job sits behind three documents. The owner is reading, not
     // preparing skills, whatever order the queue happens to be in.

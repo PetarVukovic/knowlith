@@ -53,7 +53,7 @@ export function LiveWork() {
   const moving = work.stage !== "idle" && !paused
   // An idle daemon with nothing to report is not worth a panel. One that
   // has just finished, or that could not read something, is.
-  if (work.stage === "idle" && failures.length === 0 && work.lines.length === 0) return null
+  if (work.stage === "idle" && failures.length === 0 && work.lines.length === 0 && !work.spend?.today.length) return null
 
   const percent = work.total > 0 ? Math.round((work.done / work.total) * 100) : 100
 
@@ -76,6 +76,13 @@ export function LiveWork() {
           </span>
         ) : null}
       </header>
+      {work.spend?.today.length ? (
+        <p className="flex flex-wrap gap-x-3 gap-y-1 border-b border-line px-4 py-2 font-mono text-[11.5px] tabular-nums text-muted">
+          {work.spend.today.map((row) => (
+            <span key={row.engine}>{row.phrase}</span>
+          ))}
+        </p>
+      ) : null}
 
       {work.total > 0 ? (
         <div className="h-[3px] w-full bg-surface-3" role="progressbar" aria-valuenow={percent}>

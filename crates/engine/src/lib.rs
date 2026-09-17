@@ -23,6 +23,7 @@ mod breaker;
 mod cli;
 mod detect;
 mod replay;
+mod usage;
 
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ pub use breaker::Breaker;
 pub use cli::{CliEngine, Flavour};
 pub use detect::{Detected, detect};
 pub use replay::{RecordingEngine, ReplayEngine, cassette_key};
+pub use usage::{EngineUsage, parse_json_reply, scrape_usage_only};
 
 /// One unit of work for a model.
 #[derive(Debug, Clone)]
@@ -100,12 +102,25 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Reply {
     pub text: String,
     /// Which engine produced it, recorded on the compiler run so a later
     /// question about quality has an answer.
     pub engine: String,
+    /// What the CLI printed about tokens and price. `None` when it printed
+    /// nothing — never invented, never `$0` for silence.
+    pub usage: Option<EngineUsage>,
+}
+
+impl Reply {
+    pub fn new(engine: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            engine: engine.into(),
+            usage: None,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

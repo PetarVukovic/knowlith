@@ -380,3 +380,23 @@ CREATE TABLE IF NOT EXISTS build_quiz (
     created_at      TEXT NOT NULL,
     confirmed_at    TEXT
 );
+
+-- What each CLI invoke actually printed about tokens and price.
+--
+-- One row per child process, not per document. A batch of files is one
+-- invoke. Token and cost columns are nullable because a silent CLI is
+-- silence, not zero — writing $0 here would make the work panel lie.
+CREATE TABLE IF NOT EXISTS engine_runs (
+    id              TEXT PRIMARY KEY,
+    at              TEXT NOT NULL,
+    engine          TEXT NOT NULL,
+    stage           TEXT NOT NULL,
+    subject         TEXT NOT NULL,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    cache_tokens    INTEGER,
+    cost_usd        REAL,
+    model           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_engine_runs_at ON engine_runs(at DESC);
