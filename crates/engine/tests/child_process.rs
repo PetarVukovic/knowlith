@@ -13,18 +13,32 @@
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use knowlith_engine::{CliEngine, Engine, EngineError, Flavour, Request};
 
+static SCRIPT_SEQ: AtomicU64 = AtomicU64::new(0);
+
 /// Writes an executable script and returns its path.
 fn script(name: &str, body: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("knowlith-engine-{}", std::process::id()));
+    // Own directory per call: tests in this file run on threads that share a
+    // PID, and Linux refuses to exec a file still open for write (ETXTBSY).
+    // A shared folder plus an undropped File is how CI lost
+    // `claude_json_is_the_only_source_of_tokens_and_price`.
+    let dir = std::env::temp_dir().join(format!(
+        "knowlith-engine-{}-{}-{}",
+        std::process::id(),
+        SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed),
+        name
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
-    let mut file = std::fs::File::create(&path).unwrap();
-    write!(file, "#!/bin/sh\n{body}").unwrap();
-    file.sync_all().unwrap();
+    {
+        let mut file = std::fs::File::create(&path).unwrap();
+        write!(file, "#!/bin/sh\n{body}").unwrap();
+        file.sync_all().unwrap();
+    }
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     path
 }
