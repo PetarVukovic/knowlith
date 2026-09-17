@@ -14,7 +14,7 @@ Keep `/api/brain` approved-only. Add `/api/brain/build` as an authenticated owne
 
 ## Interface
 
-Use the same 3D brain for build and approved views. Preserve node positions, render updates only when graph content changes, correctly retain kind-specific node radii, reduce detail for large graphs, honor reduced motion and stop hidden rendering. A searchable list supports keyboard navigation and environments without WebGL.
+Use the same clean 3D graph for build and approved views. The owner explicitly removed the brain-shaped mesh and blur. Preserve node positions, render updates only when graph content changes, correctly retain kind-specific node radii, reduce detail for large graphs, honor reduced motion and stop hidden rendering. A searchable list supports keyboard navigation and environments without WebGL.
 
 Replace the staged illustration and inferred progress percentage with the actual build projection, queue status, evidence relationships, document and discovery counts. Show failures, pauses and disconnected states explicitly. Do not advance on failed or empty builds. Keep review an explicit next action. Prevent duplicate starts and surface startup errors. Persist company context before queueing work.
 

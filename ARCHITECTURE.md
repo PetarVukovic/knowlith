@@ -312,3 +312,13 @@ constraint to design around is that **the worker has no user**: it runs in the
 background, possibly with the window closed, so a child process cannot stop and
 wait on stdin. The questions have to travel through the interface and the
 answers into the lake, not through the engine's standard input.
+
+## Incremental builds and live graph (v0.1.4)
+
+The supervisor uses bounded UTF-8 source batches instead of truncating a whole-company prompt. Completed replies are checkpointed by request content and engine, so a retry can reuse completed work. The corpus is passed in the actual first request. Each request runs while the worker renews its lease; temporary engine failures stay retryable. Existing owner decisions are preserved and quiz evidence is checked against the source.
+
+`GET /api/brain/build` is an authenticated owner projection of extracted documents and proposed/approved discoveries. It performs no assistant-process detection. It does not widen `/api/brain` or MCP visibility. Onboarding polls this projection and the durable work feed; it shows actual counts, pauses and errors, and waits for an explicit review action. Proposed discoveries are not presented as approved company knowledge.
+
+Both graph screens share a clean 3D node-and-edge renderer, with no brain-shaped mesh. Identity-based coordinates survive new discoveries, document adjacency is built in linear time, unchanged snapshots do not reset the scene, and hidden tabs pause rendering. Reduced-motion preferences disable directional particles and camera transitions. A searchable list remains usable without WebGL.
+
+The installer verifies checksums and checks that the downloaded executable runs before replacing an existing installation. A running daemon must be restarted to load a newly installed version; the installer explains this instead of silently claiming that the running UI was updated.

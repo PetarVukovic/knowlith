@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.
 irm https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.ps1 | iex
 ```
 
-Headless install (no browser): `KNOWLITH_NO_START=1 curl -fsSL ... | sh`
+Headless install (no browser): `curl -fsSL ... | KNOWLITH_NO_START=1 sh`
 
 Binaries for macOS (Apple Silicon and Intel), Linux and Windows are on the [Releases](https://github.com/PetarVukovic/knowlith/releases) page.
 

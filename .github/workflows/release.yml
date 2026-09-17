@@ -35,6 +35,10 @@ jobs:
           cache-dependency-path: knowlith/package-lock.json
       - run: npm ci
         working-directory: knowlith
+      - run: npm test
+        working-directory: knowlith
+      - run: npm run lint
+        working-directory: knowlith
       - run: npm run build
         working-directory: knowlith
       - uses: actions/upload-artifact@v4
@@ -55,15 +59,16 @@ jobs:
         with:
           name: interface
           path: knowlith/dist
-      - run: cargo test --workspace
+      - run: sh -n install.sh
+      - run: python3 scripts/test_installer.py
+      - run: cargo test --workspace --locked
 
   build:
     name: ${{ matrix.target }}
     needs: [interface, test]
     runs-on: ${{ matrix.os }}
     strategy:
-      # One target failing must not cancel the others: a release with three
-      # of four platforms is worth publishing, and the fourth can follow.
+      # Collect diagnostics from all targets; publication still requires all four.
       fail-fast: false
       matrix:
         include:
@@ -93,7 +98,7 @@ jobs:
           path: knowlith/dist
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --bin knowlith
+        run: cargo build --locked --release --target ${{ matrix.target }} --bin knowlith
 
       - name: Package (unix)
         if: runner.os != 'Windows'
@@ -163,3 +168,9 @@ jobs:
             dist/*.zip
             dist/checksums.txt
           generate_release_notes: true
+          draft: true
+
+      - name: Publish complete release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

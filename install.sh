@@ -1,7 +1,7 @@
 #!/bin/sh
 # Knowlith installer for macOS and Linux.
 #
-#   curl -fsSL https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.sh | sh
+#   curl --retry 3 --connect-timeout 15 -fsSL https://raw.githubusercontent.com/PetarVukovic/knowlith/main/install.sh | sh
 #
 # Written in POSIX sh rather than bash, because macOS ships bash 3.2 and the
 # one thing an installer may never do is fail on the machine it was written
@@ -59,7 +59,7 @@ done
 
 if [ "$VERSION" = "latest" ]; then
   say "asking GitHub for the latest release"
-  VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+  VERSION="$(curl --retry 3 --connect-timeout 15 -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
     | head -n 1)"
   [ -n "$VERSION" ] || die "could not work out the latest version. Set KNOWLITH_VERSION and try again."
@@ -77,7 +77,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
 say "downloading"
-curl -fsSL "$url" -o "$work/$archive" \
+curl --retry 3 --connect-timeout 15 -fsSL "$url" -o "$work/$archive" \
   || die "could not download $url
   If that version has no build for $target, the release page lists what there is."
 
@@ -88,7 +88,7 @@ curl -fsSL "$url" -o "$work/$archive" \
 # an installer that verifies only when convenient verifies nothing. The
 # owner can still say so explicitly with KNOWLITH_ALLOW_UNVERIFIED=1.
 verify() {
-  curl -fsSL "https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt" -o "$work/checksums.txt" 2>/dev/null \
+  curl --retry 3 --connect-timeout 15 -fsSL "https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt" -o "$work/checksums.txt" 2>/dev/null \
     || return 1
   expected="$(grep " ${archive}\$" "$work/checksums.txt" | awk '{print $1}' || true)"
   [ -n "$expected" ] || return 2
@@ -122,6 +122,12 @@ fi
 
 tar -xzf "$work/$archive" -C "$work" || die "the archive could not be opened."
 [ -f "$work/knowlith" ] || die "the archive did not contain a knowlith binary."
+
+# Validate before replacing a working install (wrong architecture, old libc,
+# or a corrupt executable must leave the previous binary intact).
+chmod +x "$work/knowlith"
+"$work/knowlith" --version >/dev/null 2>&1 \
+  || die "the downloaded binary cannot run on this machine. Your existing installation was not changed."
 
 # ----------------------------------------------------------------- install --
 
@@ -227,7 +233,8 @@ launch_knowlith() {
 if [ "${KNOWLITH_NO_START:-}" = "1" ]; then
   printf '\nInstalled. Run: knowlith start\n\n'
 elif listening; then
-  say 'already running on port 7717 — opening the interface'
+  say 'new version installed; restart the running Knowlith app to load the update'
+  say 'opening the currently running interface on port 7717'
   open_ui
   printf '\nConfigure at http://127.0.0.1:7717/onboarding\n\n'
 else
