@@ -382,11 +382,19 @@ pub fn confirm_quiz(lake: &mut Lake, quiz_id: &str, approved_object_ids: &[Strin
     if quiz.id != quiz_id {
         return Err("quiz id mismatch".into());
     }
+    let approved: BTreeSet<&str> = approved_object_ids.iter().map(String::as_str).collect();
+
     if quiz.state == "confirmed" {
+        // A daemon that confirmed before entity rows were wired up left
+        // `build_quiz.state = confirmed` while entities stayed `proposed`.
+        // Re-applying the owner's answer list is idempotent and fixes that lake.
+        for id in &approved {
+            if id.starts_with("entity:") {
+                lake.approve_entity(id).map_err(|e| e.to_string())?;
+            }
+        }
         return Ok(());
     }
-
-    let approved: BTreeSet<&str> = approved_object_ids.iter().map(String::as_str).collect();
     let all = lake.objects().map_err(|e| e.to_string())?;
 
     for id in &approved {
@@ -494,6 +502,47 @@ mod tests {
         assert_eq!(a.status, "approved");
         assert_eq!(b.status, "rejected");
         assert_eq!(lake.build_quiz().unwrap().unwrap().state, "confirmed");
+    }
+
+    #[test]
+    fn confirm_quiz_repairs_entities_after_an_already_confirmed_quiz() {
+        let dir = std::env::temp_dir().join(format!(
+            "knowlith-quiz-repair-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut lake = Lake::open(&dir.join("lake.sqlite")).unwrap();
+        lake.open_supervisor_session("build:1", "test").unwrap();
+        lake.put_entity(&EntityRow {
+            id: "entity:a".into(),
+            title: "A".into(),
+            kind: "party".into(),
+            summary: "Issuer".into(),
+            status: "proposed".into(),
+        })
+        .unwrap();
+        lake.put_build_quiz(&knowlith_lake::BuildQuiz {
+            id: "quiz:test".into(),
+            session_id: "build:1".into(),
+            state: "confirmed".into(),
+            questions: vec![QuizQuestion {
+                id: "q1".into(),
+                question: "Who?".into(),
+                agent_answer: "A".into(),
+                evidence: vec![],
+                proposed_object_id: Some("entity:a".into()),
+            }],
+            created_at: "2026-01-01T00:00:00Z".into(),
+        })
+        .unwrap();
+
+        confirm_quiz(&mut lake, "quiz:test", &["entity:a".into()]).unwrap();
+
+        let entity = lake.entities().unwrap().into_iter().next().unwrap();
+        assert_eq!(entity.status, "approved");
     }
 
     #[test]

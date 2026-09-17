@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react"
 import { api, failed as apiFailed, folders, usingDaemon } from "@/lib/api"
 import type {
+  BuildStatus,
   CompilerRun,
   ContextObject,
   DiscoverySummary,
@@ -57,6 +58,8 @@ interface AppState {
   mergeHints: MergeHint[]
   /** What the background worker still has in hand. */
   work: { queued: number; working: number }
+  /** Whether the build supervisor is waiting on the owner confirmation quiz. */
+  buildStatus: BuildStatus
 
   approve: (itemId: string, edited: boolean) => void
   reject: (itemId: string) => void
@@ -124,6 +127,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activity, setActivity] = useState<Activity>([])
   const [mergeHints, setMergeHints] = useState<MergeHint[]>([])
   const [work, setWork] = useState({ queued: 0, working: 0 })
+  const [buildStatus, setBuildStatus] = useState<BuildStatus>({
+    phase: "idle",
+    quizPending: false,
+    questionCount: 0,
+  })
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [live, setLive] = useState(false)
   /** The last counts the daemon reported, so a change can be noticed. */
@@ -146,7 +154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [c, o, r, s, sk, d, ru, docs, reads, act, hints] = await Promise.all([
+      const [c, o, r, s, sk, d, ru, docs, reads, act, hints, build] = await Promise.all([
         api.getCompany(),
         api.getObjects(),
         api.getReviewQueue(),
@@ -158,6 +166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         api.getToolReads(),
         api.getRecentActivity(),
         api.getMergeHints(),
+        api.getBuildStatus(),
       ])
       if (cancelled) return
       // Whatever the daemon says, including a stand-in it worked out from
@@ -173,6 +182,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setToolReads(reads)
       setActivity(act)
       setMergeHints(hints)
+      setBuildStatus(build)
       const daemon = await usingDaemon()
       setLive(daemon)
       // A wiped lake with a leftover "onboarded" flag used to drop the owner
@@ -202,7 +212,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!live) return
     let cancelled = false
     const poll = async () => {
-      const next = await api.getWork()
+      const [next, build] = await Promise.all([api.getWork(), api.getBuildStatus()])
       if (cancelled) return
       // A fresh object every four seconds is a new context value every
       // four seconds, and every screen under it re-renders for a queue
@@ -211,6 +221,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         current.queued === next.queued && current.working === next.working
           ? current
           : { queued: next.queued, working: next.working },
+      )
+      setBuildStatus((current) =>
+        current.phase === build.phase &&
+        current.quizPending === build.quizPending &&
+        current.questionCount === build.questionCount
+          ? current
+          : build,
       )
       setSeen((current) => {
         // Watching the queue drain is not enough. With recorded replies the
@@ -418,7 +435,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * tick catches up.
    */
   const refresh = useCallback(async () => {
-    const [o, r, s, sk, d, ru, docs, hints] = await Promise.all([
+    const [o, r, s, sk, d, ru, docs, hints, build] = await Promise.all([
       api.getObjects(),
       api.getReviewQueue(),
       api.getSources(),
@@ -427,6 +444,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       api.getCompilerRuns(),
       api.getSourceDocuments(),
       api.getMergeHints(),
+      api.getBuildStatus(),
     ])
     setObjects(o)
     setReview(r)
@@ -436,6 +454,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRuns(ru)
     setDocuments(docs)
     setMergeHints(hints)
+    setBuildStatus(build)
   }, [])
 
   const addSource = useCallback(async (path: string, name?: string, processor?: string) => {
@@ -485,6 +504,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activity,
       mergeHints,
       work,
+      buildStatus,
       approve,
       reject,
       keepGone,
@@ -525,6 +545,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activity,
       mergeHints,
       work,
+      buildStatus,
       approve,
       reject,
       keepGone,

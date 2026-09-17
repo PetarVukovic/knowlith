@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Check, Loader2, PartyPopper, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,7 @@ import { useApp } from "@/state/AppState"
 
 export function BuildQuiz() {
   const navigate = useNavigate()
-  const { refresh } = useApp()
+  const { refresh, buildStatus } = useApp()
   const [quiz, setQuiz] = useState<BuildQuizType | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -18,25 +18,46 @@ export function BuildQuiz() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const q = await api.getBuildQuiz()
-        setQuiz(q)
-        if (q?.questions) {
-          const all: Record<string, boolean> = {}
-          for (const item of q.questions) {
-            all[item.id] = true
-          }
-          setConfirmed(all)
+  const loadQuiz = useCallback(async () => {
+    try {
+      const q = await api.getBuildQuiz()
+      setQuiz(q)
+      if (q?.questions) {
+        const all: Record<string, boolean> = {}
+        for (const item of q.questions) {
+          all[item.id] = true
         }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Could not load quiz")
-      } finally {
-        setLoading(false)
+        setConfirmed(all)
       }
-    })()
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load quiz")
+    } finally {
+      setLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    void loadQuiz()
+  }, [loadQuiz])
+
+  // Supervisor can finish while this tab stays open; poll so the screen
+  // catches up without a manual refresh.
+  useEffect(() => {
+    if (!buildStatus.quizPending && quiz?.state === "confirmed") return
+    const timer = window.setInterval(() => {
+      void loadQuiz()
+    }, 4000)
+    return () => window.clearInterval(timer)
+  }, [buildStatus.quizPending, loadQuiz, quiz?.state])
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadQuiz()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [loadQuiz])
 
   const submit = async () => {
     if (!quiz || quiz.state === "confirmed") return
@@ -51,8 +72,7 @@ export function BuildQuiz() {
       setSubmitError("Could not save your answers. Is Knowlith still running?")
       return
     }
-    await refresh()
-    setQuiz((current) => (current ? { ...current, state: "confirmed" } : current))
+    await Promise.all([refresh(), loadQuiz()])
   }
 
   if (loading) {
@@ -109,7 +129,7 @@ export function BuildQuiz() {
         <span className="font-medium text-ink">Confirm and finish build</span> — nothing is saved until then.
       </p>
       <p className="mt-1 text-[12.5px] text-faint">
-        {yesCount} of {quiz.questions.length} marked correct
+        {yesCount} of {quiz.questions.length} marked correct · changes apply only after you confirm
       </p>
 
       <div className="mt-6 grid gap-3">

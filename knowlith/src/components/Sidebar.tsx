@@ -13,12 +13,12 @@ const LINKS: {
   label: string
   Icon: typeof Building2
   end?: boolean
-  badge?: "review"
+  badge?: "review" | "build"
   tour?: string
 }[] = [
   { to: "/home", label: "Home", Icon: Building2, end: true, tour: "tour-home" },
   { to: "/review", label: "For review", Icon: ClipboardList, badge: "review", tour: "tour-review" },
-  { to: "/build-quiz", label: "Confirm build", Icon: ClipboardList },
+  { to: "/build-quiz", label: "Confirm build", Icon: ClipboardList, badge: "build" },
   { to: "/browse", label: "Company knowledge", Icon: Search, tour: "tour-browse" },
   { to: "/brain", label: "Company brain", Icon: Network, tour: "tour-brain" },
   { to: "/connect", label: "AI assistants", Icon: Plug, tour: "tour-connect" },
@@ -28,7 +28,8 @@ const LINKS: {
 ]
 
 export function Sidebar() {
-  const { sources, review, companyName, companyLogo } = useApp()
+  const { sources, review, buildStatus, companyName, companyLogo } = useApp()
+  const buildWaiting = buildStatus.quizPending && buildStatus.questionCount > 0
 
   return (
     <nav className="flex h-full w-full min-w-0 flex-col bg-bg" aria-label="Main">
@@ -55,7 +56,8 @@ export function Sidebar() {
                 "flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px]",
                 isActive
                   ? "bg-accent-soft font-medium text-accent"
-                  : badge === "review" && review.length > 0
+                  : (badge === "review" && review.length > 0) ||
+                      (badge === "build" && buildWaiting)
                     ? "font-medium text-ink hover:bg-surface-3"
                     : "text-muted hover:bg-surface-3 hover:text-ink",
               )
@@ -64,13 +66,21 @@ export function Sidebar() {
             <Icon
               className={cn(
                 "size-3.5 shrink-0",
-                badge === "review" && review.length > 0 ? "text-pending" : "text-faint",
+                badge === "review" && review.length > 0
+                  ? "text-pending"
+                  : badge === "build" && buildWaiting
+                    ? "text-pending"
+                    : "text-faint",
               )}
             />
             <span className="flex-1 truncate">{label}</span>
             {badge === "review" && review.length > 0 ? (
               <span className="tabular rounded-sm bg-pending px-1.5 py-px text-[11px] font-semibold text-white">
                 {review.length}
+              </span>
+            ) : badge === "build" && buildWaiting ? (
+              <span className="tabular rounded-sm bg-pending px-1.5 py-px text-[11px] font-semibold text-white">
+                {buildStatus.questionCount}
               </span>
             ) : null}
           </NavLink>

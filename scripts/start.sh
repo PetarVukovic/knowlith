@@ -112,8 +112,14 @@ api -X PUT -H 'Content-Type: application/json' \
 SOURCE_ID=""
 if [ "$WITH_DEMO" = "1" ]; then
   step 'Demo source'
-  mkdir -p "$DEMO"
-  cp "$ROOT/fixtures/knowlith-demo/invoices/"*.md "$DEMO/" 2>/dev/null || true
+  # Default demo path gets fixture invoices copied in; a custom KNOWLITH_DEMO
+  # folder (e.g. a full SMB tree on Desktop) is used as-is.
+  case "$DEMO" in
+    "$HOME/Documents/knowlith-demo/invoices")
+      mkdir -p "$DEMO"
+      cp "$ROOT/fixtures/knowlith-demo/invoices/"*.md "$DEMO/" 2>/dev/null || true
+      ;;
+  esac
   # Rescan skips files whose mtime is <3s old (write-settle). Copying here
   # and posting the source in the same second leaves every file "still being
   # written" and the lake stays at zero documents.

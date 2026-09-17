@@ -48,7 +48,7 @@ function greeting(name: string): string {
  * and whether the owner must act. Compiler telemetry stays in Engineer mode.
  */
 export function Home() {
-  const { companyName, objects, skills, review, sources, mode, work } = useApp()
+  const { companyName, objects, skills, review, sources, mode, work, buildStatus } = useApp()
   const navigate = useNavigate()
   const [assistants, setAssistants] = useState<AiTool[] | null>(null)
   const [askHint, setAskHint] = useState<string | null>(null)
@@ -99,6 +99,11 @@ export function Home() {
   if (conflicts > 0) {
     attentionLines.push(
       `${conflicts} ${conflicts === 1 ? "disagreement" : "disagreements"} between documents`,
+    )
+  }
+  if (buildStatus.quizPending && buildStatus.questionCount > 0) {
+    attentionLines.push(
+      `${buildStatus.questionCount} build ${buildStatus.questionCount === 1 ? "answer" : "answers"} waiting for confirmation`,
     )
   }
   if (paused > 0) {
@@ -194,10 +199,21 @@ export function Home() {
                 </li>
               ))}
             </ul>
-            <Button className="mt-4" variant="primary" onClick={() => navigate("/review")}>
-              Review what changed
-              <ArrowRight />
-            </Button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {buildStatus.quizPending && buildStatus.questionCount > 0 ? (
+                <Button variant="primary" onClick={() => navigate("/build-quiz")}>
+                  Confirm build
+                  <ArrowRight />
+                </Button>
+              ) : null}
+              <Button
+                variant={buildStatus.quizPending ? "default" : "primary"}
+                onClick={() => navigate("/review")}
+              >
+                Review what changed
+                <ArrowRight />
+              </Button>
+            </div>
           </Panel>
         )}
       </section>

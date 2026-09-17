@@ -69,7 +69,20 @@ for t in json.load(sys.stdin):
     print(f"  {t.get(\"label\", t.get(\"slug\"))}: {mark}")
 '
 
-step '9 · Export approved knowledge to Markdown'
+step '9 · Build supervisor'
+curlq GET /api/build/status | python3 -m json.tool
+
+step '10 · Build quiz (if any)'
+curlq GET /api/build/quiz | python3 -c '
+import json, sys
+q = json.load(sys.stdin)
+if q is None:
+    print("  no quiz yet")
+else:
+    print(f"  state: {q.get(\"state\")}  questions: {len(q.get(\"questions\", []))}")
+'
+
+step '11 · Export approved knowledge to Markdown'
 curlq POST /api/export '{}' | python3 -m json.tool
 
 printf '\n\033[1mDone.\033[0m For MCP gateway proof: sh scripts/verify-gateway.sh\n\n'
