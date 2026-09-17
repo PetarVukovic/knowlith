@@ -25,6 +25,7 @@ mod detect;
 mod replay;
 mod usage;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -57,6 +58,9 @@ pub struct Request {
     /// previous holder does not keep a model answering after someone else
     /// has claimed the same row.
     pub cancel: Option<Arc<AtomicBool>>,
+    /// Where stdout is written as the child speaks, so a killed process
+    /// still leaves a session on disk. Not part of the cassette key.
+    pub journal: Option<PathBuf>,
 }
 
 impl Request {
@@ -70,6 +74,7 @@ impl Request {
             // enough that a hung CLI frees its job within the hour.
             timeout: Duration::from_secs(600),
             cancel: None,
+            journal: None,
         }
     }
 
@@ -85,6 +90,11 @@ impl Request {
 
     pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
         self.cancel = Some(cancel);
+        self
+    }
+
+    pub fn with_journal(mut self, journal: impl Into<PathBuf>) -> Self {
+        self.journal = Some(journal.into());
         self
     }
 

@@ -297,7 +297,11 @@ claimed about privacy:
    as it does for everything else the owner asks it; Knowlith adds no second
    recipient, and the owner's existing subscription pays. Stage 2 sends the
    whole rendition (eight documents per call in a batch), not a quote — the
-   product must never say "only short quotes leave".
+   product must never say "only short quotes leave". Claude Code children
+   are serialised (the CLI races concurrent processes); Codex and Cursor are
+   not. The child is killed on Drop, timeout, or a lost lease. What it
+   already said is a file under `data/runs/{job}/`, not state inside the
+   process — a killed child must leave a session the next holder can read.
 2. **A recorded replay** — `--replay <dir>` uses saved replies and calls
    nothing. This is how the test suite exercises the whole loop offline, and
    how `--record` produces new fixtures.

@@ -2,15 +2,17 @@
 # Smoke-test a running Knowlith daemon with curl.
 #
 #   sh scripts/curl-test.sh
-#   KNOWLITH_PORT=7717 sh scripts/curl-test.sh
+#   KNOWLITH_PORT=7718 KNOWLITH_HOME=~/Knowlith-curl-test sh scripts/curl-test.sh
 #
-# Requires the daemon on 127.0.0.1 and a token at ~/Knowlith/api.token.
+# Requires the daemon on 127.0.0.1 and a token at $KNOWLITH_HOME/api.token.
 
 set -eu
 
+ROOT="${KNOWLITH_HOME:-$HOME/Knowlith}"
 PORT="${KNOWLITH_PORT:-7717}"
 BASE="http://127.0.0.1:${PORT}"
-TOKEN_FILE="${KNOWLITH_TOKEN_FILE:-$HOME/Knowlith/api.token}"
+TOKEN_FILE="${KNOWLITH_TOKEN_FILE:-$ROOT/api.token}"
+RUNS="${ROOT}/data/runs"
 
 [ -f "$TOKEN_FILE" ] || {
   printf '\nno token at %s — start Knowlith first (knowlith start)\n\n' "$TOKEN_FILE" >&2
@@ -35,6 +37,7 @@ step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
 printf '\n\033[1mKnowlith — curl smoke test\033[0m\n'
 printf '  %s\n' "$BASE"
+printf '  home %s\n' "$ROOT"
 
 step '1 · Health'
 curlq GET /api/health | python3 -m json.tool
@@ -49,7 +52,17 @@ step '4 · Review queue'
 curlq GET /api/review | python3 -c 'import json,sys; r=json.load(sys.stdin); print(f"  {len(r)} waiting")'
 
 step '5 · Work queue'
-curlq GET /api/work | python3 -m json.tool
+curlq GET /api/work | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print("  stage:", d.get("stage"), "·", d.get("doing"))
+print("  done:", d.get("done"), "total:", d.get("total"), "held:", d.get("held"))
+for line in (d.get("lines") or [])[:8]:
+    if isinstance(line, dict):
+        print("   ", line.get("state") or line.get("kind"), "·", line.get("note") or line.get("subject") or line)
+    else:
+        print("   ", line)
+'
 
 step '6 · Policy'
 curlq GET /api/policy | python3 -m json.tool
@@ -73,7 +86,23 @@ print('  no quiz yet') if q is None else print('  state:', q.get('state'), ' que
 step '11 · Engine runs (token spend when CLI reported it)'
 curlq GET /api/engine-runs | python3 -c "import json,sys; r=json.load(sys.stdin); print(f'  {len(r)} runs logged')"
 
-step '12 · Export approved knowledge to Markdown'
+step '12 · CLI session journals (stdout on disk, not in the child)'
+if [ -d "$RUNS" ]; then
+  find "$RUNS" -type f \( -name '*.stdout' -o -name '*.stderr' \) | sort | python3 -c '
+import os, sys
+paths = [line.strip() for line in sys.stdin if line.strip()]
+print(f"  {len(paths)} files under data/runs")
+for path in paths[:12]:
+    size = os.path.getsize(path)
+    print(f"  {path} ({size} B)")
+if len(paths) > 12:
+    print(f"  … {len(paths) - 12} more")
+'
+else
+  printf '  no %s yet — a compile job writes it as the CLI speaks\n' "$RUNS"
+fi
+
+step '13 · Export approved knowledge to Markdown'
 curlq POST /api/export '{}' | python3 -m json.tool
 
 printf '\n\033[1mDone.\033[0m For MCP gateway proof: sh scripts/verify-gateway.sh\n\n'

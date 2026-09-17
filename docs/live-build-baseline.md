@@ -179,3 +179,10 @@ stuck rather than against token spend:
 
 Still open from the list above: relate prompt size (1), CLI cold start (4),
 empty-scan PDFs occupying a compile slot (8), Cursor Agent USD (9).
+
+## 0.1.6
+
+Claude Code children are serialised (the CLI races concurrent processes);
+Cursor and Codex are not. A dropped wait kills the child. Stdout is
+journalled under `data/runs/{job}/` as the CLI speaks, so a lost lease
+still leaves a session on disk. Curl: `sh scripts/curl-test.sh`.

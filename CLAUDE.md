@@ -95,6 +95,9 @@ Every `/api` route requires the daemon's token:
 
 ```sh
 curl -H "x-knowlith-token: $(cat ~/Knowlith/api.token)" http://127.0.0.1:7717/api/health
+sh scripts/curl-test.sh
+KNOWLITH_HOME=~/Knowlith-curl-test KNOWLITH_PORT=7718 sh scripts/curl-test.sh
+sh scripts/curl-onboarding.sh --demo
 ```
 
 Without it you get 401 and a sentence saying where the token is. This is not

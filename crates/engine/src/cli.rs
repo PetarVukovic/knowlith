@@ -30,10 +30,15 @@
 //! Cursor Agent uses `--mode=ask` (no writes) and never `--approve-mcps`:
 //! compile must not pull Knowlith MCP into the extraction loop.
 
-use std::io::{Read, Write};
+use std::fs::OpenOptions;
+use std::io::{ErrorKind, Read, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+static CLAUDE_CHILD_LOCK: Mutex<()> = Mutex::new(());
 
 use crate::{Engine, EngineError, Reply, Request, Result};
 use crate::usage::{parse_json_reply, scrape_usage_only};
@@ -94,6 +99,13 @@ impl Flavour {
     /// Cursor Agent takes the prompt as a CLI argument; Codex/Claude read stdin.
     fn prompt_as_argument(self) -> bool {
         matches!(self, Self::CursorAgent)
+    }
+
+    /// Claude Code's CLI races when two processes talk to it at once
+    /// (`ProcessTransport not ready for writing`). Codex and Cursor do not,
+    /// and serialising them would make `compileWorkers: 2` a no-op.
+    pub fn serialises_children(self) -> bool {
+        matches!(self, Self::ClaudeCode)
     }
 }
 
@@ -249,7 +261,10 @@ impl Engine for CliEngine {
             use std::os::unix::process::CommandExt;
             command.process_group(0);
         }
-        let mut child = command.spawn().map_err(|e| match e.kind() {
+        // Held for the whole child, not only spawn: Claude's transport
+        // races on overlapping processes, not on overlapping `spawn` calls.
+        let _exclusive = hold_exclusive(self.flavour);
+        let mut child = ChildGuard::new(command.spawn().map_err(|e| match e.kind() {
             // Not installed is the owner's problem to fix, and retrying
             // it every five minutes would never fix it.
             std::io::ErrorKind::NotFound => EngineError::Unavailable(format!(
@@ -257,12 +272,13 @@ impl Engine for CliEngine {
                 self.flavour.label()
             )),
             _ => EngineError::Transport(format!("could not start {}: {e}", self.program)),
-        })?;
+        })?);
 
         let writer = if self.flavour.prompt_as_argument() {
             None
         } else {
             let mut stdin = child
+                .as_mut()
                 .stdin
                 .take()
                 .ok_or_else(|| EngineError::Transport("the child process has no stdin".into()))?;
@@ -279,6 +295,7 @@ impl Engine for CliEngine {
             request.timeout,
             self.flavour.label(),
             request.cancel.as_deref(),
+            request.journal.as_deref(),
         )?;
         if let Some(writer) = writer {
             let _ = writer.join();
@@ -350,6 +367,47 @@ impl Engine for CliEngine {
 /// listening to any more.
 const MAX_OUTPUT: u64 = 8 * 1024 * 1024;
 
+fn hold_exclusive(flavour: Flavour) -> Option<std::sync::MutexGuard<'static, ()>> {
+    if !flavour.serialises_children() {
+        return None;
+    }
+    Some(CLAUDE_CHILD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
+}
+
+/// Kills the child on Drop unless the wait already reaped it.
+///
+/// A panic, a cancelled lease, or a dropped wait must not leave `claude`
+/// answering a prompt nobody is listening to. jcode learned this as
+/// `kill_on_drop`; we learned it as two workers billing the same job.
+struct ChildGuard {
+    child: Option<std::process::Child>,
+}
+
+impl ChildGuard {
+    fn new(child: std::process::Child) -> Self {
+        Self { child: Some(child) }
+    }
+
+    fn as_mut(&mut self) -> &mut std::process::Child {
+        self.child.as_mut().expect("child already taken")
+    }
+
+    fn reap(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            match child.try_wait() {
+                Ok(Some(_)) => {}
+                _ => stop_child_tree(&mut child),
+            }
+        }
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        self.reap();
+    }
+}
+
 fn stop_child_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
@@ -366,27 +424,70 @@ fn stop_child_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
+fn open_journal(path: &Path) -> Result<std::fs::File> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| EngineError::Transport(format!("could not create the session journal: {e}")))?;
+    }
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|e| EngineError::Transport(format!("could not open the session journal: {e}")))
+}
+
+fn drain(mut pipe: impl Read, mut journal: Option<std::fs::File>) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                if let Some(file) = journal.as_mut() {
+                    // Flush so a kill that races the wait still leaves
+                    // bytes on disk, not only in this thread's Vec.
+                    file.write_all(&chunk[..n])
+                        .and_then(|_| file.flush())
+                        .map_err(|e| EngineError::Transport(format!("could not write the session journal: {e}")))?;
+                }
+                buffer.extend_from_slice(&chunk[..n]);
+                if buffer.len() as u64 > MAX_OUTPUT {
+                    return Err(EngineError::Refused(
+                        "The CLI output exceeded the 8 MiB limit. Use a smaller batch.".into(),
+                    ));
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) => {
+                return Err(EngineError::Transport(format!("could not read CLI output: {error}")));
+            }
+        }
+    }
+    Ok(buffer)
+}
+
 fn wait_with_timeout(
-    mut child: std::process::Child,
+    mut child: ChildGuard,
     timeout: Duration,
     label: &str,
     cancel: Option<&AtomicBool>,
+    journal: Option<&Path>,
 ) -> Result<std::process::Output> {
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
+    let stdout = child.as_mut().stdout.take();
+    let stderr = child.as_mut().stderr.take();
+    let stdout_journal = journal.map(open_journal).transpose()?;
+    let stderr_journal = journal
+        .map(|path| open_journal(&path.with_extension("stderr")))
+        .transpose()?;
     let (tx, rx) = std::sync::mpsc::channel();
-    fn drain(pipe: impl Read) -> Result<Vec<u8>> {
-        let mut buffer = Vec::new();
-        pipe.take(MAX_OUTPUT + 1).read_to_end(&mut buffer)
-            .map_err(|e| EngineError::Transport(format!("could not read CLI output: {e}")))?;
-        if buffer.len() as u64 > MAX_OUTPUT {
-            return Err(EngineError::Refused("The CLI output exceeded the 8 MiB limit. Use a smaller batch.".into()));
-        }
-        Ok(buffer)
-    }
     let out_tx = tx.clone();
-    std::thread::spawn(move || { let _ = out_tx.send((true, stdout.map(drain).unwrap_or_else(|| Ok(vec![])))); });
-    std::thread::spawn(move || { let _ = tx.send((false, stderr.map(drain).unwrap_or_else(|| Ok(vec![])))); });
+    std::thread::spawn(move || {
+        let _ = out_tx.send((true, stdout.map(|pipe| drain(pipe, stdout_journal)).unwrap_or_else(|| Ok(vec![]))));
+    });
+    std::thread::spawn(move || {
+        let _ = tx.send((false, stderr.map(|pipe| drain(pipe, stderr_journal)).unwrap_or_else(|| Ok(vec![]))));
+    });
     let deadline = Instant::now() + timeout;
     let mut status = None;
     let mut out = None;
@@ -395,31 +496,31 @@ fn wait_with_timeout(
         while let Ok((is_stdout, result)) = rx.try_recv() {
             match result {
                 Ok(bytes) => { if is_stdout { out = Some(bytes); } else { err = Some(bytes); } }
-                Err(error) => { stop_child_tree(&mut child); return Err(error); }
+                Err(error) => { child.reap(); return Err(error); }
             }
         }
         if status.is_none() {
-            match child.try_wait() {
+            match child.as_mut().try_wait() {
                 Ok(result) => status = result,
                 Err(error) => {
-                    stop_child_tree(&mut child);
+                    child.reap();
                     return Err(EngineError::Transport(format!("{label} could not be waited on: {error}")));
                 }
             }
         }
         if status.is_some() && out.is_some() && err.is_some() {
             // Also closes stdin inherited by any lingering grandchild.
-            stop_child_tree(&mut child);
+            child.reap();
             return Ok(std::process::Output { status: status.unwrap(), stdout: out.unwrap(), stderr: err.unwrap() });
         }
         if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-            stop_child_tree(&mut child);
+            child.reap();
             return Err(EngineError::Transport(format!(
                 "{label} was stopped because the job was claimed by another worker"
             )));
         }
         if Instant::now() >= deadline {
-            stop_child_tree(&mut child);
+            child.reap();
             return Err(EngineError::Transport(format!("{label} did not answer within {} ms, and was stopped", timeout.as_millis())));
         }
         std::thread::sleep(POLL);
@@ -636,6 +737,29 @@ mod tests {
         assert!(args.contains(&"--print".to_string()));
         assert!(args.contains(&"--output-format".to_string()));
         assert!(args.contains(&"json".to_string()));
+    }
+
+    #[test]
+    fn claude_is_the_cli_that_cannot_run_two_children() {
+        assert!(Flavour::ClaudeCode.serialises_children());
+        assert!(!Flavour::CursorAgent.serialises_children());
+        assert!(!Flavour::Codex.serialises_children());
+    }
+
+    #[test]
+    fn dropping_the_child_kills_the_process() {
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id();
+        drop(ChildGuard::new(child));
+        std::thread::sleep(Duration::from_millis(50));
+        let alive = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(!alive, "pid {pid} was still alive after Drop");
     }
 
     #[test]

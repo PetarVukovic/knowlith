@@ -252,3 +252,127 @@ fn stdout_account_error_is_not_hidden_by_stderr_progress() {
     let result = engine(&path).run(&Request::new("candidates", "x", "y"));
     assert!(matches!(result, Err(EngineError::Unavailable(_))));
 }
+
+#[test]
+fn claude_does_not_run_two_children_at_once() {
+    // Claude Code's own ProcessTransport races when two `claude` processes
+    // write at once. Knowlith must serialise those children; the busy-file
+    // is how we see an overlap the wall clock could miss on a fast machine.
+    let dir = std::env::temp_dir().join(format!(
+        "knowlith-claude-lock-{}-{}",
+        std::process::id(),
+        SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let busy = dir.join("busy");
+    let overlap = dir.join("overlap");
+    let path = script(
+        "locked",
+        &format!(
+            r#"busy='{}'
+overlap='{}'
+if ! mkdir "$busy" 2>/dev/null; then echo overlap > "$overlap"; fi
+sleep 0.3
+rmdir "$busy" 2>/dev/null || true
+printf '%s\n' '{{"type":"result","result":"ok"}}'
+"#,
+            busy.display(),
+            overlap.display()
+        ),
+    );
+    let a = engine(&path);
+    let b = engine(&path);
+    let start = Instant::now();
+    let left = std::thread::spawn(move || a.run(&Request::new("candidates", "x", "y")));
+    let right = std::thread::spawn(move || b.run(&Request::new("candidates", "x", "y")));
+    left.join().unwrap().expect("first child");
+    right.join().unwrap().expect("second child");
+    assert!(
+        !overlap.exists(),
+        "two Claude children overlapped — the exclusive lock is missing"
+    );
+    assert!(
+        start.elapsed() >= Duration::from_millis(500),
+        "two 300ms children that ran together would finish sooner; took {:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
+fn cursor_children_may_run_together() {
+    let dir = std::env::temp_dir().join(format!(
+        "knowlith-cursor-lock-{}-{}",
+        std::process::id(),
+        SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let started = dir.join("started");
+    let path = script(
+        "together",
+        &format!(
+            r#"started='{}'
+echo x >> "$started"
+n=0
+while [ "$(wc -l < "$started" | tr -d ' ')" -lt 2 ] && [ "$n" -lt 40 ]; do
+  n=$((n + 1))
+  sleep 0.05
+done
+sleep 0.15
+printf '%s\n' '{{"type":"result","result":"ok"}}'
+"#,
+            started.display()
+        ),
+    );
+    let a = CliEngine::new(Flavour::CursorAgent).with_program(path.to_string_lossy().into_owned());
+    let b = CliEngine::new(Flavour::CursorAgent).with_program(path.to_string_lossy().into_owned());
+    let start = Instant::now();
+    let left = std::thread::spawn(move || a.run(&Request::new("candidates", "x", "y")));
+    let right = std::thread::spawn(move || b.run(&Request::new("candidates", "x", "y")));
+    left.join().unwrap().expect("first child");
+    right.join().unwrap().expect("second child");
+    assert!(
+        start.elapsed() < Duration::from_millis(1500),
+        "Cursor is allowed to overlap; a global lock would serialise these past 1.5s; took {:?}",
+        start.elapsed()
+    );
+    let lines = std::fs::read_to_string(&started).unwrap_or_default();
+    assert!(
+        lines.lines().count() >= 2,
+        "both Cursor children should have started: {lines:?}"
+    );
+}
+
+#[test]
+fn killing_the_child_leaves_what_it_already_said_on_disk() {
+    let path = script("partial", "printf 'PARTIAL-ANSWER\\n'; sleep 30\n");
+    let journal = std::env::temp_dir().join(format!(
+        "knowlith-journal-{}-{}",
+        std::process::id(),
+        SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let request = Request::new("candidates", "x", "y")
+        .with_timeout(Duration::from_secs(30))
+        .with_cancel(Arc::clone(&cancel))
+        .with_journal(journal.clone());
+    let path_for_thread = path.clone();
+    let handle = std::thread::spawn(move || engine(&path_for_thread).run(&request));
+    let started = Instant::now();
+    loop {
+        let body = std::fs::read_to_string(&journal).unwrap_or_default();
+        if body.contains("PARTIAL-ANSWER") {
+            break;
+        }
+        if started.elapsed() > Duration::from_secs(3) {
+            panic!("the journal was never written; contents={body:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    cancel.store(true, Ordering::Relaxed);
+    let _ = handle.join();
+    let body = std::fs::read_to_string(&journal).expect("the journal must survive the child");
+    assert!(
+        body.contains("PARTIAL-ANSWER"),
+        "a killed child must leave its session on disk, got {body:?}"
+    );
+}

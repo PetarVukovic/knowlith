@@ -33,7 +33,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -127,6 +127,9 @@ pub struct Worker {
     /// test in this crate depend on whether the laptop running it happens
     /// to be plugged in, which is the kind of failure nobody reproduces.
     power: Option<bool>,
+    /// Next to the lake, so a killed CLI still leaves its session on disk.
+    /// Absent for in-memory test workers that never spawn a real child.
+    runs_dir: Option<PathBuf>,
 }
 
 impl Worker {
@@ -143,6 +146,7 @@ impl Worker {
             track: Track::All,
             rescan_hours,
             power: None,
+            runs_dir: None,
         }
     }
 
@@ -164,7 +168,11 @@ impl Worker {
     }
 
     pub fn open(db: &Path, engine: Arc<dyn Engine>) -> Result<Self> {
-        Ok(Self::new(Lake::open(db)?, engine))
+        let mut worker = Self::new(Lake::open(db)?, engine);
+        if let Some(parent) = db.parent() {
+            worker.runs_dir = Some(parent.join("runs"));
+        }
+        Ok(worker)
     }
 
     /// Runs until `stop` is set.
@@ -566,7 +574,7 @@ impl Worker {
 
         let company = self.lake.setting("company_profile").ok().flatten();
         let cancel = Arc::new(AtomicBool::new(false));
-        let engine = self.leashed(&cancel);
+        let engine = self.leashed(&cancel, jobs[0].id);
         let engine_name = engine.name().to_string();
         let docs_for_engine: Vec<Document> = loaded.iter().map(|(_, d)| d.clone()).collect();
         let subject = batch_subject(loaded.iter().map(|(_, document)| document.name.as_str()));
@@ -684,7 +692,7 @@ impl Worker {
     ) -> std::result::Result<String, Failure> {
         let objects = self.lake.objects().map_err(|e| Failure::Refused(e.to_string()))?;
         let cancel = Arc::new(AtomicBool::new(false));
-        let engine = self.leashed(&cancel);
+        let engine = self.leashed(&cancel, job.id);
         let engine_name = engine.name().to_string();
 
         let run = self.with_heartbeat(job, stop, &cancel, move || {
@@ -728,7 +736,7 @@ impl Worker {
             return Ok("stopped before supervisor started".into());
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        let engine = self.leashed(&cancel);
+        let engine = self.leashed(&cancel, job.id);
         knowlith_desktop::paths::log_daemon(&format!(
             "supervise job {} generation {} with {}",
             job.id,
@@ -780,7 +788,7 @@ impl Worker {
     ) -> std::result::Result<String, Failure> {
         let objects = self.lake.objects().map_err(|e| Failure::Refused(e.to_string()))?;
         let cancel = Arc::new(AtomicBool::new(false));
-        let engine = self.leashed(&cancel);
+        let engine = self.leashed(&cancel, job.id);
         let engine_name = engine.name().to_string();
 
         let run = self.with_heartbeat(job, stop, &cancel, move || {
@@ -928,10 +936,12 @@ impl Worker {
         self.with_heartbeat_many(std::slice::from_ref(job), stop, cancel, work)
     }
 
-    fn leashed(&self, cancel: &Arc<AtomicBool>) -> LeashedEngine {
+    fn leashed(&self, cancel: &Arc<AtomicBool>, job_id: i64) -> LeashedEngine {
         LeashedEngine {
             inner: self.job_engine(),
             cancel: Arc::clone(cancel),
+            journal_dir: self.runs_dir.as_ref().map(|dir| dir.join(job_id.to_string())),
+            next: AtomicU64::new(0),
         }
     }
 
@@ -1022,10 +1032,14 @@ pub fn spawn_pool(
     Ok(handles)
 }
 
-/// An engine that kills its CLI child when the job lease is lost.
+/// An engine that kills its CLI child when the job lease is lost, and
+/// writes the child's session next to the lake rather than leaving it
+/// inside the process.
 struct LeashedEngine {
     inner: Arc<dyn Engine>,
     cancel: Arc<AtomicBool>,
+    journal_dir: Option<PathBuf>,
+    next: AtomicU64,
 }
 
 impl Engine for LeashedEngine {
@@ -1036,6 +1050,10 @@ impl Engine for LeashedEngine {
     fn run(&self, request: &Request) -> knowlith_engine::Result<Reply> {
         let mut request = request.clone();
         request.cancel = Some(Arc::clone(&self.cancel));
+        if let Some(dir) = &self.journal_dir {
+            let n = self.next.fetch_add(1, Ordering::Relaxed);
+            request.journal = Some(dir.join(format!("{n}.stdout")));
+        }
         self.inner.run(&request)
     }
 }

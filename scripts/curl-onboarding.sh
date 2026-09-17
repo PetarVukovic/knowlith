@@ -1,11 +1,14 @@
 #!/bin/sh
 # Configure a fresh Knowlith daemon via curl — same fields as Settings + onboarding.
 #
-# Prerequisite: daemon already running and ~/Knowlith/api.token exists.
+# Prerequisite: daemon already running and $KNOWLITH_HOME/api.token exists.
 #
 #   cargo build -p knowlith-cli
 #   ./target/debug/knowlith serve --engine cursor-agent &
 #   sh scripts/curl-onboarding.sh --demo
+#
+# Another lake / port:
+#   KNOWLITH_HOME=~/Knowlith-curl-test KNOWLITH_PORT=7718 sh scripts/curl-onboarding.sh --demo
 #
 # With Medicor demo on Desktop:
 #   KNOWLITH_DEMO=~/Desktop/Medicor-Klinika-Demo \
@@ -16,7 +19,8 @@ set -eu
 
 PORT="${KNOWLITH_PORT:-7717}"
 BASE="http://127.0.0.1:${PORT}"
-TOKEN_FILE="${KNOWLITH_TOKEN_FILE:-$HOME/Knowlith/api.token}"
+ROOT="${KNOWLITH_HOME:-$HOME/Knowlith}"
+TOKEN_FILE="${KNOWLITH_TOKEN_FILE:-$ROOT/api.token}"
 ENGINE="${KNOWLITH_ENGINE:-cursor-agent}"
 COMPANY_NAME="${KNOWLITH_COMPANY:-Demo}"
 COMPANY_PROFILE="${KNOWLITH_PROFILE:-We send invoices to Formify. Bethel AI issues them in EUR with net-7 payment terms.}"
