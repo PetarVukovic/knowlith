@@ -5,7 +5,7 @@ members = ["crates/core", "crates/extract", "crates/lake", "crates/graph", "crat
 [workspace.package]
 version = "0.1.2"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "Apache-2.0"
 authors = ["Knowlith contributors"]
 

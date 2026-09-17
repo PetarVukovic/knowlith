@@ -50,8 +50,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.85"
       - uses: Swatinem/rust-cache@v2
       - uses: actions/download-artifact@v4
         with:
@@ -83,7 +81,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.85"
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2

@@ -28,8 +28,6 @@ jobs:
         working-directory: knowlith
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.85"
 
       - uses: Swatinem/rust-cache@v2
 

@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-compiler"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "knowlith-core",
  "knowlith-engine",
@@ -906,7 +906,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "serde",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-desktop"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -930,7 +930,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-engine"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "sha2",
@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-extract"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "calamine",
  "chrono",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-graph"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "knowlith-core",
  "knowlith-lake",
@@ -966,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-lake"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "knowlith-core",
@@ -980,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-mcp"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -995,7 +995,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-server"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-supervisor"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "knowlith-core",
@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "knowlith-worker"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "knowlith-compiler",
